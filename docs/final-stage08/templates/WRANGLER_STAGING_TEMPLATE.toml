@@ -1,6 +1,7 @@
-#:schema ../../../node_modules/wrangler/config-schema.json
-# Copy this file OUTSIDE the source tree. Replace every angle-bracket value
-# with verified Cloudflare values. Do not commit the completed file.
+#:schema node_modules/wrangler/config-schema.json
+# Keep the completed canonical file OUTSIDE the source tree. Replace every angle-bracket value
+# with verified Cloudflare values. Before Wrangler commands materialize an exact ignored copy
+# at source-root/.cpcv-staging.wrangler.toml. Do not commit either completed file.
 name = "<STAGING_WORKER_NAME>"
 main = "src/index.js"
 compatibility_date = "2026-06-17"

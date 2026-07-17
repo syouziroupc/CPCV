@@ -30,11 +30,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run static and project checks
+      - name: Run static project and documentation checks
         run: |
+          npm run verify:source-manifest
           npm run check
           npm run check:project
           npm run check:pdf-links
+          npm run verify:final-docs
 
       - name: Run all implemented-stage tests
         run: npm run check:stage08
@@ -46,4 +48,6 @@ jobs:
         run: npm run deploy:dry-run
 
       - name: Audit all dependencies
-        run: npm audit
+        run: |
+          npm audit
+          npm audit --omit=dev

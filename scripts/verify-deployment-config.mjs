@@ -62,7 +62,7 @@ if (failures.length) {
   for (const failure of failures) console.error(`[FAIL] ${failure}`);
   process.exit(1);
 }
-console.log("production deployment configuration verified");
+console.log(`deployment configuration verified: ${configPath}`);
 
 function findArrayBlock(section, key, value) {
   const pattern = new RegExp(`\\[\\[${section}\\]\\]([\\s\\S]*?)(?=\\n\\[\\[|\\n\\[[^\\[]|$)`, "g");

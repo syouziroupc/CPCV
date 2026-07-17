@@ -72,7 +72,10 @@
     "verify:stage82-preflight": "node scripts/verify-stage82-preflight.mjs",
     "verify:final-docs": "node scripts/verify-final-documentation.mjs",
     "verify:environment-separation": "node scripts/verify-environment-separation.mjs",
-    "verify:staging-evidence": "node scripts/verify-staging-evidence.mjs"
+    "verify:staging-evidence": "node scripts/verify-staging-evidence.mjs",
+    "staging:materialize-config": "node scripts/materialize-staging-config.mjs",
+    "manifest:source": "node scripts/generate-source-manifest.mjs",
+    "verify:source-manifest": "node scripts/verify-source-manifest.mjs"
   },
   "devDependencies": {
     "wrangler": "4.110.0",

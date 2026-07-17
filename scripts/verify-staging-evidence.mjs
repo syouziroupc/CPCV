@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const ACCEPTANCE_SPEC = resolve(ROOT, "docs/final-stage08/10_STAGING_ACCEPTANCE_TEST.md");
 
 try {
   main();
@@ -20,19 +25,23 @@ function main() {
   const text = readFileSync(recordPath, "utf8");
   const values = parseRecord(text);
   const failures = [];
+  const acceptanceText = readFileSync(ACCEPTANCE_SPEC, "utf8");
+  const acceptanceItemsTotal = acceptanceText.split(/\r?\n/).filter((line) => /^- /.test(line)).length;
+  const acceptanceSpecSha256 = createHash("sha256").update(Buffer.from(acceptanceText, "utf8")).digest("hex");
 
   expectExact("record_format", "CPCV_STAGING_ACCEPTANCE_V1");
   expectExact("result", "PASSED");
   expectExact("release_commit", options.commit.toLowerCase(), true);
   expectExact("staging_deployment_id", options.deployment);
   expectExact("staging_config_sha256", options.configSha256.toLowerCase(), true);
+  expectExact("acceptance_spec_sha256", acceptanceSpecSha256, true);
+  expectExact("acceptance_items_total", String(acceptanceItemsTotal));
   expectExact("acceptance_items_failed", "0");
   expectExact("production_resources_used", "NO");
   expectExact("test_data_cleanup", "COMPLETED");
   expectExact("pdf_data_egress", "NONE");
 
-  const total = Number(values.get("acceptance_items_total"));
-  if (!Number.isSafeInteger(total) || total < 1) failures.push("acceptance_items_total must be a positive integer.");
+  if (acceptanceItemsTotal !== 44) failures.push(`Canonical staging acceptance checklist must contain exactly 44 items. Found ${acceptanceItemsTotal}.`);
   const completedAt = values.get("completed_at_utc") || "";
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/.test(completedAt) || Number.isNaN(Date.parse(completedAt))) {
     failures.push("completed_at_utc must be a valid UTC ISO-8601 timestamp ending in Z.");
@@ -45,6 +54,8 @@ function main() {
     process.exit(1);
   }
   console.log(`staging acceptance evidence verified: ${recordPath}`);
+  console.log(`acceptance_spec_sha256=${acceptanceSpecSha256}`);
+  console.log(`acceptance_items_total=${acceptanceItemsTotal}`);
 
   function expectExact(key, expected, caseInsensitive = false) {
     const actual = values.get(key);

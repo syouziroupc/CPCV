@@ -8,6 +8,9 @@ import { createHash } from "node:crypto";
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const temp = mkdtempSync(join(tmpdir(), "cpcv-deploy-verifiers-"));
 const results = [];
+const acceptanceSpecText = readFileSync(resolve(ROOT, "docs/final-stage08/10_STAGING_ACCEPTANCE_TEST.md"), "utf8");
+const acceptanceSpecSha = createHash("sha256").update(Buffer.from(acceptanceSpecText, "utf8")).digest("hex");
+const acceptanceItemCount = acceptanceSpecText.split(/\r?\n/).filter((line) => /^- /.test(line)).length;
 try {
   const current = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
   const validConfig = current
@@ -53,6 +56,13 @@ try {
     .replace('namespace_id = "1004"', 'namespace_id = "2004"');
   const stagingPath = join(temp, "staging.toml");
   writeFileSync(stagingPath, stagingConfig);
+  const runtimeStagingPath = resolve(ROOT, ".cpcv-staging.wrangler.toml");
+  rmSync(runtimeStagingPath, { force: true });
+  const materialized = run("scripts/materialize-staging-config.mjs", [stagingPath, "--expected-sha256", createHash("sha256").update(stagingConfig).digest("hex")]);
+  check("external staging config is materialized byte-for-byte at source root", materialized.status === 0 && readFileSync(runtimeStagingPath).equals(Buffer.from(stagingConfig)), materialized);
+  const stagingDryRun = runNpx(["wrangler", "deploy", "--dry-run", "--config", runtimeStagingPath]);
+  check("materialized staging config resolves source-relative Wrangler paths", stagingDryRun.status === 0, stagingDryRun);
+  rmSync(runtimeStagingPath, { force: true });
   const separated = run("scripts/verify-environment-separation.mjs", [validPath, stagingPath]);
   check("separate production and staging resources are accepted", separated.status === 0 && separated.stdout.includes("separation verified"), separated);
 
@@ -80,7 +90,7 @@ try {
   const releaseCommit = "0123456789abcdef0123456789abcdef01234567";
   const deploymentId = "staging-version-20260717";
   const stagingConfigSha = createHash("sha256").update(stagingConfig).digest("hex");
-  const stagingRecord = `record_format=CPCV_STAGING_ACCEPTANCE_V1\nresult=PASSED\nrelease_commit=${releaseCommit}\nstaging_deployment_id=${deploymentId}\nstaging_config_sha256=${stagingConfigSha}\nacceptance_items_total=38\nacceptance_items_failed=0\nproduction_resources_used=NO\ntest_data_cleanup=COMPLETED\npdf_data_egress=NONE\nexecuted_by=test-runner\ncompleted_at_utc=2026-07-17T06:00:00Z\n`;
+  const stagingRecord = `record_format=CPCV_STAGING_ACCEPTANCE_V1\nresult=PASSED\nrelease_commit=${releaseCommit}\nstaging_deployment_id=${deploymentId}\nstaging_config_sha256=${stagingConfigSha}\nacceptance_spec_sha256=${acceptanceSpecSha}\nacceptance_items_total=${acceptanceItemCount}\nacceptance_items_failed=0\nproduction_resources_used=NO\ntest_data_cleanup=COMPLETED\npdf_data_egress=NONE\nexecuted_by=test-runner\ncompleted_at_utc=2026-07-17T06:00:00Z\n`;
   const stagingRecordPath = join(temp, "staging-acceptance.txt");
   writeFileSync(stagingRecordPath, stagingRecord);
   const stagingEvidence = run("scripts/verify-staging-evidence.mjs", [stagingRecordPath, "--commit", releaseCommit, "--deployment", deploymentId, "--config-sha256", stagingConfigSha]);
@@ -89,6 +99,14 @@ try {
   writeFileSync(failedStagingRecordPath, stagingRecord.replace("acceptance_items_failed=0", "acceptance_items_failed=1"));
   const failedStagingEvidence = run("scripts/verify-staging-evidence.mjs", [failedStagingRecordPath, "--commit", releaseCommit, "--deployment", deploymentId, "--config-sha256", stagingConfigSha]);
   check("failed staging acceptance evidence is rejected", failedStagingEvidence.status === 1 && failedStagingEvidence.stderr.includes("acceptance_items_failed"), failedStagingEvidence);
+  const shortStagingRecordPath = join(temp, "staging-acceptance-short.txt");
+  writeFileSync(shortStagingRecordPath, stagingRecord.replace(`acceptance_items_total=${acceptanceItemCount}`, "acceptance_items_total=1"));
+  const shortStagingEvidence = run("scripts/verify-staging-evidence.mjs", [shortStagingRecordPath, "--commit", releaseCommit, "--deployment", deploymentId, "--config-sha256", stagingConfigSha]);
+  check("incomplete staging acceptance item count is rejected", shortStagingEvidence.status === 1 && shortStagingEvidence.stderr.includes("acceptance_items_total"), shortStagingEvidence);
+  const staleSpecRecordPath = join(temp, "staging-acceptance-stale-spec.txt");
+  writeFileSync(staleSpecRecordPath, stagingRecord.replace(acceptanceSpecSha, "0".repeat(64)));
+  const staleSpecEvidence = run("scripts/verify-staging-evidence.mjs", [staleSpecRecordPath, "--commit", releaseCommit, "--deployment", deploymentId, "--config-sha256", stagingConfigSha]);
+  check("stale staging acceptance specification hash is rejected", staleSpecEvidence.status === 1 && staleSpecEvidence.stderr.includes("acceptance_spec_sha256"), staleSpecEvidence);
 
   const fixtures = {
     owner: [{ success: true, results: [{ active_owner_count: 1 }] }],
@@ -119,6 +137,10 @@ if (failed) process.exitCode = 1;
 
 function run(script, args = []) {
   return spawnSync(process.execPath, [resolve(ROOT, script), ...args], { encoding: "utf8", cwd: ROOT });
+}
+function runNpx(args = []) {
+  const command = process.platform === "win32" ? "npx.cmd" : "npx";
+  return spawnSync(command, args, { encoding: "utf8", cwd: ROOT });
 }
 function check(name, condition, detail = "") {
   const ok = Boolean(condition);

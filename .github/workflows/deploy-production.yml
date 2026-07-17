@@ -115,17 +115,23 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          mkdir -p .deployment-input
-          printf '%s' "$STAGING_CONFIG_BASE64" | base64 --decode > .deployment-input/wrangler.staging.toml
-          printf '%s' "$STAGING_TEST_RECORD_BASE64" | base64 --decode > .deployment-input/staging-acceptance-record.txt
-          test "$(sha256sum .deployment-input/wrangler.staging.toml | cut -d' ' -f1)" = "${STAGING_CONFIG_SHA256,,}"
-          test "$(sha256sum .deployment-input/staging-acceptance-record.txt | cut -d' ' -f1)" = "${STAGING_TEST_RECORD_SHA256,,}"
-          node scripts/verify-deployment-config.mjs .deployment-input/wrangler.staging.toml
-          node scripts/verify-environment-separation.mjs wrangler.toml .deployment-input/wrangler.staging.toml
-          node scripts/verify-staging-evidence.mjs .deployment-input/staging-acceptance-record.txt \
+          STAGING_CONFIG_PATH="$RUNNER_TEMP/cpcv-wrangler.staging.toml"
+          STAGING_RECORD_PATH="$RUNNER_TEMP/cpcv-staging-acceptance-record.txt"
+          printf '%s' "$STAGING_CONFIG_BASE64" | base64 --decode > "$STAGING_CONFIG_PATH"
+          printf '%s' "$STAGING_TEST_RECORD_BASE64" | base64 --decode > "$STAGING_RECORD_PATH"
+          test "$(sha256sum "$STAGING_CONFIG_PATH" | cut -d' ' -f1)" = "${STAGING_CONFIG_SHA256,,}"
+          test "$(sha256sum "$STAGING_RECORD_PATH" | cut -d' ' -f1)" = "${STAGING_TEST_RECORD_SHA256,,}"
+          node scripts/materialize-staging-config.mjs "$STAGING_CONFIG_PATH" --expected-sha256 "$STAGING_CONFIG_SHA256"
+          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+          node scripts/verify-environment-separation.mjs wrangler.toml .cpcv-staging.wrangler.toml
+          node scripts/verify-staging-evidence.mjs "$STAGING_RECORD_PATH" \
             --commit "$STAGING_COMMIT_SHA" \
             --deployment "$STAGING_DEPLOYMENT_ID" \
             --config-sha256 "$STAGING_CONFIG_SHA256"
+          npx wrangler deploy --dry-run --config .cpcv-staging.wrangler.toml
+          rm -f .cpcv-staging.wrangler.toml
+          echo "STAGING_CONFIG_PATH=$STAGING_CONFIG_PATH" >> "$GITHUB_ENV"
+          echo "STAGING_RECORD_PATH=$STAGING_RECORD_PATH" >> "$GITHUB_ENV"
 
       - name: Verify clean immutable checkout
         shell: bash
@@ -153,6 +159,7 @@ jobs:
 
       - name: Run full local validation
         run: |
+          npm run verify:source-manifest
           npm run check
           npm run check:project
           npm run check:pdf-links
@@ -181,8 +188,8 @@ jobs:
             echo "wrangler=$(npx wrangler --version | tail -n 1)"
           } > deployment-records/00-metadata.txt
           cp wrangler.toml deployment-records/00-wrangler-production.toml
-          cp .deployment-input/wrangler.staging.toml deployment-records/00-wrangler-staging.toml
-          cp .deployment-input/staging-acceptance-record.txt deployment-records/00-staging-acceptance-record.txt
+          cp "$STAGING_CONFIG_PATH" deployment-records/00-wrangler-staging-canonical.toml
+          cp "$STAGING_RECORD_PATH" deployment-records/00-staging-acceptance-record.txt
 
       - name: Record DB_V2 Time Travel bookmark
         shell: bash
@@ -212,11 +219,31 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
+      - name: Verify read-only production state before migration
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/05-remote-d1-before-migration.txt
+          npm run verify:email-auth-ready 2>&1 | tee deployment-records/06-email-auth-readiness-before-migration.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Record pre-deploy Worker rollback state
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler deployments status 2>&1 | tee deployment-records/07-deployments-status-before.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/08-versions-list-before.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Apply legacy D1 migrations
         shell: bash
         run: |
           set -o pipefail
-          npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee deployment-records/05-legacy-migrations-apply.txt
+          npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee deployment-records/10-legacy-migrations-apply.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -225,7 +252,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee deployment-records/06-v2-migrations-apply.txt
+          npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee deployment-records/11-v2-migrations-apply.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -234,16 +261,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/07-remote-d1-before-deploy.txt
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-
-      - name: Verify email-authentication cutover readiness
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run verify:email-auth-ready 2>&1 | tee deployment-records/08-email-auth-readiness.txt
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/12-remote-d1-after-migration.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -252,7 +270,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          node scripts/configure-rate-limit-secret.mjs 2>&1 | tee deployment-records/09-secret-configuration.txt
+          node scripts/configure-rate-limit-secret.mjs 2>&1 | tee deployment-records/14-secret-configuration.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -264,7 +282,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          npx wrangler deploy 2>&1 | tee deployment-records/10-worker-deploy.txt
+          npx wrangler deploy 2>&1 | tee deployment-records/15-worker-deploy.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -273,7 +291,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/11-remote-d1-after-deploy.txt
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/16-remote-d1-after-deploy.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -282,14 +300,14 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          node scripts/smoke-production.mjs 2>&1 | tee deployment-records/12-production-smoke.txt
+          node scripts/smoke-production.mjs 2>&1 | tee deployment-records/17-production-smoke.txt
 
       - name: Record deployed Worker state
         shell: bash
         run: |
           set -o pipefail
-          npx wrangler deployments status 2>&1 | tee deployment-records/13-deployments-status.txt
-          npx wrangler versions list 2>&1 | tee deployment-records/14-versions-list.txt
+          npx wrangler deployments status 2>&1 | tee deployment-records/18-deployments-status-after.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/19-versions-list-after.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

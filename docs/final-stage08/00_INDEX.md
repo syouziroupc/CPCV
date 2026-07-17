@@ -1,6 +1,6 @@
 # CPCV Stage 8.2 最終統合正本
 
-文書release: `stage08-final-spec-2`
+文書release: `stage08-final-spec-3`
 対象code version: `0.8.2`
 対象migration: `0001`〜`0017`
 Cloudflare remote変更: 未実施

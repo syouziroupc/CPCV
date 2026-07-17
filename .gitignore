@@ -26,3 +26,6 @@ output/
 
 deployment-records/
 .deployment-input/
+
+.cpcv-staging.wrangler.toml
+.cpcv-staging.wrangler.toml.tmp-*

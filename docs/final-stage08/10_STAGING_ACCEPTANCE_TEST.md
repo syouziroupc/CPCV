@@ -1,17 +1,19 @@
 # Staging受入試験
 
-productionと完全に分離したresourceで実施します。同じrelease commitを使います。
+productionと完全に分離したresourceで実施します。同じrelease commitを使います。本書の試験項目は44件です。
 
-## 事前検査
+canonical staging configはsource外に置きます。Wrangler commandにはsource rootへmaterializeした完全一致copyを使います。
 
 ```bash
-node scripts/verify-deployment-config.mjs /absolute/path/wrangler.staging.toml
-node scripts/verify-environment-separation.mjs wrangler.toml /absolute/path/wrangler.staging.toml
-node scripts/verify-ai-readiness.mjs --config /absolute/path/wrangler.staging.toml
-npx wrangler deploy --dry-run --config /absolute/path/wrangler.staging.toml
+STAGING_CONFIG_SHA256=$(sha256sum /absolute/path/wrangler.staging.toml | cut -d' ' -f1)
+node scripts/materialize-staging-config.mjs /absolute/path/wrangler.staging.toml --expected-sha256 "$STAGING_CONFIG_SHA256"
+node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+node scripts/verify-environment-separation.mjs wrangler.toml .cpcv-staging.wrangler.toml
+node scripts/verify-ai-readiness.mjs --config .cpcv-staging.wrangler.toml
+npx wrangler deploy --dry-run --config .cpcv-staging.wrangler.toml
 ```
 
-確認項目です。
+## 事前検査
 
 - Worker originがstaging専用
 - legacy DBとDB_V2がstaging専用
@@ -72,15 +74,17 @@ npx wrangler deploy --dry-run --config /absolute/path/wrangler.staging.toml
 
 ## 証跡
 
-`templates/STAGING_ACCEPTANCE_RECORD_TEMPLATE.txt`を使います。全項目の結果。実行者。UTC日時。commit。deployment IDを記録します。
+`templates/STAGING_ACCEPTANCE_RECORD_TEMPLATE.txt`を使います。44項目の結果。実行者。UTC日時。commit。deployment IDを記録します。受入試験書のSHA-256も記録します。
 
 ```bash
+sha256sum docs/final-stage08/10_STAGING_ACCEPTANCE_TEST.md
 sha256sum /absolute/path/wrangler.staging.toml
 sha256sum /absolute/path/staging-acceptance-record.txt
 node scripts/verify-staging-evidence.mjs /absolute/path/staging-acceptance-record.txt \
   --commit <EXACT_COMMIT> \
   --deployment <STAGING_DEPLOYMENT_ID> \
   --config-sha256 <STAGING_CONFIG_SHA256>
+rm -f .cpcv-staging.wrangler.toml
 ```
 
 一件でも失敗した場合は`result=PASSED`を記録しません。productionへ進みません。
