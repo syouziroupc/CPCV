@@ -1,7 +1,20 @@
-CPCV Stage 8.1 source record
-Base Stage 8 local commit: 111b6024fbe546043b09bb2042313a5457a19c0b
-Stage 8 original upstream record: 74fc8daed92c4469a6aa1c96092522a4ee8d0730
-Stage 8.1 final commit: 7d740e699ec4661cf3ec35f5bd4a86a2887422c9
-Version: 0.8.1
-Remote deploy: not performed
+CPCV Stage 8.2 source record
+
+Version: 0.8.2
+Local reconstruction baseline commit: 3471c1354c66e6570d7db63c9093edce1e29fd1e
+Stage 8.2 content commit: 30a93355521aca62bdaa8abb4a126021a0aa759d
+Original Stage 8 upstream record retained from the supplied handoff: 74fc8daed92c4469a6aa1c96092522a4ee8d0730
+
+Scope:
+- Stage 8 audit remediation for all 71 recorded findings
+- Migration 0017 final integrity hardening
+- Final regression and deployment-gate verification
+- Canonical Codex staging and production instructions
+- Stage 8.2 preflight and remote D1 verification
+
+Remote staging deploy: not performed
+Remote production deploy: not performed
 GitHub push: not performed
+PowerShell safe-deploy execution: not performed because PowerShell is unavailable in the validation environment
+
+External deployment values remain intentionally unset. The exact final packaged source commit is recorded in the outer RELEASE_RECORD.txt.
