@@ -80,7 +80,7 @@ export default {
 
   async scheduled(controller, env, ctx) {
     if (!env?.DB_V2) return;
-    ctx.waitUntil(runScheduledMaintenance(env, controller?.scheduledTime));
+    ctx.waitUntil(runScheduledMaintenance(env, controller?.scheduledTime, controller?.cron));
   },
 
   async queue(batch, env) {
@@ -88,9 +88,13 @@ export default {
   }
 };
 
-async function runScheduledMaintenance(env, scheduledTime) {
+async function runScheduledMaintenance(env, scheduledTime, cron) {
   const db = env.DB_V2;
   const now = Number.isFinite(Number(scheduledTime)) ? Number(scheduledTime) : Date.now();
+  if (cron === "*/5 * * * *") {
+    await recoverAiJobsIfSchemaReady(env, { now, limit: 100 });
+    return;
+  }
   let backlogRemains = false;
   for (let batch = 0; batch < 20; batch += 1) {
     const pdfAnalytics = await runPdfAnalyticsRetentionIfSchemaReady(db, { now, limit: 500 });

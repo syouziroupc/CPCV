@@ -1,4 +1,3 @@
-import { auditStatement } from "../auth/audit.js";
 import { requireUnsafeRequestProtection } from "../auth/csrf.js";
 import { AuthError } from "../auth/errors.js";
 import { authJson } from "../auth/http.js";
@@ -8,6 +7,7 @@ import { assertOnlyFields, readJsonObject, rejectOrganizationSelector } from "..
 import {
   createFilterTerm,
   deleteFilterTerm,
+  getFilterTerm,
   getSessionFilterSettings,
   installFilterPack,
   listOrganizationFilter,
@@ -48,18 +48,9 @@ export async function handleOrganizationContentFilterApi(request, env) {
     const term = await createFilterTerm(env.DB_V2, {
       organizationId: auth.organizationId,
       actorUserId: auth.userId,
-      ...normalized
+      ...normalized,
+      audit: userAudit(auth, "content_filter.term.created")
     });
-    await env.DB_V2.batch([auditStatement(env.DB_V2, {
-      organizationId: auth.organizationId,
-      actorType: "user",
-      actorUserId: auth.userId,
-      actorRole: auth.role,
-      action: "content_filter.term.created",
-      targetType: "content_filter_term",
-      targetId: term.id,
-      details: { category: term.category, severity: term.severity, fuzzyEnabled: term.fuzzyEnabled }
-    })]);
     return authJson({ ok: true, term }, 201);
   }
   if (url.pathname === "/api/org/content-filter/policies" && request.method === "PATCH") {
@@ -87,18 +78,9 @@ export async function handleOrganizationContentFilterApi(request, env) {
     const data = await updateFilterPolicies(env.DB_V2, {
       organizationId: auth.organizationId,
       actorUserId: auth.userId,
-      policies
+      policies,
+      audit: userAudit(auth, "content_filter.policies.updated")
     });
-    await env.DB_V2.batch([auditStatement(env.DB_V2, {
-      organizationId: auth.organizationId,
-      actorType: "user",
-      actorUserId: auth.userId,
-      actorRole: auth.role,
-      action: "content_filter.policies.updated",
-      targetType: "organization",
-      targetId: auth.organizationId,
-      details: { categories: policies.map((policy) => policy.category) }
-    })]);
     return authJson({ ok: true, categories: categoryResponses(), languages: languageResponses(), ...data });
   }
 
@@ -106,23 +88,14 @@ export async function handleOrganizationContentFilterApi(request, env) {
   if (packMatch && request.method === "POST") {
     requireRole(auth, "owner");
     await requireUnsafeRequestProtection(request, env, auth);
-    const packId = decodeURIComponent(packMatch[1]);
+    const packId = decodePathComponent(packMatch[1]);
     if (!/^[a-z0-9-]{3,80}$/.test(packId)) throw new AuthError(404, "FILTER_PACK_NOT_FOUND");
     const result = await installFilterPack(env.DB_V2, {
       organizationId: auth.organizationId,
       actorUserId: auth.userId,
-      packId
+      packId,
+      audit: userAudit(auth, "content_filter.pack.installed")
     });
-    await env.DB_V2.batch([auditStatement(env.DB_V2, {
-      organizationId: auth.organizationId,
-      actorType: "user",
-      actorUserId: auth.userId,
-      actorRole: auth.role,
-      action: "content_filter.pack.installed",
-      targetType: "content_filter_pack",
-      targetId: packId,
-      details: { packId, version: result.pack?.version || null }
-    })]);
     return authJson({ ok: true, ...result }, 201);
   }
 
@@ -134,8 +107,7 @@ export async function handleOrganizationContentFilterApi(request, env) {
       rejectOrganizationSelector(request, input);
       assertOnlyFields(input, ["term", "category", "severity", "matchMode", "fuzzyEnabled", "languageCode", "boundaryMode", "active"]);
       await requireUnsafeRequestProtection(request, env, auth);
-      const current = (await listOrganizationFilter(env.DB_V2, auth.organizationId)).terms.find((term) => term.id === termId);
-      if (!current) throw new AuthError(404, "FILTER_TERM_NOT_FOUND");
+      const current = await getFilterTerm(env.DB_V2, auth.organizationId, termId);
       const normalized = requireFilterTermInput({
         term: Object.hasOwn(input, "term") ? input.term : current.term,
         category: Object.hasOwn(input, "category") ? input.category : current.category,
@@ -149,35 +121,18 @@ export async function handleOrganizationContentFilterApi(request, env) {
         id: termId,
         organizationId: auth.organizationId,
         active: Object.hasOwn(input, "active") ? requireFilterBoolean(input.active) : current.active,
-        ...normalized
+        ...normalized,
+        audit: userAudit(auth, "content_filter.term.updated")
       });
-      await env.DB_V2.batch([auditStatement(env.DB_V2, {
-        organizationId: auth.organizationId,
-        actorType: "user",
-        actorUserId: auth.userId,
-        actorRole: auth.role,
-        action: "content_filter.term.updated",
-        targetType: "content_filter_term",
-        targetId: term.id,
-        details: { category: term.category, severity: term.severity, fuzzyEnabled: term.fuzzyEnabled, active: term.active }
-      })]);
       return authJson({ ok: true, term });
     }
     if (request.method === "DELETE") {
       await requireUnsafeRequestProtection(request, env, auth);
-      const current = (await listOrganizationFilter(env.DB_V2, auth.organizationId)).terms.find((term) => term.id === termId);
-      if (!current) throw new AuthError(404, "FILTER_TERM_NOT_FOUND");
-      await deleteFilterTerm(env.DB_V2, auth.organizationId, termId);
-      await env.DB_V2.batch([auditStatement(env.DB_V2, {
-        organizationId: auth.organizationId,
-        actorType: "user",
-        actorUserId: auth.userId,
-        actorRole: auth.role,
-        action: "content_filter.term.deleted",
-        targetType: "content_filter_term",
-        targetId: termId,
+      const current = await getFilterTerm(env.DB_V2, auth.organizationId, termId);
+      await deleteFilterTerm(env.DB_V2, auth.organizationId, termId, Date.now(), {
+        ...userAudit(auth, "content_filter.term.deleted"),
         details: { category: current.category, severity: current.severity }
-      })]);
+      });
       return new Response(null, { status: 204 });
     }
     throw methodNotAllowed("PATCH, DELETE");
@@ -211,19 +166,24 @@ export async function updatePrivateSessionFilterSettings(request, env, auth, ses
       : current.translationFilterEnabled,
     unsupportedLanguageMode: Object.hasOwn(input, "unsupportedLanguageMode")
       ? requireUnsupportedLanguageMode(input.unsupportedLanguageMode)
-      : current.unsupportedLanguageMode
+      : current.unsupportedLanguageMode,
+    audit: userAudit(auth, "session.content_filter.updated")
   });
-  await env.DB_V2.batch([auditStatement(env.DB_V2, {
+  return authJson({ ok: true, settings });
+}
+
+function userAudit(auth, action) {
+  return {
     organizationId: auth.organizationId,
     actorType: "user",
     actorUserId: auth.userId,
     actorRole: auth.role,
-    action: "session.content_filter.updated",
-    targetType: "live_session",
-    targetId: session.id,
-    details: settings
-  })]);
-  return authJson({ ok: true, settings });
+    action
+  };
+}
+
+function decodePathComponent(value) {
+  try { return decodeURIComponent(value); } catch { throw new AuthError(400, "INVALID_PATH_PARAMETER"); }
 }
 
 function categoryResponses() {

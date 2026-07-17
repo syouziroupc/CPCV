@@ -10,6 +10,7 @@ const results = [];
 try {
   const current = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
   const validConfig = current
+    .replace('name = \"EMAIL\"', 'name = \"EMAIL\"\nallowed_sender_addresses = [ \"noreply@auth.real-domain.jp\" ]')
     .replace('database_name = "class_comment_db_v2"\nmigrations_dir', 'database_name = "class_comment_db_v2"\ndatabase_id = "123e4567-e89b-42d3-a456-426614174000"\nmigrations_dir')
     .replace('PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"', 'PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"\nAUTH_EMAIL_FROM = "noreply@auth.real-domain.jp"\nAUTH_EMAIL_REPLY_TO = "support@auth.real-domain.jp"\nTURNSTILE_SITE_KEY = "0x4AAAAA-real-site-key"')
     + `\n[[ratelimits]]\nname = "AUTH_LOGIN_IP_LIMITER"\nnamespace_id = "1001"\n[ratelimits.simple]\nlimit = 20\nperiod = 60\n\n[[ratelimits]]\nname = "AUTH_LOGIN_ACCOUNT_LIMITER"\nnamespace_id = "1002"\n[ratelimits.simple]\nlimit = 10\nperiod = 60\n\n[[ratelimits]]\nname = "PUBLIC_COMMENT_RATE_LIMITER"\nnamespace_id = "1003"\n[ratelimits.simple]\nlimit = 30\nperiod = 60\n\n[[ratelimits]]\nname = "AUTH_PUBLIC_EMAIL_LIMITER"\nnamespace_id = "1004"\n[ratelimits.simple]\nlimit = 30\nperiod = 60\n`;
@@ -22,6 +23,11 @@ try {
   writeFileSync(validPath, validConfig);
   const valid = run("scripts/verify-deployment-config.mjs", [validPath]);
   check("complete deployment configuration is accepted", valid.status === 0 && valid.stdout.includes("verified"), valid);
+
+  const unrestrictedEmailPath = join(temp, "unrestricted-email.toml");
+  writeFileSync(unrestrictedEmailPath, validConfig.replace('allowed_sender_addresses = [ "noreply@auth.real-domain.jp" ]\n', ""));
+  const unrestrictedEmail = run("scripts/verify-deployment-config.mjs", [unrestrictedEmailPath]);
+  check("unrestricted Email sender binding is rejected", unrestrictedEmail.status === 1 && unrestrictedEmail.stderr.includes("allowed_sender_addresses"), unrestrictedEmail);
 
   const invalidOriginPath = join(temp, "invalid-origin.toml");
   writeFileSync(invalidOriginPath, validConfig.replace('AUTH_ORIGIN = "https://', 'AUTH_ORIGIN = "http://'));

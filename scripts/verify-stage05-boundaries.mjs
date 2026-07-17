@@ -12,7 +12,7 @@ const immutableHashes = {
   "src/auth/permissions.js": "dd3016c47a64249873843f953a1003d42fc52923ddb077ba0aa1a80769312616",
   "src/auth/csrf.js": "68fc7f291a14a45266e9376a0ead492ac8c86ba4f550e0da95ede40d7d0ee77d",
   "src/auth/passwords.js": "734ea909b2f4d7ee378f5d0266f60999cb333a4422a421290bc143a405b8a9b4",
-  "src/comments/cookies.js": "6fa26eaf4b8294c641a32c0077ed45f0a58cab683dd3d9952876144ffab42283"
+  "src/comments/cookies.js": "fb0dcfa55a8323591d9739e20d785115700dd32764849002ff82e1e3bb2f2d6f"
 };
 for (const [path, hash] of Object.entries(immutableHashes)) {
   check(`${path} retains the Stage 4 security contract`, sha256(path) === hash);

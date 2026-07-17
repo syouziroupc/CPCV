@@ -1,3 +1,4 @@
+import { auditStatement } from "../auth/audit.js";
 import { AuthError } from "../auth/errors.js";
 import { makeId } from "../auth/request.js";
 
@@ -23,119 +24,207 @@ export async function bindPdfToSession(db, input) {
   ).bind(input.liveSessionId, input.organizationId, input.userId, nowIso).first();
   if (!access) throw new AuthError(410, "SESSION_EXPIRED");
 
-  let document = await db.prepare(
+  const existingDocument = await db.prepare(
     `SELECT id, page_count, file_size_bytes, pdfjs_fingerprint
      FROM pdf_documents
      WHERE organization_id = ?1 AND sha256_hex = ?2 LIMIT 1`
   ).bind(input.organizationId, input.sha256Hex).first();
-
-  let insertedDocumentId = null;
-  if (document) {
-    if (Number(document.page_count) !== input.pageCount || Number(document.file_size_bytes) !== input.fileSizeBytes) {
-      throw new AuthError(409, "PDF_METADATA_CONFLICT");
-    }
-    await db.prepare(
-      `UPDATE pdf_documents
-       SET last_seen_at = ?1,
-           pdfjs_fingerprint = COALESCE(pdfjs_fingerprint, ?2)
-       WHERE id = ?3 AND organization_id = ?4`
-    ).bind(nowIso, input.pdfjsFingerprint, document.id, input.organizationId).run();
-  } else {
-    const candidateId = makeId("pdf");
-    await db.prepare(
-      `INSERT INTO pdf_documents (
-         id, organization_id, sha256_hex, pdfjs_fingerprint,
-         page_count, file_size_bytes, created_by_user_id, created_at, last_seen_at
-       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
-       ON CONFLICT(organization_id, sha256_hex) DO NOTHING`
-    ).bind(
-      candidateId,
-      input.organizationId,
-      input.sha256Hex,
-      input.pdfjsFingerprint,
-      input.pageCount,
-      input.fileSizeBytes,
-      input.userId,
-      nowIso
-    ).run();
-    document = await db.prepare(
-      `SELECT id, page_count, file_size_bytes, pdfjs_fingerprint
-       FROM pdf_documents
-       WHERE organization_id = ?1 AND sha256_hex = ?2 LIMIT 1`
-    ).bind(input.organizationId, input.sha256Hex).first();
-    if (!document) throw new AuthError(500, "PDF_DOCUMENT_WRITE_FAILED");
-    if (Number(document.page_count) !== input.pageCount || Number(document.file_size_bytes) !== input.fileSizeBytes) {
-      throw new AuthError(409, "PDF_METADATA_CONFLICT");
-    }
-    if (document.id === candidateId) insertedDocumentId = candidateId;
+  if (existingDocument && (
+    Number(existingDocument.page_count) !== input.pageCount
+    || Number(existingDocument.file_size_bytes) !== input.fileSizeBytes
+  )) {
+    throw new AuthError(409, "PDF_METADATA_CONFLICT");
   }
 
   const current = await getSessionPdfState(db, input.organizationId, input.liveSessionId);
-  if (current && current.pdfDocumentId === document.id) {
-    return { ...current, reused: true };
+  if (current && existingDocument && current.pdfDocumentId === existingDocument.id) {
+    const statements = [db.prepare(
+      `UPDATE pdf_documents
+       SET last_seen_at = ?1,
+           pdfjs_fingerprint = COALESCE(pdfjs_fingerprint, ?2)
+       WHERE id = ?3 AND organization_id = ?4
+         AND page_count = ?5 AND file_size_bytes = ?6`
+    ).bind(
+      nowIso, input.pdfjsFingerprint, existingDocument.id, input.organizationId,
+      input.pageCount, input.fileSizeBytes
+    )];
+    const auditIndex = appendPdfAudit(statements, db, input.audit, {
+      organizationId: input.organizationId,
+      targetType: "live_session",
+      targetId: input.liveSessionId,
+      createdAt: nowIso,
+      details: {
+        documentHashPrefix: input.sha256Hex.slice(0, 12),
+        pageCount: input.pageCount,
+        fileSizeBytes: input.fileSizeBytes,
+        reused: true,
+        previousSnapshotId: input.previousSnapshotId || null
+      },
+      condition: {
+        sql: `EXISTS (
+          SELECT 1 FROM session_pdf_state s
+          JOIN session_pdf_bindings b ON b.id = s.binding_id AND b.replaced_at IS NULL
+          WHERE s.organization_id = ?11 AND s.live_session_id = ?12
+            AND s.pdf_document_id = ?13
+        )`,
+        bindings: [input.organizationId, input.liveSessionId, existingDocument.id]
+      }
+    });
+    const results = await db.batch(statements);
+    if (changesOf(results?.[0]) !== 1) throw new AuthError(409, "PDF_METADATA_CONFLICT");
+    assertPdfAudit(results, auditIndex);
+    const reused = await getSessionPdfState(db, input.organizationId, input.liveSessionId);
+    return { ...reused, reused: true };
   }
 
+  const candidateDocumentId = existingDocument?.id || makeId("pdf");
   const bindingId = makeId("pbd");
   const eventId = makeId("pge");
+  const statements = [
+    db.prepare(
+      `INSERT INTO pdf_documents (
+         id, organization_id, sha256_hex, pdfjs_fingerprint,
+         page_count, file_size_bytes, created_by_user_id, created_at, last_seen_at
+       )
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8
+       FROM live_sessions ls
+       JOIN organization_members om
+         ON om.organization_id = ls.organization_id
+        AND om.user_id = ?7 AND om.status = 'active'
+       WHERE ls.id = ?9 AND ls.organization_id = ?2
+         AND ls.status = 'active' AND ls.expires_at > ?8
+       ON CONFLICT(organization_id, sha256_hex) DO UPDATE SET
+         last_seen_at = excluded.last_seen_at,
+         pdfjs_fingerprint = COALESCE(pdf_documents.pdfjs_fingerprint, excluded.pdfjs_fingerprint)
+       WHERE pdf_documents.page_count = excluded.page_count
+         AND pdf_documents.file_size_bytes = excluded.file_size_bytes`
+    ).bind(
+      candidateDocumentId, input.organizationId, input.sha256Hex, input.pdfjsFingerprint,
+      input.pageCount, input.fileSizeBytes, input.userId, nowIso, input.liveSessionId
+    ),
+    db.prepare(
+      `UPDATE session_pdf_bindings
+       SET replaced_at = ?1
+       WHERE organization_id = ?2 AND live_session_id = ?3 AND replaced_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM live_sessions ls
+           JOIN organization_members om
+             ON om.organization_id = ls.organization_id
+            AND om.user_id = ?4 AND om.status = 'active'
+           JOIN pdf_documents d
+             ON d.organization_id = ls.organization_id AND d.sha256_hex = ?5
+            AND d.page_count = ?6 AND d.file_size_bytes = ?7
+           WHERE ls.id = ?3 AND ls.organization_id = ?2
+             AND ls.status = 'active' AND ls.expires_at > ?1
+         )`
+    ).bind(
+      nowIso, input.organizationId, input.liveSessionId, input.userId,
+      input.sha256Hex, input.pageCount, input.fileSizeBytes
+    ),
+    db.prepare(
+      `INSERT INTO session_pdf_bindings (
+         id, organization_id, live_session_id, pdf_document_id,
+         bound_by_user_id, bound_at, replaced_at
+       )
+       SELECT ?1, ls.organization_id, ls.id, d.id, ?2, ?3, NULL
+       FROM live_sessions ls
+       JOIN organization_members om
+         ON om.organization_id = ls.organization_id
+        AND om.user_id = ?2 AND om.status = 'active'
+       JOIN pdf_documents d
+         ON d.organization_id = ls.organization_id AND d.sha256_hex = ?4
+        AND d.page_count = ?5 AND d.file_size_bytes = ?6
+       WHERE ls.id = ?7 AND ls.organization_id = ?8
+         AND ls.status = 'active' AND ls.expires_at > ?3`
+    ).bind(
+      bindingId, input.userId, nowIso, input.sha256Hex,
+      input.pageCount, input.fileSizeBytes, input.liveSessionId, input.organizationId
+    ),
+    db.prepare(
+      `INSERT INTO pdf_pages (
+         pdf_document_id, page_number, organization_id, first_seen_at, last_seen_at
+       )
+       SELECT pdf_document_id, 1, organization_id, ?1, ?1
+       FROM session_pdf_bindings
+       WHERE id = ?2 AND organization_id = ?3 AND live_session_id = ?4 AND replaced_at IS NULL
+       ON CONFLICT(pdf_document_id, page_number)
+       DO UPDATE SET last_seen_at = excluded.last_seen_at`
+    ).bind(nowIso, bindingId, input.organizationId, input.liveSessionId),
+    db.prepare(
+      `INSERT INTO session_pdf_state (
+         organization_id, live_session_id, binding_id, pdf_document_id,
+         current_page, page_count, client_version, updated_by_user_id, updated_at
+       )
+       SELECT organization_id, live_session_id, id, pdf_document_id,
+              1, ?1, 1, ?2, ?3
+       FROM session_pdf_bindings
+       WHERE id = ?4 AND organization_id = ?5 AND live_session_id = ?6 AND replaced_at IS NULL
+       ON CONFLICT(live_session_id) DO UPDATE SET
+         organization_id = excluded.organization_id,
+         binding_id = excluded.binding_id,
+         pdf_document_id = excluded.pdf_document_id,
+         current_page = 1,
+         page_count = excluded.page_count,
+         client_version = 1,
+         updated_by_user_id = excluded.updated_by_user_id,
+         updated_at = excluded.updated_at`
+    ).bind(
+      input.pageCount, input.userId, nowIso, bindingId,
+      input.organizationId, input.liveSessionId
+    ),
+    db.prepare(
+      `INSERT INTO pdf_page_events (
+         id, organization_id, live_session_id, binding_id, pdf_document_id,
+         page_number, client_version, event_type, source_user_id, occurred_at
+       )
+       SELECT ?1, organization_id, live_session_id, binding_id, pdf_document_id,
+              1, 1, 'bound', ?2, ?3
+       FROM session_pdf_state
+       WHERE organization_id = ?4 AND live_session_id = ?5 AND binding_id = ?6
+         AND current_page = 1 AND client_version = 1`
+    ).bind(eventId, input.userId, nowIso, input.organizationId, input.liveSessionId, bindingId)
+  ];
+  const auditIndex = appendPdfAudit(statements, db, input.audit, {
+    organizationId: input.organizationId,
+    targetType: "live_session",
+    targetId: input.liveSessionId,
+    createdAt: nowIso,
+    details: {
+      documentHashPrefix: input.sha256Hex.slice(0, 12),
+      pageCount: input.pageCount,
+      fileSizeBytes: input.fileSizeBytes,
+      reused: false,
+      previousSnapshotId: input.previousSnapshotId || null
+    },
+    condition: {
+      sql: `EXISTS (
+        SELECT 1 FROM session_pdf_state
+        WHERE organization_id = ?11 AND live_session_id = ?12 AND binding_id = ?13
+      )`,
+      bindings: [input.organizationId, input.liveSessionId, bindingId]
+    }
+  });
+
+  let results;
   try {
-    await db.batch([
-      db.prepare(
-        `UPDATE session_pdf_bindings
-         SET replaced_at = ?1
-         WHERE organization_id = ?2 AND live_session_id = ?3 AND replaced_at IS NULL`
-      ).bind(nowIso, input.organizationId, input.liveSessionId),
-      db.prepare(
-        `INSERT INTO session_pdf_bindings (
-           id, organization_id, live_session_id, pdf_document_id,
-           bound_by_user_id, bound_at, replaced_at
-         )
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, NULL
-         FROM live_sessions
-         WHERE id = ?3 AND organization_id = ?2 AND status = 'active' AND expires_at > ?6`
-      ).bind(bindingId, input.organizationId, input.liveSessionId, document.id, input.userId, nowIso),
-      db.prepare(
-        `INSERT INTO pdf_pages (
-           pdf_document_id, page_number, organization_id, first_seen_at, last_seen_at
-         ) VALUES (?1, 1, ?2, ?3, ?3)
-         ON CONFLICT(pdf_document_id, page_number)
-         DO UPDATE SET last_seen_at = excluded.last_seen_at`
-      ).bind(document.id, input.organizationId, nowIso),
-      db.prepare(
-        `INSERT INTO session_pdf_state (
-           organization_id, live_session_id, binding_id, pdf_document_id,
-           current_page, page_count, client_version, updated_by_user_id, updated_at
-         ) VALUES (?1, ?2, ?3, ?4, 1, ?5, 1, ?6, ?7)
-         ON CONFLICT(live_session_id) DO UPDATE SET
-           organization_id = excluded.organization_id,
-           binding_id = excluded.binding_id,
-           pdf_document_id = excluded.pdf_document_id,
-           current_page = 1,
-           page_count = excluded.page_count,
-           client_version = 1,
-           updated_by_user_id = excluded.updated_by_user_id,
-           updated_at = excluded.updated_at`
-      ).bind(input.organizationId, input.liveSessionId, bindingId, document.id, input.pageCount, input.userId, nowIso),
-      db.prepare(
-        `INSERT INTO pdf_page_events (
-           id, organization_id, live_session_id, binding_id, pdf_document_id,
-           page_number, client_version, event_type, source_user_id, occurred_at
-         ) VALUES (?1, ?2, ?3, ?4, ?5, 1, 1, 'bound', ?6, ?7)`
-      ).bind(eventId, input.organizationId, input.liveSessionId, bindingId, document.id, input.userId, nowIso)
-    ]);
+    results = await db.batch(statements);
+    if (changesOf(results?.[2]) !== 1 || changesOf(results?.[4]) !== 1 || changesOf(results?.[5]) !== 1) {
+      throw new AuthError(409, "PDF_BINDING_CONFLICT");
+    }
+    assertPdfAudit(results, auditIndex);
+    const state = await getSessionPdfState(db, input.organizationId, input.liveSessionId);
+    if (!state || state.bindingId !== bindingId) throw new AuthError(409, "PDF_BINDING_CONFLICT");
+    return { ...state, reused: false };
   } catch (error) {
-    if (insertedDocumentId) {
+    if (!existingDocument) {
       await db.prepare(
         `DELETE FROM pdf_documents
          WHERE id = ?1 AND organization_id = ?2
            AND NOT EXISTS (SELECT 1 FROM session_pdf_bindings b WHERE b.pdf_document_id = pdf_documents.id)`
-      ).bind(insertedDocumentId, input.organizationId).run().catch(() => {});
+      ).bind(candidateDocumentId, input.organizationId).run().catch(() => {});
     }
     throw error;
   }
-
-  const state = await getSessionPdfState(db, input.organizationId, input.liveSessionId);
-  if (!state || state.bindingId !== bindingId) throw new AuthError(409, "PDF_BINDING_CONFLICT");
-  return { ...state, reused: false };
 }
 
 export async function updatePdfPageState(db, input) {
@@ -146,8 +235,9 @@ export async function updatePdfPageState(db, input) {
   if (input.clientVersion <= current.clientVersion) return { ...current, accepted: false, stale: true };
 
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
+  let accepted = false;
   if (input.pageNumber === current.currentPage) {
-    await db.prepare(
+    const result = await db.prepare(
       `UPDATE session_pdf_state
        SET client_version = ?1, updated_by_user_id = ?2, updated_at = ?3
        WHERE organization_id = ?4 AND live_session_id = ?5 AND binding_id = ?6
@@ -160,16 +250,10 @@ export async function updatePdfPageState(db, input) {
       input.liveSessionId,
       input.bindingId
     ).run();
+    accepted = changesOf(result) === 1;
   } else {
     const eventId = makeId("pge");
-    await db.batch([
-      db.prepare(
-        `INSERT INTO pdf_pages (
-           pdf_document_id, page_number, organization_id, first_seen_at, last_seen_at
-         ) VALUES (?1, ?2, ?3, ?4, ?4)
-         ON CONFLICT(pdf_document_id, page_number)
-         DO UPDATE SET last_seen_at = excluded.last_seen_at`
-      ).bind(current.pdfDocumentId, input.pageNumber, input.organizationId, nowIso),
+    const results = await db.batch([
       db.prepare(
         `UPDATE session_pdf_state
          SET current_page = ?1, client_version = ?2,
@@ -184,6 +268,24 @@ export async function updatePdfPageState(db, input) {
         input.organizationId,
         input.liveSessionId,
         input.bindingId
+      ),
+      db.prepare(
+        `INSERT INTO pdf_pages (
+           pdf_document_id, page_number, organization_id, first_seen_at, last_seen_at
+         )
+         SELECT pdf_document_id, current_page, organization_id, ?1, ?1
+         FROM session_pdf_state
+         WHERE organization_id = ?2 AND live_session_id = ?3 AND binding_id = ?4
+           AND client_version = ?5 AND current_page = ?6
+         ON CONFLICT(pdf_document_id, page_number)
+         DO UPDATE SET last_seen_at = excluded.last_seen_at`
+      ).bind(
+        nowIso,
+        input.organizationId,
+        input.liveSessionId,
+        input.bindingId,
+        input.clientVersion,
+        input.pageNumber
       ),
       db.prepare(
         `INSERT INTO pdf_page_events (
@@ -207,13 +309,14 @@ export async function updatePdfPageState(db, input) {
         input.pageNumber
       )
     ]);
+    accepted = changesOf(results?.[0]) === 1 && changesOf(results?.[2]) === 1;
   }
 
   const next = await getSessionPdfState(db, input.organizationId, input.liveSessionId);
   return {
     ...next,
-    accepted: Boolean(next && next.bindingId === input.bindingId && next.clientVersion === input.clientVersion),
-    stale: Boolean(next && next.clientVersion > input.clientVersion)
+    accepted,
+    stale: !accepted && Boolean(next && next.clientVersion >= input.clientVersion)
   };
 }
 
@@ -283,6 +386,12 @@ export async function persistUnderstandingSignal(db, input) {
 
   const now = new Date(input.now ?? Date.now());
   const nowIso = now.toISOString();
+  const activeSession = await db.prepare(
+    `SELECT 1 FROM live_sessions
+     WHERE id = ?1 AND organization_id = ?2 AND status = 'active' AND expires_at > ?3
+     LIMIT 1`
+  ).bind(input.liveSessionId, input.organizationId, nowIso).first();
+  if (!activeSession) throw new AuthError(410, "SESSION_EXPIRED");
   const retainedUntil = new Date(now.getTime() + UNDERSTANDING_RETENTION_DAYS * 86_400_000).toISOString();
   const existing = await db.prepare(
     `SELECT us.signal, us.updated_at, us.retained_until
@@ -336,6 +445,9 @@ export async function persistUnderstandingSignal(db, input) {
               s.binding_id, s.pdf_document_id, s.current_page, ?2,
               ?3, ?3, ?4
        FROM participants p
+       JOIN live_sessions ls
+         ON ls.id = p.live_session_id AND ls.organization_id = p.organization_id
+        AND ls.status = 'active' AND ls.expires_at > ?3
        JOIN session_pdf_state s
          ON s.organization_id = p.organization_id AND s.live_session_id = p.live_session_id
        JOIN session_pdf_bindings b
@@ -461,7 +573,7 @@ export async function buildSessionAnalytics(db, input) {
 
   const comments = new Map(rowsOf(commentResult).map((row) => [Number(row.page_number), row]));
   const signals = new Map(rowsOf(signalResult).map((row) => [Number(row.page_number), row]));
-  const dwell = calculateDwell(rowsOf(eventResult), cutoffMs);
+  const dwell = calculateDwell(rowsOf(eventResult));
   const pages = [];
   for (let pageNumber = 1; pageNumber <= state.pageCount; pageNumber += 1) {
     const comment = comments.get(pageNumber) || {};
@@ -532,7 +644,7 @@ export async function createAnalyticsSnapshot(db, input) {
     pages: analytics.pages
   };
   const checksumSha256 = await sha256Hex(stableStringify(payload));
-  await db.prepare(
+  const statements = [db.prepare(
     `INSERT INTO analytics_snapshots (
        id, organization_id, live_session_id, binding_id, pdf_document_id,
        source_cutoff_at, minimum_group_size, schema_version,
@@ -553,7 +665,34 @@ export async function createAnalyticsSnapshot(db, input) {
     input.userId,
     createdAt,
     retainedUntil
-  ).run();
+  )];
+  let auditId = null;
+  let auditIndex = -1;
+  if (input.audit) {
+    auditId = input.audit.id || makeId("aud");
+    auditIndex = appendPdfAudit(statements, db, { ...input.audit, id: auditId }, {
+      organizationId: input.organizationId,
+      targetType: "analytics_snapshot",
+      targetId: id,
+      createdAt,
+      details: {
+        ...(input.audit.details || {}),
+        snapshotId: id,
+        checksumSha256,
+        sourceCutoffAt: analytics.sourceCutoffAt
+      },
+      condition: {
+        sql: `EXISTS (
+          SELECT 1 FROM analytics_snapshots
+          WHERE id = ?11 AND organization_id = ?12 AND live_session_id = ?13
+        )`,
+        bindings: [id, input.organizationId, input.liveSessionId]
+      }
+    });
+  }
+  const results = await db.batch(statements);
+  if (changesOf(results?.[0]) !== 1) throw new AuthError(500, "ANALYTICS_SNAPSHOT_WRITE_FAILED");
+  assertPdfAudit(results, auditIndex);
   return {
     id,
     organizationId: input.organizationId,
@@ -567,8 +706,29 @@ export async function createAnalyticsSnapshot(db, input) {
     pages: analytics.pages,
     checksumSha256,
     createdAt,
-    retainedUntil
+    retainedUntil,
+    auditId
   };
+}
+
+export async function rollbackAnalyticsSnapshot(db, input) {
+  const statements = [];
+  if (input.auditId) {
+    statements.push(db.prepare(
+      `DELETE FROM audit_logs
+       WHERE id = ?1 AND organization_id = ?2
+         AND target_type = 'analytics_snapshot' AND target_id = ?3`
+    ).bind(input.auditId, input.organizationId, input.snapshotId));
+  }
+  const snapshotIndex = statements.length;
+  statements.push(db.prepare(
+    `DELETE FROM analytics_snapshots
+     WHERE id = ?1 AND organization_id = ?2 AND live_session_id = ?3`
+  ).bind(input.snapshotId, input.organizationId, input.liveSessionId));
+  const results = await db.batch(statements);
+  if (changesOf(results?.[snapshotIndex]) !== 1) {
+    throw new AuthError(500, "ANALYTICS_SNAPSHOT_ROLLBACK_FAILED");
+  }
 }
 
 export async function getAnalyticsSnapshot(db, input) {
@@ -694,23 +854,35 @@ export async function runPdfAnalyticsRetention(db, options = {}) {
   };
 }
 
-function calculateDwell(events, cutoffMs) {
+function calculateDwell(events) {
   const map = new Map();
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index];
-    const start = Date.parse(event.occurred_at);
-    const nextStart = index + 1 < events.length ? Date.parse(events[index + 1].occurred_at) : cutoffMs;
-    const rawSeconds = Number.isFinite(start) && Number.isFinite(nextStart)
-      ? Math.max(0, Math.floor((nextStart - start) / 1000))
-      : 0;
-    const seconds = Math.min(rawSeconds, MAX_DWELL_GAP_SECONDS);
     const page = Number(event.page_number);
     const current = map.get(page) || { viewCount: 0, seconds: 0 };
     current.viewCount += 1;
-    current.seconds += seconds;
+    if (index + 1 < events.length) {
+      const start = Date.parse(event.occurred_at);
+      const nextStart = Date.parse(events[index + 1].occurred_at);
+      const rawSeconds = Number.isFinite(start) && Number.isFinite(nextStart)
+        ? Math.max(0, Math.floor((nextStart - start) / 1000))
+        : 0;
+      current.seconds += Math.min(rawSeconds, MAX_DWELL_GAP_SECONDS);
+    }
     map.set(page, current);
   }
   return map;
+}
+
+function appendPdfAudit(statements, db, audit, overrides) {
+  if (!audit) return -1;
+  statements.push(auditStatement(db, { ...audit, ...overrides }));
+  return statements.length - 1;
+}
+
+function assertPdfAudit(results, auditIndex) {
+  if (auditIndex < 0) return;
+  if (changesOf(results?.[auditIndex]) !== 1) throw new AuthError(500, "AUDIT_WRITE_FAILED");
 }
 
 async function sha256Hex(value) {

@@ -11,6 +11,7 @@ import {
 
 const MAX_CLIENT_FRAME_BYTES = 256;
 const AUTH_REVALIDATION_BATCH_SIZE = 80;
+const AUTH_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
 
 export class CommentRoom {
   constructor(state, env) {
@@ -78,6 +79,7 @@ export class CommentRoom {
       lastSentSequence: sync.currentSequence
     };
     server.serializeAttachment(attachment);
+    await this.scheduleAuthRevalidation();
     safeSocketSend(server, JSON.stringify({
       type: "room:sync",
       currentSequence: sync.currentSequence,
@@ -195,6 +197,29 @@ export class CommentRoom {
       delivered += 1;
     }
     return delivered;
+  }
+
+  async alarm() {
+    if (typeof this.state?.getWebSockets !== "function") return;
+    const sockets = this.state.getWebSockets();
+    if (!sockets.length) return;
+    const authorized = await this.authorizedAuthSessions(sockets);
+    for (const socket of sockets) {
+      const attachment = safeAttachment(socket);
+      const currentAuth = attachment.authSessionId ? authorized.get(attachment.authSessionId) : null;
+      if (!currentAuth
+          || currentAuth.organizationId !== attachment.organizationId
+          || currentAuth.userId !== attachment.userId
+          || currentAuth.role !== attachment.role) {
+        safeClose(socket, 4001, "authorization revoked");
+      }
+    }
+    if (this.state.getWebSockets().length) await this.scheduleAuthRevalidation();
+  }
+
+  async scheduleAuthRevalidation() {
+    if (typeof this.state?.storage?.setAlarm !== "function") return;
+    await this.state.storage.setAlarm(Date.now() + AUTH_REVALIDATION_INTERVAL_MS);
   }
 
   async authorizedAuthSessions(sockets) {

@@ -1,158 +1,77 @@
-# データモデルとmigration仕様
+# DB。data。migration正本
 
-## 1. DB構成
+## Database
 
-`DB_V2`が現行正本である。
-`DB`は旧画面と旧接続の互換投影先である。
-二つのD1を同一transactionへ含められない。
-DB_V2成功後に旧DBへ投影する。
-投影失敗時はDB_V2を補償更新する。
-
-## 2. migration一覧
-
-| 番号 | 内容 |
+| binding | 用途 |
 |---|---|
-| 0001 | 組織。利用者。membership。session。授業。監査 |
-| 0002 | 認証security。lock。CSRF。rate limit補助 |
-| 0003 | 匿名参加者。コメント |
-| 0004 | 精密制約。保持期限。index |
-| 0005 | コメント本文guard |
-| 0006 | 手動moderation |
-| 0007 | Realtime sequence。ticket |
-| 0008 | メール登録。確認。reset |
-| 0009 | 招待。メール変更。quota |
-| 0010 | AI job。結果。翻訳。利用量 |
-| 0011 | 辞書filter |
-| 0012 | 多言語と設定簡略化 |
-| 0013 | 日英pack。翻訳前後検閲 |
-| 0014 | pack拡充と更新保護 |
-| 0015 | PDF page分析。理解度。snapshot |
-| 0016 | Stage 8証拠整合trigger |
+| `DB` | legacy互換投影 |
+| `DB_V2` | application source of truth |
 
-既存migrationは編集しない。
-新しい変更は`0017_...sql`から開始する。
+## migration順序
 
-## 3. table群
+`migrations-v2/0001_initial_schema.sql`から`0017_final_integrity_hardening.sql`までを連番で適用します。適用済みmigrationは編集しません。
 
-### 組織と認証
+| migration | 主題 |
+|---|---|
+| 0001 | core schema |
+| 0002 | auth security |
+| 0003 | comments |
+| 0004 | precision auth hardening |
+| 0005 | comment guards |
+| 0006 | manual moderation |
+| 0007 | realtime |
+| 0008 | email auth |
+| 0009 | account lifecycle |
+| 0010 | AI moderation and translation |
+| 0011 | dictionary filter |
+| 0012 | multilingual usability |
+| 0013 | bilingual translation safety |
+| 0014 | filter pack expansion |
+| 0015 | PDF page analytics |
+| 0016 | Stage 8 precision hardening |
+| 0017 | final integrity hardening |
 
-- `organizations`
-- `users`
-- `organization_members`
-- `auth_sessions`
-- `auth_session_csrf_tokens`
-- `password_reset_tokens`
-- `audit_logs`
-- `organization_quotas`
-- `organization_origins`
-### メールとaccount lifecycle
+## 0017
 
-- `pending_registrations`
-- `organization_invitations`
-- `email_change_requests`
-- `email_delivery_attempts`
-- `email_enrollment_requests`
-- `organization_email_events`
-- `auth_public_counters`
-### 授業とコメント
+`0017`は既存dataを先に検査します。次のいずれかがあればmigrationを中止します。
 
-- `live_sessions`
-- `participants`
-- `comments`
-- `comment_events`
-- `session_moderation_settings`
-- `comment_moderation_actions`
-### Realtime
+- 20種類の組織・context不整合
+- organizationごとのactive filter termが2000件超
 
-- `realtime_session_state`
-- `realtime_events`
-- `realtime_connection_tickets`
-### AIと翻訳
+移行後は42本の永続triggerを作成します。insertとupdateの両方を対象にします。
 
-- `organization_ai_settings`
-- `session_ai_settings`
-- `ai_jobs`
-- `ai_results`
-- `ai_usage_events`
-- `translations`
-### 辞書filter
+主な境界は次です。
 
-- `content_filter_terms`
-- `organization_content_filter_policies`
-- `session_content_filter_settings`
-- `comment_filter_matches`
-- `content_filter_pack_installs`
-### PDF分析
+- audit actorとorganization
+- moderation actorとorganization
+- filter creator。updater。installerとorganization
+- AI settings updaterとorganization
+- PDF creatorとorganization
+- invitation acceptorとorganization membership
+- Realtime ticketのuser。auth session。organization
+- Realtime eventとsource comment session
+- filter evidenceとterm organization
+- AI result。translation。usageとjob context
+- active filter term上限
 
-- `pdf_documents`
-- `session_pdf_bindings`
-- `pdf_pages`
-- `session_pdf_state`
-- `pdf_page_events`
-- `comment_page_links`
-- `understanding_signals`
-- `analytics_snapshots`
-
-## 4. IDと時刻
-
-- IDはprefix付きrandom IDを使う。
-- 時刻はUTC ISO 8601 textで保存する。
-- booleanは0または1で保存する。
-- organizationを持つtableはorganization IDを複合外部キーへ含める。
-
-## 5. token保存
-
-raw tokenを保存しない。
-SHA-256 hashだけを保存する。
-対象はauth session。CSRF。password reset。registration。invitation。email change。Realtime ticket。participant tokenである。
-
-## 6. 証拠不変性
-
-Stage 8の次の情報は作成後に変更しない。
-
-- PDF identity
-- PDF binding identity
-- page identity
-- page event
-- comment page link
-- analytics snapshot
-
-understanding signalは同一participant。同一binding。同一pageの再回答だけを許可する。
-
-## 7. retention
-
-- コメントは授業設定または環境設定の保持期間を使う。
-- 理解度。page event。analytics snapshotは180日である。
-- cleanup cronが遅れてもquery時点で期限切れを除外する。
-- 一回のcleanup件数には上限を設ける。
-
-## 8. migration手順
-
-Local:
+## deploy前remote preflight
 
 ```bash
-npx wrangler d1 migrations apply DB_V2 --local --persist-to .stage08-final-d1
-npx wrangler d1 migrations apply DB_V2 --local --persist-to .stage08-final-d1
+npm run verify:stage82-preflight
 ```
 
-二回目は`No migrations to apply`でなければならない。
+0件以外を無断で修正しません。review済みdata repair手順を作成します。修正後にpreflightを再実行します。
 
-Remote:
+## migration
 
 ```bash
+npx wrangler d1 time-travel info class_comment_db_v2
 npx wrangler d1 migrations apply class_comment_db_v2 --remote
 node scripts/verify-remote-d1.mjs
 ```
 
-Cloudflareは未適用migrationだけを適用する。
-適用後にbackupが取得される。
+Remote検査は`0017`。42本のStage 8.2 trigger。foreign key。quick check。active Ownerを確認します。
 
-## 9. Remote検証
+## rollback
 
-- `d1_migrations`に0016まで記録
-- 必須tableが存在
-- moderation。Realtime。quota。Stage 8 triggerが存在
-- `PRAGMA foreign_key_check`が0件
-- `PRAGMA quick_check`が`ok`
-- active Ownerが一人以上
-- verified emailがないOwnerがいる場合は`EMAIL_AUTH_REQUIRED=0`を維持
+通常rollbackはWorker versionを戻します。migration fileとtableを削除しません。D1 Time Travel restoreはdataを書き戻す破壊的操作です。明示承認と影響確認がある場合だけ実行します。

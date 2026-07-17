@@ -11,7 +11,6 @@ import { normalizeUnderstandingInput } from "../pdf-analysis/validation.js";
 const EXISTING_TABLE_CACHE = new WeakMap();
 export async function handlePublicV2Api(request, env) {
   if (!env?.DB_V2) throw new AuthError(500, "DB_V2_NOT_CONFIGURED");
-  if (!env?.COMMENT_ROOM) throw new AuthError(500, "COMMENT_ROOM_NOT_CONFIGURED");
 
   const url = new URL(request.url);
   const parts = url.pathname.split("/").filter(Boolean);
@@ -40,6 +39,7 @@ export async function handlePublicV2Api(request, env) {
   }
 
   if (request.method === "POST" && parts[4] === "messages" && parts.length === 5) {
+    if (!env?.COMMENT_ROOM) throw new AuthError(500, "COMMENT_ROOM_NOT_CONFIGURED");
     await enforcePublicCommentEdgeLimit(request, env, publicCode);
     const input = await readJsonObject(request, { maxBytes: 4096 });
     assertOnlyFields(input, ["nickname", "message", "idempotencyKey", "clientId"]);

@@ -60,32 +60,36 @@ export async function processAiJob(env, jobId, options = {}) {
   const now = options.now ?? Date.now();
   const job = await claimAiJob(env.DB_V2, jobId, now);
   if (!job) return { retry: false, ignored: true };
+  if (Date.parse(job.retained_until || "") <= Number(now)) {
+    await skipAiJob(env.DB_V2, job, "COMMENT_EXPIRED", now);
+    return { retry: false, skipped: "COMMENT_EXPIRED" };
+  }
 
   if (!job.organization_ai_enabled || job.organization_status !== "active") {
-    await skipAiJob(env.DB_V2, job.id, "AI_DISABLED", now);
+    await skipAiJob(env.DB_V2, job, "AI_DISABLED", now);
     return { retry: false, skipped: "AI_DISABLED" };
   }
   if (job.moderation_state === "deleted") {
-    await skipAiJob(env.DB_V2, job.id, "COMMENT_DELETED", now);
+    await skipAiJob(env.DB_V2, job, "COMMENT_DELETED", now);
     return { retry: false, skipped: "COMMENT_DELETED" };
   }
   const unsupportedAiReview = Boolean(job.session_filter_enabled)
     && Boolean(job.unsupported_language)
     && job.unsupported_language_mode === "ai_review";
   if (job.job_type === "moderation" && !job.session_moderation_enabled && !unsupportedAiReview) {
-    await skipAiJob(env.DB_V2, job.id, "AI_DISABLED", now);
+    await skipAiJob(env.DB_V2, job, "AI_DISABLED", now);
     return { retry: false, skipped: "AI_DISABLED" };
   }
   if (job.job_type === "translation" && !job.session_translation_enabled) {
-    await skipAiJob(env.DB_V2, job.id, "AI_DISABLED", now);
+    await skipAiJob(env.DB_V2, job, "AI_DISABLED", now);
     return { retry: false, skipped: "AI_DISABLED" };
   }
   if (job.job_type === "translation" && job.moderation_state !== "visible") {
-    await skipAiJob(env.DB_V2, job.id, "COMMENT_NOT_VISIBLE", now);
+    await skipAiJob(env.DB_V2, job, "COMMENT_NOT_VISIBLE", now);
     return { retry: false, skipped: "COMMENT_NOT_VISIBLE" };
   }
   if (job.job_type === "translation" && job.target_language !== job.session_target_language) {
-    await skipAiJob(env.DB_V2, job.id, "AI_SETTING_CHANGED", now);
+    await skipAiJob(env.DB_V2, job, "AI_SETTING_CHANGED", now);
     return { retry: false, skipped: "AI_SETTING_CHANGED" };
   }
 
@@ -95,7 +99,7 @@ export async function processAiJob(env, jobId, options = {}) {
       await completePrivacyGuardModeration(env.DB_V2, { job, promptInjection: privacy.promptInjection, now });
       return { retry: false, completed: true, source: "local_privacy_guard" };
     }
-    await skipAiJob(env.DB_V2, job.id, "PII_DETECTED", now);
+    await skipAiJob(env.DB_V2, job, "PII_DETECTED", now);
     return { retry: false, skipped: "PII_DETECTED" };
   }
 
@@ -153,8 +157,11 @@ export async function processAiJob(env, jobId, options = {}) {
     await dispatchTranslationRealtime(env, job.live_session_id, event);
     return { retry: false, completed: true, sequence: event?.sequence || null };
   } catch (error) {
+    if (error instanceof AuthError && error.code === "AI_JOB_STATE_CONFLICT") {
+      return { retry: false, ignored: true, conflict: true };
+    }
     if (error instanceof AuthError && error.code === "AI_DAILY_LIMIT_REACHED") {
-      await skipAiJob(env.DB_V2, job.id, "AI_DAILY_LIMIT_REACHED", now);
+      await skipAiJob(env.DB_V2, job, "AI_DAILY_LIMIT_REACHED", now);
       return { retry: false, skipped: "AI_DAILY_LIMIT_REACHED" };
     }
     const code = String(error?.aiCode || error?.code || "AI_PROVIDER_FAILED").slice(0, 80);

@@ -35,7 +35,8 @@ for (const [prefix, label] of [
   ["0013_bilingual_filter_translation_safety", "Stage 7.7 migration 0013_bilingual_filter_translation_safety"],
   ["0014_filter_pack_expansion", "Stage 7.8 migration 0014_filter_pack_expansion"],
   ["0015_pdf_page_analytics", "Stage 8 migration 0015_pdf_page_analytics"],
-  ["0016_stage08_precision_hardening", "Stage 8.1 migration 0016_stage08_precision_hardening"]
+  ["0016_stage08_precision_hardening", "Stage 8.1 migration 0016_stage08_precision_hardening"],
+  ["0017_final_integrity_hardening", "Stage 8.2 migration 0017_final_integrity_hardening"]
 ]) {
   const rows = query(`SELECT name FROM d1_migrations WHERE name LIKE '${prefix}%' LIMIT 1;`);
   assert(rows.length === 1, `DB_V2 ${label} is not recorded.`);
@@ -78,6 +79,53 @@ const stage8TriggerNames = [
 const stage8Triggers = query(`SELECT name FROM sqlite_schema WHERE type='trigger' AND name IN (${stage8TriggerNames.map((name) => `'${name}'`).join(",")}) ORDER BY name;`);
 assert(stage8Triggers.length === stage8TriggerNames.length, "DB_V2 Stage 8 precision triggers are incomplete.");
 
+const stage82TriggerNames = [
+  "trg_audit_logs_actor_org_insert",
+  "trg_audit_logs_actor_org_update",
+  "trg_comment_events_actor_org_insert",
+  "trg_comment_events_actor_org_update",
+  "trg_comment_moderation_actions_actor_org_insert",
+  "trg_comment_moderation_actions_actor_org_update",
+  "trg_session_moderation_settings_updater_org_insert",
+  "trg_session_moderation_settings_updater_org_update",
+  "trg_content_filter_terms_creator_org_insert",
+  "trg_content_filter_terms_creator_org_update",
+  "trg_organization_content_filter_policies_updater_org_insert",
+  "trg_organization_content_filter_policies_updater_org_update",
+  "trg_session_content_filter_settings_updater_org_insert",
+  "trg_session_content_filter_settings_updater_org_update",
+  "trg_content_filter_pack_installs_installer_org_insert",
+  "trg_content_filter_pack_installs_installer_org_update",
+  "trg_organization_ai_settings_updater_org_insert",
+  "trg_organization_ai_settings_updater_org_update",
+  "trg_session_ai_settings_updater_org_insert",
+  "trg_session_ai_settings_updater_org_update",
+  "trg_organization_origins_creator_org_insert",
+  "trg_organization_origins_creator_org_update",
+  "trg_pdf_documents_creator_org_insert",
+  "trg_pdf_documents_creator_org_update",
+  "trg_organization_invitations_accepted_user_org_insert",
+  "trg_organization_invitations_accepted_user_org_update",
+  "trg_realtime_connection_tickets_user_org_insert",
+  "trg_realtime_connection_tickets_user_org_update",
+  "trg_realtime_connection_tickets_auth_context_insert",
+  "trg_realtime_connection_tickets_auth_context_update",
+  "trg_realtime_events_source_comment_insert",
+  "trg_realtime_events_source_comment_update",
+  "trg_comment_filter_matches_term_org_insert",
+  "trg_comment_filter_matches_term_org_update",
+  "trg_ai_results_job_context_insert",
+  "trg_ai_results_job_context_update",
+  "trg_translations_job_context_insert",
+  "trg_translations_job_context_update",
+  "trg_ai_usage_events_job_context_insert",
+  "trg_ai_usage_events_job_context_update",
+  "trg_content_filter_terms_limit_insert",
+  "trg_content_filter_terms_limit_update",
+];
+const stage82Triggers = query(`SELECT name FROM sqlite_schema WHERE type='trigger' AND name IN (${stage82TriggerNames.map((name) => `'${name}'`).join(",")}) ORDER BY name;`);
+assert(stage82Triggers.length === stage82TriggerNames.length, `DB_V2 Stage 8.2 integrity triggers are incomplete (${stage82Triggers.length}/${stage82TriggerNames.length}).`);
+
 const foreignKeys = query("PRAGMA foreign_key_check;");
 assert(foreignKeys.length === 0, `DB_V2 foreign_key_check returned ${foreignKeys.length} row(s).`);
 
@@ -106,7 +154,7 @@ if (unverifiedOwnerCount > 0) {
   console.warn(`[WARN] ${unverifiedOwnerCount} active Owner account(s) do not have a verified email. Keep EMAIL_AUTH_REQUIRED=0 until npm run verify:email-auth-ready succeeds.`);
 }
 
-console.log(`remote DB_V2 health verified; ${requiredTables.length} required tables, migrations through Stage 8.1, moderation/realtime/quota/Stage8 precision triggers, active Owners: ${ownerCount}, unverified Owners: ${unverifiedOwnerCount}`);
+console.log(`remote DB_V2 health verified; ${requiredTables.length} required tables, migrations through Stage 8.2, moderation/realtime/quota/Stage8 precision and Stage8.2 integrity triggers (${stage82TriggerNames.length}), active Owners: ${ownerCount}, unverified Owners: ${unverifiedOwnerCount}`);
 
 function query(sql) {
   const result = spawnSync(npxCommand(), [

@@ -75,6 +75,7 @@ export async function updateSessionAiSettings(db, input) {
 }
 
 export async function createAiJobsForComment(db, input) {
+  const nowIso = new Date(input.now ?? Date.now()).toISOString();
   const context = await db.prepare(
     `SELECT c.id, c.organization_id, c.live_session_id, c.message, c.moderation_state,
             COALESCE(c.filter_ai_required, 0) AS filter_ai_required,
@@ -93,8 +94,10 @@ export async function createAiJobsForComment(db, input) {
        ON s.organization_id = c.organization_id AND s.live_session_id = c.live_session_id
      LEFT JOIN session_content_filter_settings f
        ON f.organization_id = c.organization_id AND f.live_session_id = c.live_session_id
-     WHERE c.id = ?1 AND c.organization_id = ?2 AND c.live_session_id = ?3 LIMIT 1`
-  ).bind(input.commentId, input.organizationId, input.liveSessionId).first();
+     WHERE c.id = ?1 AND c.organization_id = ?2 AND c.live_session_id = ?3
+       AND c.moderation_state <> 'deleted' AND c.retained_until > ?4
+     LIMIT 1`
+  ).bind(input.commentId, input.organizationId, input.liveSessionId, nowIso).first();
   if (!context || !context.organization_enabled) return [];
   if (!context.detected_language || context.detected_language === "und") {
     const detected = detectCommentLanguage(context.message);
@@ -102,10 +105,9 @@ export async function createAiJobsForComment(db, input) {
     context.unsupported_language = detected.supported ? 0 : 1;
     await db.prepare(
       `UPDATE comments SET detected_language = ?1, language_confidence_milli = ?2, unsupported_language = ?3
-       WHERE id = ?4 AND detected_language = 'und'`
-    ).bind(context.detected_language, detected.confidenceMilli, context.unsupported_language, context.id).run();
+       WHERE id = ?4 AND detected_language = 'und' AND retained_until > ?5`
+    ).bind(context.detected_language, detected.confidenceMilli, context.unsupported_language, context.id, nowIso).run();
   }
-  const nowIso = new Date(input.now ?? Date.now()).toISOString();
   const statements = [];
   const unsupportedAiReview = Boolean(context.filter_enabled)
     && Boolean(context.unsupported_language)
@@ -148,9 +150,9 @@ export async function backfillAiJobsForSession(db, input) {
   const result = await db.prepare(
     `SELECT id FROM comments
      WHERE organization_id = ?1 AND live_session_id = ?2
-       AND moderation_state <> 'deleted'
-     ORDER BY created_at DESC, id DESC LIMIT ?3`
-  ).bind(input.organizationId, input.liveSessionId, input.limit || 100).all();
+       AND moderation_state <> 'deleted' AND retained_until > ?3
+     ORDER BY created_at DESC, id DESC LIMIT ?4`
+  ).bind(input.organizationId, input.liveSessionId, new Date(input.now ?? Date.now()).toISOString(), input.limit || 100).all();
   const jobs = [];
   for (const row of rowsOf(result).reverse()) {
     jobs.push(...await createAiJobsForComment(db, {
@@ -170,18 +172,27 @@ export async function claimAiJob(db, jobId, now = Date.now()) {
      SET status = 'processing', attempt_count = attempt_count + 1,
          claimed_at = ?1, finished_at = NULL, last_error_code = NULL, updated_at = ?1
      WHERE id = ?2 AND status IN ('queued', 'retry')
-       AND run_after <= ?1 AND attempt_count < ?3`
+       AND run_after <= ?1 AND attempt_count < ?3
+       AND EXISTS (
+         SELECT 1 FROM comments c
+         WHERE c.id = ai_jobs.comment_id
+           AND c.organization_id = ai_jobs.organization_id
+           AND c.live_session_id = ai_jobs.live_session_id
+           AND c.moderation_state <> 'deleted'
+           AND c.retained_until > ?1
+       )`
   ).bind(nowIso, jobId, MAX_ATTEMPTS).run();
   if (changesOf(result) !== 1) return null;
-  return loadAiJobContext(db, jobId);
+  return loadAiJobContext(db, jobId, now);
 }
 
-export async function loadAiJobContext(db, jobId) {
+export async function loadAiJobContext(db, jobId, now = Date.now()) {
+  const nowIso = new Date(now).toISOString();
   return db.prepare(
     `SELECT j.id, j.organization_id, j.live_session_id, j.comment_id,
             j.job_type, j.target_language, j.status, j.attempt_count,
             j.run_after, j.claimed_at, j.created_at, j.updated_at,
-            c.message, c.nickname, c.moderation_state, c.updated_at AS comment_updated_at,
+            c.message, c.nickname, c.moderation_state, c.retained_until, c.updated_at AS comment_updated_at,
             c.filter_action, c.filter_ai_required,
             COALESCE(c.detected_language, 'und') AS detected_language,
             COALESCE(c.unsupported_language, 0) AS unsupported_language,
@@ -212,8 +223,8 @@ export async function loadAiJobContext(db, jobId) {
        ON sas.organization_id = j.organization_id AND sas.live_session_id = j.live_session_id
      LEFT JOIN session_content_filter_settings scfs
        ON scfs.organization_id = j.organization_id AND scfs.live_session_id = j.live_session_id
-     WHERE j.id = ?1 LIMIT 1`
-  ).bind(jobId).first();
+     WHERE j.id = ?1 AND c.retained_until > ?2 AND c.moderation_state <> 'deleted' LIMIT 1`
+  ).bind(jobId, nowIso).first();
 }
 
 export async function reserveAiUsage(db, job, now = Date.now(), model = "") {
@@ -254,7 +265,18 @@ export async function completeModerationJob(db, input) {
          id, job_id, organization_id, live_session_id, comment_id,
          recommendation, confidence_milli, categories_json, source,
          provider, model, prompt_version, created_at
-       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+       )
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13
+       FROM ai_jobs j
+       WHERE j.id = ?2 AND j.organization_id = ?3 AND j.live_session_id = ?4 AND j.comment_id = ?5
+         AND j.job_type = 'moderation' AND j.status = 'processing'
+         AND j.claimed_at = ?14 AND j.attempt_count = ?15
+         AND EXISTS (
+           SELECT 1 FROM comments c
+           WHERE c.id = j.comment_id AND c.organization_id = j.organization_id
+             AND c.live_session_id = j.live_session_id AND c.retained_until > ?13
+             AND c.moderation_state <> 'deleted'
+         )
        ON CONFLICT(job_id) DO UPDATE SET
          recommendation = excluded.recommendation,
          confidence_milli = excluded.confidence_milli,
@@ -268,9 +290,10 @@ export async function completeModerationJob(db, input) {
       input.resultId || makeId("air"), input.job.id, input.job.organization_id,
       input.job.live_session_id, input.job.comment_id, input.recommendation,
       input.confidenceMilli, JSON.stringify(input.categories), input.source,
-      input.provider, input.model, input.promptVersion, nowIso
+      input.provider, input.model, input.promptVersion, nowIso,
+      input.job.claimed_at, Number(input.job.attempt_count)
     ),
-    finishJobStatement(db, input.job.id, "succeeded", null, nowIso)
+    finishJobStatement(db, input.job, "succeeded", null, nowIso, { requireRetainedComment: true })
   ];
   if (input.usageEventId) statements.push(usageOutputStatement(db, input.usageEventId, input.outputCharacters || 0, nowIso));
   let results;
@@ -279,7 +302,9 @@ export async function completeModerationJob(db, input) {
   } catch (error) {
     throw aiPersistenceError(error);
   }
-  if (changesOf(results?.[1]) !== 1) throw new AuthError(409, "AI_JOB_STATE_CONFLICT");
+  if (changesOf(results?.[0]) !== 1 || changesOf(results?.[1]) !== 1) {
+    throw new AuthError(409, "AI_JOB_STATE_CONFLICT");
+  }
 }
 
 export async function completeTranslationJob(db, input) {
@@ -297,7 +322,18 @@ export async function completeTranslationJob(db, input) {
          id, job_id, organization_id, live_session_id, comment_id,
          target_language, translated_text, provider, model, prompt_version, created_at,
          source_language, display_text, filter_action, filter_matches_json, filter_version
-       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+       )
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16
+       FROM ai_jobs j
+       WHERE j.id = ?2 AND j.organization_id = ?3 AND j.live_session_id = ?4 AND j.comment_id = ?5
+         AND j.job_type = 'translation' AND j.target_language = ?6 AND j.status = 'processing'
+         AND j.claimed_at = ?17 AND j.attempt_count = ?18
+         AND EXISTS (
+           SELECT 1 FROM comments c
+           WHERE c.id = j.comment_id AND c.organization_id = j.organization_id
+             AND c.live_session_id = j.live_session_id AND c.retained_until > ?11
+             AND c.moderation_state = 'visible'
+         )
        ON CONFLICT(comment_id, target_language) DO UPDATE SET
          job_id = excluded.job_id,
          translated_text = excluded.translated_text,
@@ -315,15 +351,18 @@ export async function completeTranslationJob(db, input) {
       input.job.live_session_id, input.job.comment_id, input.job.target_language,
       input.translatedText, input.provider, input.model, input.promptVersion, nowIso,
       input.job.detected_language || "und", displayText, filter.action || "allow",
-      JSON.stringify(filter.matches || []), Number(filter.version || 0)
+      JSON.stringify(filter.matches || []), Number(filter.version || 0),
+      input.job.claimed_at, Number(input.job.attempt_count)
     ),
-    finishJobStatement(db, input.job.id, "succeeded", null, nowIso)
+    finishJobStatement(db, input.job, "succeeded", null, nowIso, { requireRetainedComment: true })
   ];
   if (input.usageEventId) statements.push(usageOutputStatement(db, input.usageEventId, input.outputCharacters || 0, nowIso));
   if (!displayText) {
     let results;
     try { results = await db.batch(statements); } catch (error) { throw aiPersistenceError(error); }
-    if (changesOf(results?.[1]) !== 1) throw new AuthError(409, "AI_JOB_STATE_CONFLICT");
+    if (changesOf(results?.[0]) !== 1 || changesOf(results?.[1]) !== 1) {
+      throw new AuthError(409, "AI_JOB_STATE_CONFLICT");
+    }
     return null;
   }
   const realtime = realtimeEventStatements(db, {
@@ -338,6 +377,12 @@ export async function completeTranslationJob(db, input) {
       translation: displayText,
       label: "AI翻訳"
     },
+    requiredAiJob: {
+      id: input.job.id,
+      claimedAt: input.job.claimed_at,
+      attemptCount: Number(input.job.attempt_count),
+      finishedAt: nowIso
+    },
     now
   });
   const realtimeOffset = statements.length;
@@ -348,11 +393,13 @@ export async function completeTranslationJob(db, input) {
   } catch (error) {
     throw aiPersistenceError(error);
   }
-  if (changesOf(results?.[1]) !== 1) throw new AuthError(409, "AI_JOB_STATE_CONFLICT");
+  if (changesOf(results?.[0]) !== 1 || changesOf(results?.[1]) !== 1) {
+    throw new AuthError(409, "AI_JOB_STATE_CONFLICT");
+  }
   if (changesOf(results?.[realtimeOffset + 1]) !== 1 || changesOf(results?.[realtimeOffset + 2]) !== 1) {
     throw new AuthError(500, "REALTIME_EVENT_WRITE_INCONSISTENT");
   }
-  return getRealtimeEventById(db, realtime.eventId);
+  return getRealtimeEventById(db, realtime.eventId, now);
 }
 
 export async function completePrivacyGuardModeration(db, input) {
@@ -370,13 +417,15 @@ export async function completePrivacyGuardModeration(db, input) {
   });
 }
 
-export async function skipAiJob(db, jobId, code, now = Date.now()) {
+export async function skipAiJob(db, job, code, now = Date.now()) {
   const nowIso = new Date(now).toISOString();
-  await db.prepare(
+  const result = await db.prepare(
     `UPDATE ai_jobs
      SET status = 'skipped', finished_at = ?1, last_error_code = ?2, updated_at = ?1
-     WHERE id = ?3 AND status = 'processing'`
-  ).bind(nowIso, code, jobId).run();
+     WHERE id = ?3 AND status = 'processing'
+       AND claimed_at = ?4 AND attempt_count = ?5`
+  ).bind(nowIso, code, job.id, job.claimed_at, Number(job.attempt_count)).run();
+  if (changesOf(result) !== 1) throw new AuthError(409, "AI_JOB_STATE_CONFLICT");
 }
 
 export async function failOrRetryAiJob(db, job, code, retryable, now = Date.now()) {
@@ -387,13 +436,19 @@ export async function failOrRetryAiJob(db, job, code, retryable, now = Date.now(
     ? new Date(nowMs).toISOString()
     : new Date(nowMs + retryDelayMs(job.attempt_count)).toISOString();
   const finishedAt = finalFailure ? new Date(nowMs).toISOString() : null;
-  await db.prepare(
+  const result = await db.prepare(
     `UPDATE ai_jobs
      SET status = ?1, run_after = ?2, finished_at = ?3,
+         claimed_at = CASE WHEN ?1 = 'retry' THEN NULL ELSE claimed_at END,
          last_error_code = ?4, updated_at = ?5
-     WHERE id = ?6 AND status = 'processing'`
-  ).bind(nextStatus, runAfter, finishedAt, code, new Date(nowMs).toISOString(), job.id).run();
-  return { retry: !finalFailure, delaySeconds: Math.ceil((Date.parse(runAfter) - nowMs) / 1000) };
+     WHERE id = ?6 AND status = 'processing'
+       AND claimed_at = ?7 AND attempt_count = ?8`
+  ).bind(
+    nextStatus, runAfter, finishedAt, code, new Date(nowMs).toISOString(),
+    job.id, job.claimed_at, Number(job.attempt_count)
+  ).run();
+  if (changesOf(result) !== 1) throw new AuthError(409, "AI_JOB_STATE_CONFLICT");
+  return { retry: !finalFailure, delaySeconds: Math.max(0, Math.ceil((Date.parse(runAfter) - nowMs) / 1000)) };
 }
 
 export async function retryAiJobsForComment(db, input) {
@@ -422,12 +477,31 @@ export async function listDueAiJobs(db, input = {}) {
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
   const limit = Math.max(1, Math.min(200, Number(input.limit) || 100));
   const staleIso = new Date(Date.parse(nowIso) - STALE_PROCESSING_MS).toISOString();
-  await db.prepare(
-    `UPDATE ai_jobs
-     SET status = 'retry', run_after = ?1, claimed_at = NULL,
-         last_error_code = 'AI_STALE_PROCESSING', updated_at = ?1
-     WHERE status = 'processing' AND claimed_at <= ?2 AND attempt_count < ?3`
-  ).bind(nowIso, staleIso, MAX_ATTEMPTS).run();
+  await db.batch([
+    db.prepare(
+      `UPDATE ai_jobs
+       SET status = 'skipped', finished_at = ?1, last_error_code = 'COMMENT_EXPIRED', updated_at = ?1
+       WHERE status IN ('queued', 'retry', 'processing')
+         AND EXISTS (
+           SELECT 1 FROM comments c
+           WHERE c.id = ai_jobs.comment_id AND c.organization_id = ai_jobs.organization_id
+             AND c.live_session_id = ai_jobs.live_session_id
+             AND (c.retained_until <= ?1 OR c.moderation_state = 'deleted')
+         )`
+    ).bind(nowIso),
+    db.prepare(
+      `UPDATE ai_jobs
+       SET status = 'failed', finished_at = ?1,
+           last_error_code = 'AI_STALE_MAX_ATTEMPTS', updated_at = ?1
+       WHERE status = 'processing' AND claimed_at <= ?2 AND attempt_count >= ?3`
+    ).bind(nowIso, staleIso, MAX_ATTEMPTS),
+    db.prepare(
+      `UPDATE ai_jobs
+       SET status = 'retry', run_after = ?1, claimed_at = NULL,
+           last_error_code = 'AI_STALE_PROCESSING', updated_at = ?1
+       WHERE status = 'processing' AND claimed_at <= ?2 AND attempt_count < ?3`
+    ).bind(nowIso, staleIso, MAX_ATTEMPTS)
+  ]);
   const result = await db.prepare(
     `SELECT id, job_type, target_language, status
      FROM ai_jobs
@@ -519,12 +593,22 @@ function aiJobInsertStatement(db, input) {
   );
 }
 
-function finishJobStatement(db, jobId, status, code, nowIso) {
+function finishJobStatement(db, job, status, code, nowIso, options = {}) {
   return db.prepare(
     `UPDATE ai_jobs
      SET status = ?1, finished_at = ?2, last_error_code = ?3, updated_at = ?2
-     WHERE id = ?4 AND status = 'processing'`
-  ).bind(status, nowIso, code, jobId);
+     WHERE id = ?4 AND status = 'processing'
+       AND claimed_at = ?5 AND attempt_count = ?6
+       AND (?7 = 0 OR EXISTS (
+         SELECT 1 FROM comments c
+         WHERE c.id = ai_jobs.comment_id AND c.organization_id = ai_jobs.organization_id
+           AND c.live_session_id = ai_jobs.live_session_id
+           AND c.retained_until > ?2 AND c.moderation_state <> 'deleted'
+       ))`
+  ).bind(
+    status, nowIso, code, job.id, job.claimed_at, Number(job.attempt_count),
+    options.requireRetainedComment ? 1 : 0
+  );
 }
 
 function usageOutputStatement(db, usageEventId, outputCharacters, nowIso) {

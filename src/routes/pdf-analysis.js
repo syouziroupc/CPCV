@@ -2,7 +2,6 @@ import { AuthError } from "../auth/errors.js";
 import { authJson } from "../auth/http.js";
 import { requireUnsafeRequestProtection } from "../auth/csrf.js";
 import { assertOnlyFields, readJsonObject } from "../auth/request.js";
-import { writeAudit } from "../auth/audit.js";
 import { BASE_SECURITY_HEADERS } from "../security-headers.js";
 import {
   bindPdfToSession,
@@ -11,6 +10,7 @@ import {
   getAnalyticsSnapshot,
   getSessionPdfState,
   listAnalyticsSnapshots,
+  rollbackAnalyticsSnapshot,
   updatePdfPageState
 } from "../pdf-analysis/repository.js";
 import {
@@ -37,22 +37,36 @@ export async function bindPrivatePdf(request, env, auth, session) {
     previousSnapshot = await createAnalyticsSnapshot(env.DB_V2, {
       organizationId: auth.organizationId,
       liveSessionId: session.id,
-      userId: auth.userId
+      userId: auth.userId,
+      audit: userAudit(auth, "analytics.snapshot_created")
     });
   }
-  const state = await bindPdfToSession(env.DB_V2, {
-    organizationId: auth.organizationId,
-    liveSessionId: session.id,
-    userId: auth.userId,
-    ...normalized
-  });
-  await safeAudit(env.DB_V2, auth, session.id, "pdf.bound", {
-    documentHashPrefix: state.documentSha256.slice(0, 12),
-    pageCount: state.pageCount,
-    fileSizeBytes: state.fileSizeBytes,
-    reused: Boolean(state.reused),
-    previousSnapshotId: previousSnapshot?.id || null
-  });
+  let state;
+  try {
+    state = await bindPdfToSession(env.DB_V2, {
+      organizationId: auth.organizationId,
+      liveSessionId: session.id,
+      userId: auth.userId,
+      ...normalized,
+      previousSnapshotId: previousSnapshot?.id || null,
+      audit: userAudit(auth, "pdf.bound")
+    });
+  } catch (error) {
+    if (previousSnapshot) {
+      try {
+        await rollbackAnalyticsSnapshot(env.DB_V2, {
+          organizationId: auth.organizationId,
+          liveSessionId: session.id,
+          snapshotId: previousSnapshot.id,
+          auditId: previousSnapshot.auditId
+        });
+      } catch (rollbackError) {
+        console.error("PDF bind snapshot rollback failed", String(rollbackError?.code || rollbackError?.name || "Error"));
+        throw new AuthError(500, "PDF_BIND_ROLLBACK_FAILED");
+      }
+    }
+    throw error;
+  }
   return authJson({
     ok: true,
     state,
@@ -105,12 +119,8 @@ export async function createPrivateAnalyticsSnapshot(request, env, auth, session
   const snapshot = await createAnalyticsSnapshot(env.DB_V2, {
     organizationId: auth.organizationId,
     liveSessionId: session.id,
-    userId: auth.userId
-  });
-  await safeAudit(env.DB_V2, auth, session.id, "analytics.snapshot_created", {
-    snapshotId: snapshot.id,
-    checksumSha256: snapshot.checksumSha256,
-    sourceCutoffAt: snapshot.sourceCutoffAt
+    userId: auth.userId,
+    audit: userAudit(auth, "analytics.snapshot_created")
   });
   return authJson({
     ok: true,
@@ -157,19 +167,12 @@ function requireActiveSession(session) {
   }
 }
 
-async function safeAudit(db, auth, sessionId, action, details) {
-  try {
-    await writeAudit(db, {
-      organizationId: auth.organizationId,
-      actorType: "user",
-      actorUserId: auth.userId,
-      actorRole: auth.role,
-      action,
-      targetType: "live_session",
-      targetId: sessionId,
-      details
-    });
-  } catch (error) {
-    console.error("Stage 8 audit write failed", String(error?.name || "Error"));
-  }
+function userAudit(auth, action) {
+  return {
+    organizationId: auth.organizationId,
+    actorType: "user",
+    actorUserId: auth.userId,
+    actorRole: auth.role,
+    action
+  };
 }

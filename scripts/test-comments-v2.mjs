@@ -62,7 +62,7 @@ async function testPublicPersistence(h) {
   const sessionBody = await response.json();
   const setCookie = response.headers.get("set-cookie") || "";
   check("public session GET succeeds", response.status === 200 && sessionBody.postingEnabled === true);
-  check("participant cookie is HttpOnly and session-scoped", /cpcv_p_[a-z0-9]+=/.test(setCookie) && /HttpOnly/i.test(setCookie) && setCookie.includes(`/api/public/sessions/${h.publicCode}`), setCookie);
+  check("participant cookie is HttpOnly and session-scoped", /cpcv_p_[a-z0-9]+=/.test(setCookie) && /HttpOnly/i.test(setCookie) && setCookie.includes("Path=/api/public/sessions/"), setCookie);
   check("GET does not create participant row", h.count("participants") === 0);
 
   const cookie = setCookie.split(";")[0];
@@ -154,9 +154,10 @@ async function testValidationAndPrivacy(h) {
 }
 
 async function testHistoryAndExport(h) {
-  await insertComment(h, "hist_key_00000001", "=SUM(1,1)", "@nickname", "2000-01-01T00:00:00.000Z");
-  h.exec("UPDATE participants SET next_post_at='2000-01-01T00:00:00.000Z'");
-  await insertComment(h, "hist_key_00000002", "normal", "student", "2000-01-01T00:00:10.000Z");
+  const historyBase = Date.now() - 20_000;
+  await insertComment(h, "hist_key_00000001", "=SUM(1,1)", "@nickname", new Date(historyBase).toISOString());
+  h.exec("UPDATE participants SET next_post_at=created_at");
+  await insertComment(h, "hist_key_00000002", "normal", "student", new Date(historyBase + 10_000).toISOString());
 
   let response = await h.api(`/api/private/sessions/${h.sessionId}/comments?limit=1`, { actor: "teacherA" });
   let body = await response.json();

@@ -1,3 +1,4 @@
+import { auditStatement } from "../auth/audit.js";
 import { AuthError } from "../auth/errors.js";
 import { makeId } from "../auth/request.js";
 import { detectCommentLanguage, isSupportedFilterLanguage } from "./language.js";
@@ -107,17 +108,31 @@ export async function listOrganizationFilter(db, organizationId) {
      FROM organization_content_filter_policies
      WHERE organization_id = ?1 ORDER BY category ASC`
   ).bind(organizationId).all()).map(policyResponse);
-  const terms = rowsOf(await db.prepare(
-    `SELECT id, term, normalized_term, compact_term, category, severity,
-            match_mode, fuzzy_enabled, language_code, boundary_mode, active,
-            source_pack, source_pack_version, source_pack_term_key,
-            created_by_user_id, created_at, updated_at
-     FROM content_filter_terms
-     WHERE organization_id = ?1 AND deleted_at IS NULL
-     ORDER BY category ASC, severity DESC, term ASC, id ASC LIMIT ${TERM_LIMIT + 1}`
-  ).bind(organizationId).all()).map(termResponse);
-  if (terms.length > TERM_LIMIT) throw new AuthError(409, "FILTER_TERM_LIMIT_REACHED");
-  return { policies, terms, termLimit: TERM_LIMIT, packs: await listFilterPacks(db, organizationId) };
+  const [termsResult, termCountValue] = await Promise.all([
+    db.prepare(
+      `SELECT id, term, normalized_term, compact_term, category, severity,
+              match_mode, fuzzy_enabled, language_code, boundary_mode, active,
+              source_pack, source_pack_version, source_pack_term_key,
+              created_by_user_id, created_at, updated_at
+       FROM content_filter_terms
+       WHERE organization_id = ?1 AND deleted_at IS NULL
+       ORDER BY category ASC, severity DESC, term ASC, id ASC LIMIT ${TERM_LIMIT}`
+    ).bind(organizationId).all(),
+    db.prepare(
+      `SELECT COUNT(*) AS count FROM content_filter_terms
+       WHERE organization_id = ?1 AND deleted_at IS NULL`
+    ).bind(organizationId).first("count")
+  ]);
+  const terms = rowsOf(termsResult).map(termResponse);
+  const termCount = Number(termCountValue || 0);
+  return {
+    policies,
+    terms,
+    termCount,
+    overLimit: termCount > TERM_LIMIT,
+    termLimit: TERM_LIMIT,
+    packs: await listFilterPacks(db, organizationId)
+  };
 }
 
 export async function listFilterPacks(db, organizationId) {
@@ -195,6 +210,7 @@ export async function installFilterPack(db, input) {
       input.actorUserId, nowIso, pack.id, pack.version, value.key
     ));
   }
+  const installIndex = statements.length;
   statements.push(db.prepare(
     `INSERT INTO content_filter_pack_installs (
        organization_id, pack_id, pack_version, installed_by_user_id,
@@ -205,7 +221,28 @@ export async function installFilterPack(db, input) {
        installed_by_user_id = excluded.installed_by_user_id,
        updated_at = excluded.updated_at`
   ).bind(input.organizationId, pack.id, pack.version, input.actorUserId, nowIso));
-  await db.batch(statements);
+  const auditIndex = appendAudit(statements, db, input.audit, {
+    organizationId: input.organizationId,
+    targetType: "content_filter_pack",
+    targetId: pack.id,
+    createdAt: nowIso,
+    details: { packId: pack.id, version: pack.version },
+    condition: {
+      sql: `EXISTS (
+        SELECT 1 FROM content_filter_pack_installs
+        WHERE organization_id = ?11 AND pack_id = ?12
+          AND pack_version = ?13 AND updated_at = ?14
+      )`,
+      bindings: [input.organizationId, pack.id, pack.version, nowIso]
+    }
+  });
+  try {
+    const results = await db.batch(statements);
+    if (changesOf(results?.[installIndex]) !== 1) throw new Error("FILTER_PACK_INSTALL_NOT_APPLIED");
+    assertAuditApplied(results, auditIndex);
+  } catch (error) {
+    throw mapFilterWriteError(error);
+  }
   return {
     pack: (await listFilterPacks(db, input.organizationId)).find((item) => item.id === pack.id),
     organizationFilter: await listOrganizationFilter(db, input.organizationId)
@@ -220,75 +257,141 @@ export async function createFilterTerm(db, input) {
   if (Number(count || 0) >= TERM_LIMIT) throw new AuthError(409, "FILTER_TERM_LIMIT_REACHED");
   const id = makeId("flt");
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
-  try {
-    await db.prepare(
-      `INSERT INTO content_filter_terms (
-         id, organization_id, term, normalized_term, compact_term, category,
-         severity, match_mode, fuzzy_enabled, language_code, boundary_mode, active, created_by_user_id,
-         created_at, updated_at, deleted_at, source_pack, source_pack_version, source_pack_term_key
-       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?13, ?13, NULL, NULL, NULL, NULL)`
-    ).bind(
-      id, input.organizationId, input.term, input.normalizedTerm, input.compactTerm,
-      input.category, input.severity, input.matchMode, input.fuzzyEnabled ? 1 : 0,
-      input.languageCode, input.boundaryMode, input.actorUserId, nowIso
-    ).run();
-  } catch (error) {
-    if (/UNIQUE constraint failed.*content_filter_terms/i.test(String(error?.message || error))) {
-      throw new AuthError(409, "FILTER_TERM_ALREADY_EXISTS");
+  const statements = [db.prepare(
+    `INSERT INTO content_filter_terms (
+       id, organization_id, term, normalized_term, compact_term, category,
+       severity, match_mode, fuzzy_enabled, language_code, boundary_mode, active, created_by_user_id,
+       created_at, updated_at, deleted_at, source_pack, source_pack_version, source_pack_term_key
+     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 1, ?12, ?13, ?13, NULL, NULL, NULL, NULL)`
+  ).bind(
+    id, input.organizationId, input.term, input.normalizedTerm, input.compactTerm,
+    input.category, input.severity, input.matchMode, input.fuzzyEnabled ? 1 : 0,
+    input.languageCode, input.boundaryMode, input.actorUserId, nowIso
+  )];
+  const auditIndex = appendAudit(statements, db, input.audit, {
+    organizationId: input.organizationId,
+    targetType: "content_filter_term",
+    targetId: id,
+    createdAt: nowIso,
+    details: { category: input.category, severity: input.severity, fuzzyEnabled: Boolean(input.fuzzyEnabled) },
+    condition: {
+      sql: `EXISTS (
+        SELECT 1 FROM content_filter_terms
+        WHERE id = ?11 AND organization_id = ?12 AND created_at = ?13 AND deleted_at IS NULL
+      )`,
+      bindings: [id, input.organizationId, nowIso]
     }
-    throw error;
+  });
+  try {
+    const results = await db.batch(statements);
+    if (changesOf(results?.[0]) !== 1) throw new Error("FILTER_TERM_CREATE_NOT_APPLIED");
+    assertAuditApplied(results, auditIndex);
+  } catch (error) {
+    throw mapFilterWriteError(error);
   }
   return getFilterTerm(db, input.organizationId, id);
 }
 
 export async function updateFilterTerm(db, input) {
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
+  const statements = [db.prepare(
+    `UPDATE content_filter_terms
+     SET term = ?1, normalized_term = ?2, compact_term = ?3, category = ?4,
+         severity = ?5, match_mode = ?6, fuzzy_enabled = ?7, language_code = ?8,
+         boundary_mode = ?9, active = ?10, updated_at = ?11,
+         source_pack = NULL, source_pack_version = NULL, source_pack_term_key = NULL
+     WHERE id = ?12 AND organization_id = ?13 AND deleted_at IS NULL`
+  ).bind(
+    input.term, input.normalizedTerm, input.compactTerm, input.category,
+    input.severity, input.matchMode, input.fuzzyEnabled ? 1 : 0, input.languageCode,
+    input.boundaryMode, input.active ? 1 : 0, nowIso, input.id, input.organizationId
+  )];
+  const auditIndex = appendAudit(statements, db, input.audit, {
+    organizationId: input.organizationId,
+    targetType: "content_filter_term",
+    targetId: input.id,
+    createdAt: nowIso,
+    details: {
+      category: input.category,
+      severity: input.severity,
+      fuzzyEnabled: Boolean(input.fuzzyEnabled),
+      active: Boolean(input.active)
+    },
+    condition: {
+      sql: `EXISTS (
+        SELECT 1 FROM content_filter_terms
+        WHERE id = ?11 AND organization_id = ?12 AND updated_at = ?13 AND deleted_at IS NULL
+      )`,
+      bindings: [input.id, input.organizationId, nowIso]
+    }
+  });
   try {
-    const result = await db.prepare(
-      `UPDATE content_filter_terms
-       SET term = ?1, normalized_term = ?2, compact_term = ?3, category = ?4,
-           severity = ?5, match_mode = ?6, fuzzy_enabled = ?7, language_code = ?8,
-           boundary_mode = ?9, active = ?10, updated_at = ?11,
-           source_pack = NULL, source_pack_version = NULL, source_pack_term_key = NULL
-       WHERE id = ?12 AND organization_id = ?13 AND deleted_at IS NULL`
-    ).bind(
-      input.term, input.normalizedTerm, input.compactTerm, input.category,
-      input.severity, input.matchMode, input.fuzzyEnabled ? 1 : 0, input.languageCode,
-      input.boundaryMode, input.active ? 1 : 0, nowIso, input.id, input.organizationId
-    ).run();
-    if (changesOf(result) !== 1) throw new AuthError(404, "FILTER_TERM_NOT_FOUND");
+    const results = await db.batch(statements);
+    if (changesOf(results?.[0]) !== 1) throw new AuthError(404, "FILTER_TERM_NOT_FOUND");
+    assertAuditApplied(results, auditIndex);
   } catch (error) {
     if (error instanceof AuthError) throw error;
-    if (/UNIQUE constraint failed.*content_filter_terms/i.test(String(error?.message || error))) {
-      throw new AuthError(409, "FILTER_TERM_ALREADY_EXISTS");
-    }
-    throw error;
+    throw mapFilterWriteError(error);
   }
   return getFilterTerm(db, input.organizationId, input.id);
 }
 
-export async function deleteFilterTerm(db, organizationId, id, now = Date.now()) {
+export async function deleteFilterTerm(db, organizationId, id, now = Date.now(), audit = null) {
   const nowIso = new Date(now).toISOString();
-  const result = await db.prepare(
+  const statements = [db.prepare(
     `UPDATE content_filter_terms SET active = 0, deleted_at = ?1, updated_at = ?1
      WHERE id = ?2 AND organization_id = ?3 AND deleted_at IS NULL`
-  ).bind(nowIso, id, organizationId).run();
-  if (changesOf(result) !== 1) throw new AuthError(404, "FILTER_TERM_NOT_FOUND");
+  ).bind(nowIso, id, organizationId)];
+  const auditIndex = appendAudit(statements, db, audit, {
+    organizationId,
+    targetType: "content_filter_term",
+    targetId: id,
+    createdAt: nowIso,
+    condition: {
+      sql: `EXISTS (
+        SELECT 1 FROM content_filter_terms
+        WHERE id = ?11 AND organization_id = ?12 AND deleted_at = ?13
+      )`,
+      bindings: [id, organizationId, nowIso]
+    }
+  });
+  const results = await db.batch(statements);
+  if (changesOf(results?.[0]) !== 1) throw new AuthError(404, "FILTER_TERM_NOT_FOUND");
+  assertAuditApplied(results, auditIndex);
 }
 
 export async function updateFilterPolicies(db, input) {
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
   const statements = input.policies.map((policy) => db.prepare(
-    `UPDATE organization_content_filter_policies
-     SET enabled = ?1, review_min_severity = ?2, mask_min_severity = ?3,
-         reject_min_severity = ?4, updated_by_user_id = ?5, updated_at = ?6
-     WHERE organization_id = ?7 AND category = ?8`
+    `INSERT INTO organization_content_filter_policies (
+       organization_id, category, enabled, review_min_severity, mask_min_severity,
+       reject_min_severity, updated_by_user_id, created_at, updated_at
+     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)
+     ON CONFLICT(organization_id, category) DO UPDATE SET
+       enabled = excluded.enabled,
+       review_min_severity = excluded.review_min_severity,
+       mask_min_severity = excluded.mask_min_severity,
+       reject_min_severity = excluded.reject_min_severity,
+       updated_by_user_id = excluded.updated_by_user_id,
+       updated_at = excluded.updated_at`
   ).bind(
-    policy.enabled ? 1 : 0, policy.reviewMinSeverity, policy.maskMinSeverity,
-    policy.rejectMinSeverity, input.actorUserId, nowIso,
-    input.organizationId, policy.category
+    input.organizationId, policy.category, policy.enabled ? 1 : 0,
+    policy.reviewMinSeverity, policy.maskMinSeverity, policy.rejectMinSeverity,
+    input.actorUserId, nowIso
   ));
-  await db.batch(statements);
+  const policyCount = statements.length;
+  const auditIndex = appendAudit(statements, db, input.audit, {
+    organizationId: input.organizationId,
+    targetType: "organization",
+    targetId: input.organizationId,
+    createdAt: nowIso,
+    details: { categories: input.policies.map((policy) => policy.category) }
+  });
+  const results = await db.batch(statements);
+  for (let index = 0; index < policyCount; index += 1) {
+    if (changesOf(results?.[index]) !== 1) throw new Error("FILTER_POLICY_UPDATE_NOT_APPLIED");
+  }
+  assertAuditApplied(results, auditIndex);
   return listOrganizationFilter(db, input.organizationId);
 }
 
@@ -307,7 +410,7 @@ export async function getSessionFilterSettings(db, organizationId, liveSessionId
 
 export async function updateSessionFilterSettings(db, input) {
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
-  const result = await db.prepare(
+  const statements = [db.prepare(
     `UPDATE session_content_filter_settings
      SET enabled = ?1, ai_routing_mode = ?2, mask_character = ?3,
          translation_filter_enabled = ?4, unsupported_language_mode = ?5,
@@ -317,8 +420,30 @@ export async function updateSessionFilterSettings(db, input) {
     input.enabled ? 1 : 0, input.aiRoutingMode, input.maskCharacter,
     input.translationFilterEnabled === false ? 0 : 1, input.unsupportedLanguageMode || "ai_review",
     input.actorUserId, nowIso, input.organizationId, input.liveSessionId
-  ).run();
-  if (changesOf(result) !== 1) throw new AuthError(404, "SESSION_NOT_FOUND");
+  )];
+  const auditIndex = appendAudit(statements, db, input.audit, {
+    organizationId: input.organizationId,
+    targetType: "live_session",
+    targetId: input.liveSessionId,
+    createdAt: nowIso,
+    details: {
+      enabled: Boolean(input.enabled),
+      aiRoutingMode: input.aiRoutingMode,
+      maskCharacter: input.maskCharacter,
+      translationFilterEnabled: input.translationFilterEnabled !== false,
+      unsupportedLanguageMode: input.unsupportedLanguageMode || "ai_review"
+    },
+    condition: {
+      sql: `EXISTS (
+        SELECT 1 FROM session_content_filter_settings
+        WHERE organization_id = ?11 AND live_session_id = ?12 AND updated_at = ?13
+      )`,
+      bindings: [input.organizationId, input.liveSessionId, nowIso]
+    }
+  });
+  const results = await db.batch(statements);
+  if (changesOf(results?.[0]) !== 1) throw new AuthError(404, "SESSION_NOT_FOUND");
+  assertAuditApplied(results, auditIndex);
   return getSessionFilterSettings(db, input.organizationId, input.liveSessionId);
 }
 
@@ -356,7 +481,7 @@ export async function listCommentFilterMatches(db, commentId) {
   }));
 }
 
-async function getFilterTerm(db, organizationId, id) {
+export async function getFilterTerm(db, organizationId, id) {
   const row = await db.prepare(
     `SELECT id, term, normalized_term, compact_term, category, severity,
             match_mode, fuzzy_enabled, language_code, boundary_mode, active,
@@ -367,6 +492,31 @@ async function getFilterTerm(db, organizationId, id) {
   ).bind(organizationId, id).first();
   if (!row) throw new AuthError(404, "FILTER_TERM_NOT_FOUND");
   return termResponse(row);
+}
+
+function appendAudit(statements, db, audit, overrides) {
+  if (!audit) return -1;
+  const entry = {
+    ...audit,
+    ...overrides,
+    details: overrides.details ?? audit.details ?? null,
+    condition: overrides.condition ?? audit.condition
+  };
+  statements.push(auditStatement(db, entry));
+  return statements.length - 1;
+}
+
+function assertAuditApplied(results, auditIndex) {
+  if (auditIndex < 0) return;
+  if (changesOf(results?.[auditIndex]) !== 1) throw new Error("AUDIT_WRITE_NOT_APPLIED");
+}
+
+function mapFilterWriteError(error) {
+  if (error instanceof AuthError) return error;
+  const message = String(error?.message || error);
+  if (/FILTER_TERM_LIMIT_REACHED/i.test(message)) return new AuthError(409, "FILTER_TERM_LIMIT_REACHED");
+  if (/UNIQUE constraint failed.*content_filter_terms/i.test(message)) return new AuthError(409, "FILTER_TERM_ALREADY_EXISTS");
+  return error;
 }
 
 function inferMatchedLanguage(matches, terms) {

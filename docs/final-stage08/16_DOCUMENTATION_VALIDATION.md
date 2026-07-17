@@ -1,28 +1,20 @@
-# Stage 8 final documentation validation
+# Documentation validation
 
-- required integrated documents: 17
-- missing: 0
-- empty or too small: 0
-- code changes: none
-- Cloudflare remote changes: none
-- source ZIP hash: 外側の`CPCV_STAGE08_FINAL_ARTIFACT_RECORD.txt`を正本とする
+```bash
+npm run verify:final-docs
+```
 
-## Package tests
+検査対象です。
 
-- handoff ZIP compression test: PASS
-- handoff SHA-256 manifest: PASS
-- documented source ZIP compression test: PASS
-- `npm ci`: PASS
-- `npm run check`: PASS
-- `npm run check:project`: PASS
-- `npm run check:pdf-links`: PASS
-- `npm run deploy:dry-run`: PASS
-- `npm audit --omit=dev`: 0 vulnerabilities
+- package version `0.8.2`
+- READMEとcurrent systemのversion
+- migration `0017`
+- Stage 8.2 trigger 42本
+- Codex final instructionの禁止事項
+- staging evidence gate
+- Time Travel bookmarkとpreflight
+- production後のRemote再検査
+- external pending values
+- historical deploy文書のdeprecated表示
 
-## Missing
-
-- none
-
-## Empty
-
-- none
+失敗した場合は文書を正本として渡しません。

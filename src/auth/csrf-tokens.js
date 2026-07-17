@@ -36,7 +36,7 @@ export async function issueSessionCsrfToken(db, sessionId, absoluteExpiresAt, no
        WHERE id IN (
          SELECT id FROM auth_session_csrf_tokens
          WHERE auth_session_id = ?1
-         ORDER BY created_at DESC, id DESC
+         ORDER BY created_at DESC, rowid DESC
          LIMIT -1 OFFSET ?2
        )`
     ).bind(sessionId, MAX_SECONDARY_TOKENS_PER_SESSION)

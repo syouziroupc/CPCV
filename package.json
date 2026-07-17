@@ -1,6 +1,6 @@
 {
   "name": "class-pdf-comment-viewer-v01",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -67,7 +67,10 @@
     "db:v2:test:stage08": "node --no-warnings scripts/test-pdf-analysis-v2.mjs",
     "check:stage08": "node scripts/verify-stage08-boundaries.mjs && node scripts/verify-precision-boundaries.mjs && node scripts/test-stage-compatibility.mjs && node scripts/test-deployment-verifiers.mjs && node scripts/test-stage08-all.mjs",
     "visual:stage08": "python scripts/render-stage08-visuals.py",
-    "test:owner-bootstrap": "node scripts/test-bootstrap-owner-v2.mjs"
+    "test:owner-bootstrap": "node scripts/test-bootstrap-owner-v2.mjs",
+    "test:final-hardening": "node --no-warnings scripts/test-final-hardening.mjs",
+    "verify:stage82-preflight": "node scripts/verify-stage82-preflight.mjs",
+    "verify:final-docs": "node scripts/verify-final-documentation.mjs"
   },
   "devDependencies": {
     "wrangler": "4.110.0",

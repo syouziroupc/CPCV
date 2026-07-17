@@ -210,9 +210,9 @@ async function testSafeSideStop(h) {
   });
   check("V2 end failure returns error", response.status === 500);
   const legacyEnded = h.legacyRow("SELECT status, posting_enabled, comments_visible FROM sessions WHERE id=?1", endCreated.sessionId);
-  check("end failure keeps legacy projection safely stopped", legacyEnded.status === "ended" && legacyEnded.posting_enabled === 0 && legacyEnded.comments_visible === 0);
+  check("end failure restores the legacy projection", legacyEnded.status === "active" && legacyEnded.posting_enabled === 1 && legacyEnded.comments_visible === 1);
   check("end failure does not falsely end DB_V2", h.v2Row("SELECT status FROM live_sessions WHERE id=?1", endCreated.sessionId).status === "active");
-  check("end failure records projection inconsistency", h.v2Row("SELECT action FROM audit_logs WHERE target_id=?1 AND action='session.projection_inconsistent'", endCreated.sessionId)?.action === "session.projection_inconsistent");
+  check("successful end compensation records no inconsistency", !h.v2Row("SELECT action FROM audit_logs WHERE target_id=?1 AND action='session.projection_inconsistent'", endCreated.sessionId));
 
   h.v2Exec("DROP TRIGGER fail_end_audit;");
   const deleteCreated = await createSession(h, "teacherA", "Delete safety class");
@@ -224,8 +224,8 @@ async function testSafeSideStop(h) {
   });
   check("V2 delete failure returns error", response.status === 500);
   const legacyDeleted = h.legacyRow("SELECT status, posting_enabled, comments_visible FROM sessions WHERE id=?1", deleteCreated.sessionId);
-  check("delete failure keeps legacy projection safely deleted", legacyDeleted.status === "deleted" && legacyDeleted.posting_enabled === 0 && legacyDeleted.comments_visible === 0);
-  check("delete failure records projection inconsistency", h.v2Row("SELECT action FROM audit_logs WHERE target_id=?1 AND action='session.projection_inconsistent'", deleteCreated.sessionId)?.action === "session.projection_inconsistent");
+  check("delete failure restores the legacy projection", legacyDeleted.status === "active" && legacyDeleted.posting_enabled === 1 && legacyDeleted.comments_visible === 1);
+  check("successful delete compensation records no inconsistency", !h.v2Row("SELECT action FROM audit_logs WHERE target_id=?1 AND action='session.projection_inconsistent'", deleteCreated.sessionId));
 }
 
 async function testCommentRoomAndWebSocket(h) {

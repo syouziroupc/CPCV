@@ -48,7 +48,7 @@ export async function issueConnectionTicket(db, input) {
 
 export async function consumeConnectionTicket(db, input) {
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
-  const result = await db.prepare(
+  const row = await db.prepare(
     `UPDATE realtime_connection_tickets
      SET consumed_at = ?1
      WHERE token_hash = ?2
@@ -77,15 +77,10 @@ export async function consumeConnectionTicket(db, input) {
          WHERE ls.id = realtime_connection_tickets.live_session_id
            AND ls.organization_id = realtime_connection_tickets.organization_id
            AND ls.status = 'active' AND ls.expires_at > ?1
-       )`
-  ).bind(nowIso, input.tokenHash, input.organizationId, input.liveSessionId, input.userId).run();
-  if (changesOf(result) !== 1) throw new AuthError(401, "REALTIME_TICKET_INVALID");
-  const row = await db.prepare(
-    `SELECT id, organization_id, live_session_id, user_id, auth_session_id, role,
-            last_sequence, issued_at, expires_at, consumed_at
-     FROM realtime_connection_tickets
-     WHERE token_hash = ?1 LIMIT 1`
-  ).bind(input.tokenHash).first();
+       )
+     RETURNING id, organization_id, live_session_id, user_id, auth_session_id, role,
+               last_sequence, issued_at, expires_at, consumed_at`
+  ).bind(nowIso, input.tokenHash, input.organizationId, input.liveSessionId, input.userId).first();
   if (!row) throw new AuthError(401, "REALTIME_TICKET_INVALID");
   return {
     id: row.id,
@@ -105,6 +100,11 @@ export function realtimeEventStatements(db, input) {
   const eventId = input.eventId || makeId("rte");
   const payloadJson = JSON.stringify(input.payload);
   const requiredUpdatedAt = input.requiredSessionUpdatedAt || null;
+  const requiredAiJob = input.requiredAiJob || null;
+  const requiredAiJobId = requiredAiJob?.id || null;
+  const requiredAiClaimedAt = requiredAiJob?.claimedAt || null;
+  const requiredAiAttemptCount = requiredAiJob ? Number(requiredAiJob.attemptCount) : null;
+  const requiredAiFinishedAt = requiredAiJob?.finishedAt || null;
   return {
     eventId,
     createdAt,
@@ -118,11 +118,19 @@ export function realtimeEventStatements(db, input) {
          FROM live_sessions
          WHERE id = ?2 AND organization_id = ?3
            AND (?4 IS NULL OR updated_at = ?4)
+           AND (?5 IS NULL OR EXISTS (
+             SELECT 1 FROM ai_jobs j
+             WHERE j.id = ?5 AND j.status = 'succeeded'
+               AND j.claimed_at = ?6 AND j.attempt_count = ?7 AND j.finished_at = ?8
+           ))
          ON CONFLICT(live_session_id) DO NOTHING`
-      ).bind(createdAt, input.liveSessionId, input.organizationId, requiredUpdatedAt),
+      ).bind(
+        createdAt, input.liveSessionId, input.organizationId, requiredUpdatedAt,
+        requiredAiJobId, requiredAiClaimedAt, requiredAiAttemptCount, requiredAiFinishedAt
+      ),
       db.prepare(
         `UPDATE realtime_session_state
-         SET last_clear_sequence = CASE WHEN ?5 = 'message:clear' THEN last_sequence + 1 ELSE last_clear_sequence END,
+         SET last_clear_sequence = CASE WHEN ?9 = 'message:clear' THEN last_sequence + 1 ELSE last_clear_sequence END,
              last_sequence = last_sequence + 1,
              last_event_at = ?1,
              updated_at = ?1
@@ -131,8 +139,17 @@ export function realtimeEventStatements(db, input) {
              SELECT 1 FROM live_sessions
              WHERE id = ?2 AND organization_id = ?3
                AND (?4 IS NULL OR updated_at = ?4)
-           )`
-      ).bind(createdAt, input.liveSessionId, input.organizationId, requiredUpdatedAt, input.eventType),
+           )
+           AND (?5 IS NULL OR EXISTS (
+             SELECT 1 FROM ai_jobs j
+             WHERE j.id = ?5 AND j.status = 'succeeded'
+               AND j.claimed_at = ?6 AND j.attempt_count = ?7 AND j.finished_at = ?8
+           ))`
+      ).bind(
+        createdAt, input.liveSessionId, input.organizationId, requiredUpdatedAt,
+        requiredAiJobId, requiredAiClaimedAt, requiredAiAttemptCount, requiredAiFinishedAt,
+        input.eventType
+      ),
       db.prepare(
         `INSERT INTO realtime_events (
            id, organization_id, live_session_id, sequence,
@@ -143,7 +160,12 @@ export function realtimeEventStatements(db, input) {
                 ?2, ?3, ?4, ?5, ?6
          FROM realtime_session_state
          WHERE live_session_id = ?7 AND organization_id = ?8
-           AND last_event_at = ?5`
+           AND last_event_at = ?5
+           AND (?9 IS NULL OR EXISTS (
+             SELECT 1 FROM ai_jobs j
+             WHERE j.id = ?9 AND j.status = 'succeeded'
+               AND j.claimed_at = ?10 AND j.attempt_count = ?11 AND j.finished_at = ?12
+           ))`
       ).bind(
         eventId,
         input.eventType,
@@ -152,7 +174,11 @@ export function realtimeEventStatements(db, input) {
         createdAt,
         expiresAt,
         input.liveSessionId,
-        input.organizationId
+        input.organizationId,
+        requiredAiJobId,
+        requiredAiClaimedAt,
+        requiredAiAttemptCount,
+        requiredAiFinishedAt
       )
     ]
   };
@@ -164,32 +190,36 @@ export async function appendRealtimeEvent(db, input) {
   if (changesOf(results?.[1]) !== 1 || changesOf(results?.[2]) !== 1) {
     throw new AuthError(500, "REALTIME_EVENT_WRITE_INCONSISTENT");
   }
-  return getRealtimeEventById(db, built.eventId);
+  return getRealtimeEventById(db, built.eventId, input.now);
 }
 
-export async function getRealtimeEventById(db, eventId) {
+export async function getRealtimeEventById(db, eventId, now = Date.now()) {
+  const nowIso = new Date(now ?? Date.now()).toISOString();
   const row = await db.prepare(
     `SELECT id, organization_id, live_session_id, sequence,
             event_type, payload_json, source_comment_id,
             created_at, expires_at
-     FROM realtime_events WHERE id = ?1 LIMIT 1`
-  ).bind(eventId).first();
+     FROM realtime_events WHERE id = ?1 AND expires_at > ?2 LIMIT 1`
+  ).bind(eventId, nowIso).first();
   return row ? realtimeEventResponse(row) : null;
 }
 
-export async function getRealtimeEvent(db, organizationId, liveSessionId, sequence) {
+export async function getRealtimeEvent(db, organizationId, liveSessionId, sequence, now = Date.now()) {
+  const nowIso = new Date(now ?? Date.now()).toISOString();
   const row = await db.prepare(
     `SELECT id, organization_id, live_session_id, sequence,
             event_type, payload_json, source_comment_id,
             created_at, expires_at
      FROM realtime_events
      WHERE organization_id = ?1 AND live_session_id = ?2 AND sequence = ?3
+       AND expires_at > ?4
      LIMIT 1`
-  ).bind(organizationId, liveSessionId, normalizeSequence(sequence)).first();
+  ).bind(organizationId, liveSessionId, normalizeSequence(sequence), nowIso).first();
   return row ? realtimeEventResponse(row) : null;
 }
 
 export async function findRealtimeEventForComment(db, input) {
+  const nowIso = new Date(input.now ?? Date.now()).toISOString();
   const row = await db.prepare(
     `SELECT id, organization_id, live_session_id, sequence,
             event_type, payload_json, source_comment_id,
@@ -199,18 +229,21 @@ export async function findRealtimeEventForComment(db, input) {
        AND source_comment_id = ?3
        AND (?4 IS NULL OR event_type = ?4)
        AND (?5 IS NULL OR created_at = ?5)
+       AND expires_at > ?6
      ORDER BY sequence DESC LIMIT 1`
   ).bind(
     input.organizationId,
     input.liveSessionId,
     input.commentId,
     input.eventType || null,
-    input.createdAt || null
+    input.createdAt || null,
+    nowIso
   ).first();
   return row ? realtimeEventResponse(row) : null;
 }
 
 export async function getRealtimeSync(db, input) {
+  const nowIso = new Date(input.now ?? Date.now()).toISOString();
   const session = await db.prepare(
     `SELECT ls.id, ls.organization_id, ls.title, ls.posting_enabled,
             ls.comments_visible, ls.comment_display_seconds,
@@ -228,8 +261,9 @@ export async function getRealtimeSync(db, input) {
   const oldest = await db.prepare(
     `SELECT MIN(sequence) AS min_sequence
      FROM realtime_events
-     WHERE live_session_id = ?1 AND organization_id = ?2`
-  ).bind(input.liveSessionId, input.organizationId).first();
+     WHERE live_session_id = ?1 AND organization_id = ?2
+       AND expires_at > ?3`
+  ).bind(input.liveSessionId, input.organizationId, nowIso).first();
   const oldestAvailableSequence = oldest?.min_sequence == null ? currentSequence + 1 : Number(oldest.min_sequence);
   const resetRequired = requestedSequence > currentSequence
     || (requestedSequence < currentSequence && requestedSequence < oldestAvailableSequence - 1)
@@ -249,6 +283,7 @@ export async function getRealtimeSync(db, input) {
        FROM comments c
        WHERE c.organization_id = ?1 AND c.live_session_id = ?2
          AND c.moderation_state = 'visible'
+         AND c.retained_until > ?4
          AND EXISTS (
            SELECT 1 FROM realtime_events re
            WHERE re.organization_id = c.organization_id
@@ -256,12 +291,14 @@ export async function getRealtimeSync(db, input) {
              AND re.source_comment_id = c.id
              AND re.event_type IN ('message:new', 'message:restore')
              AND re.sequence > ?3
+             AND re.expires_at > ?4
          )
-       ORDER BY c.created_at DESC, c.id DESC LIMIT ?4`
+       ORDER BY c.created_at DESC, c.id DESC LIMIT ?5`
     ).bind(
       input.organizationId,
       input.liveSessionId,
       Number(session.last_clear_sequence || 0),
+      nowIso,
       MAX_SNAPSHOT_COMMENTS
     ).all();
     snapshot = (result.results || []).reverse().map(commentSnapshotResponse);
@@ -273,8 +310,9 @@ export async function getRealtimeSync(db, input) {
        FROM realtime_events
        WHERE organization_id = ?1 AND live_session_id = ?2
          AND sequence > ?3
-       ORDER BY sequence ASC LIMIT ?4`
-    ).bind(input.organizationId, input.liveSessionId, requestedSequence, MAX_CATCH_UP_EVENTS).all();
+         AND expires_at > ?4
+       ORDER BY sequence ASC LIMIT ?5`
+    ).bind(input.organizationId, input.liveSessionId, requestedSequence, nowIso, MAX_CATCH_UP_EVENTS).all();
     events = (result.results || []).map(realtimeEventResponse);
   }
 

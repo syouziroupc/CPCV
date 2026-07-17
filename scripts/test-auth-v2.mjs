@@ -255,12 +255,12 @@ async function testRateLimit() {
   await assertRejects("failed rate limiter produces 429", () => requireRateLimit({ limit: async () => ({ success: false }) }, "key-2"), 429, "RATE_LIMITED");
   let failureObserved = false;
   const unavailable = await checkRateLimit({ limit: async () => { throw new Error("binding unavailable"); } }, "key-3", { onFailure: async () => { failureObserved = true; } });
-  assert("limiter failure fails open", unavailable.success && unavailable.unavailable, unavailable);
+  assert("limiter failure fails closed", !unavailable.success && unavailable.unavailable, unavailable);
   assert("limiter failure callback runs", failureObserved);
   const callbackFailure = await checkRateLimit({ limit: async () => { throw new Error("binding unavailable"); } }, "key-3b", { onFailure: async () => { throw new Error("audit unavailable"); } });
-  assert("limiter and failure callback outage still fails open", callbackFailure.success && callbackFailure.unavailable, callbackFailure);
+  assert("limiter and failure callback outage still fails closed", !callbackFailure.success && callbackFailure.unavailable, callbackFailure);
   const missing = await checkRateLimit(null, "key-4");
-  assert("missing local limiter fails open", missing.success && missing.unavailable, missing);
+  assert("missing limiter is unavailable and denied", !missing.success && missing.unavailable, missing);
 }
 
 async function testSessions() {

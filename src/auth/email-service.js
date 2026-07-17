@@ -90,11 +90,12 @@ export async function sendTransactionalEmail(env, message) {
     message.organizationId || null
   ).run();
 
+  let result;
   try {
     if (!env?.EMAIL || typeof env.EMAIL.send !== "function") {
       throw Object.assign(new Error("EMAIL_BINDING_NOT_CONFIGURED"), { code: "EMAIL_BINDING_NOT_CONFIGURED" });
     }
-    const result = await env.EMAIL.send({
+    result = await env.EMAIL.send({
       to: message.to,
       from,
       subject: sanitizeHeader(message.subject),
@@ -102,13 +103,15 @@ export async function sendTransactionalEmail(env, message) {
       html: message.html,
       ...(env.AUTH_EMAIL_REPLY_TO ? { replyTo: String(env.AUTH_EMAIL_REPLY_TO).trim() } : {})
     });
-    await safeComplete(env.DB_V2, attemptId, "sent", String(result?.messageId || ""), null);
-    return { ok: true, messageId: String(result?.messageId || "") };
   } catch (error) {
     const code = sanitizeErrorCode(error?.code || "EMAIL_SEND_FAILED");
-    await safeComplete(env.DB_V2, attemptId, "failed", null, code);
+    await completeAttempt(env.DB_V2, attemptId, "failed", null, code);
     return { ok: false, error: code };
   }
+
+  const messageId = String(result?.messageId || "");
+  await completeAttempt(env.DB_V2, attemptId, "sent", messageId, null);
+  return { ok: true, messageId };
 }
 
 function authLink(env, path, rawToken) {
@@ -119,15 +122,19 @@ function authLink(env, path, rawToken) {
   return `${origin}/${path}/${encodeURIComponent(rawToken)}`;
 }
 
-async function safeComplete(db, id, status, messageId, errorCode) {
+async function completeAttempt(db, id, status, messageId, errorCode) {
+  let result;
   try {
-    await db.prepare(
+    result = await db.prepare(
       `UPDATE email_delivery_attempts
        SET status = ?1, provider_message_id = ?2, provider_error_code = ?3, completed_at = ?4
        WHERE id = ?5 AND status = 'pending'`
     ).bind(status, messageId, errorCode, new Date().toISOString(), id).run();
-  } catch {
-    // A provider result must not expose storage failures or leak message content.
+  } catch (error) {
+    throw new AuthError(503, "EMAIL_DELIVERY_STATUS_PERSISTENCE_FAILED", { expose: true });
+  }
+  if (Number(result?.meta?.changes || 0) !== 1) {
+    throw new AuthError(503, "EMAIL_DELIVERY_STATUS_PERSISTENCE_FAILED", { expose: true });
   }
 }
 

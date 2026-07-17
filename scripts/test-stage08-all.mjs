@@ -15,7 +15,8 @@ const commands = [
   ["Stage 7.7 bilingual filter", ["--no-warnings", "scripts/test-bilingual-filter-v2.mjs"]],
   ["Stage 7.8 dictionary audit", ["scripts/audit-filter-packs.mjs"]],
   ["Stage 7.8 pack upgrade", ["--no-warnings", "scripts/test-filter-pack-upgrade-v2.mjs"]],
-  ["Stage 8 PDF analytics", ["--no-warnings", "scripts/test-pdf-analysis-v2.mjs"]]
+  ["Stage 8 PDF analytics", ["--no-warnings", "scripts/test-pdf-analysis-v2.mjs"]],
+  ["Stage 8.2 final hardening", ["--no-warnings", "scripts/test-final-hardening.mjs"]]
 ];
 
 for (const [name, args] of commands) {

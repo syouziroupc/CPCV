@@ -7,11 +7,21 @@ const EXISTING_TABLE_CACHE = new WeakMap();
 const POST_INTERVAL_MS = 10_000;
 
 export async function persistComment(db, input) {
-  const existing = await findCommentByIdempotency(db, input.liveSessionId, input.idempotencyKey);
-  if (existing) return { comment: commentResponse(existing), duplicate: true };
-
   const now = new Date(input.now ?? Date.now());
   const nowIso = now.toISOString();
+  await releaseExpiredIdempotencyKey(db, input.liveSessionId, input.idempotencyKey, nowIso);
+  const existing = await findCommentByIdempotency(
+    db,
+    input.liveSessionId,
+    input.idempotencyKey,
+    input.participantTokenHash,
+    nowIso
+  );
+  if (existing) return { comment: commentResponse(existing), duplicate: true };
+  if (await activeIdempotencyKeyExists(db, input.liveSessionId, input.idempotencyKey, nowIso)) {
+    throw new AuthError(409, "IDEMPOTENCY_KEY_CONFLICT");
+  }
+
   const nextPostAt = new Date(now.getTime() + POST_INTERVAL_MS).toISOString();
   const retainedUntil = new Date(now.getTime() + input.retentionDays * 86_400_000).toISOString();
   const participantId = makeId("part");
@@ -114,8 +124,17 @@ export async function persistComment(db, input) {
   const inserted = await findCommentById(db, commentId);
   if (inserted) return { comment: commentResponse(inserted), duplicate: false };
 
-  const racedDuplicate = await findCommentByIdempotency(db, input.liveSessionId, input.idempotencyKey);
+  const racedDuplicate = await findCommentByIdempotency(
+    db,
+    input.liveSessionId,
+    input.idempotencyKey,
+    input.participantTokenHash,
+    nowIso
+  );
   if (racedDuplicate) return { comment: commentResponse(racedDuplicate), duplicate: true };
+  if (await activeIdempotencyKeyExists(db, input.liveSessionId, input.idempotencyKey, nowIso)) {
+    throw new AuthError(409, "IDEMPOTENCY_KEY_CONFLICT");
+  }
 
   const session = await db.prepare(
     `SELECT status, posting_enabled, expires_at
@@ -129,6 +148,7 @@ export async function persistComment(db, input) {
 
 export async function listSessionComments(db, input) {
   const limit = input.limit;
+  const nowIso = new Date(input.now ?? Date.now()).toISOString();
   const pdfPageSelect = await pdfPageSelectExpression(db, "c");
   let sql = `
     SELECT c.id, c.nickname, c.message, c.display_message, c.message_length, c.moderation_state,
@@ -169,8 +189,9 @@ export async function listSessionComments(db, input) {
            (SELECT t.filter_action FROM translations t
             WHERE t.comment_id = c.id ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS translation_filter_action
     FROM comments c
-    WHERE c.organization_id = ?1 AND c.live_session_id = ?2`;
-  const values = [input.organizationId, input.liveSessionId];
+    WHERE c.organization_id = ?1 AND c.live_session_id = ?2
+      AND c.retained_until > ?3`;
+  const values = [input.organizationId, input.liveSessionId, nowIso];
   if (Array.isArray(input.states) && input.states.length) {
     const placeholders = input.states.map((_, index) => `?${values.length + index + 1}`).join(", ");
     sql += ` AND c.moderation_state IN (${placeholders})`;
@@ -193,8 +214,9 @@ export async function listSessionComments(db, input) {
   };
 }
 
-export async function listCommentsForExport(db, organizationId, liveSessionId, limit = 10_000) {
+export async function listCommentsForExport(db, organizationId, liveSessionId, limit = 10_000, now = Date.now()) {
   const pdfPageSelect = await pdfPageSelectExpression(db, "comments");
+  const nowIso = new Date(now).toISOString();
   const result = await db.prepare(
     `SELECT id, nickname, message, display_message, message_length, moderation_state,
             filter_action, filter_ai_required, filter_version,
@@ -203,9 +225,10 @@ export async function listCommentsForExport(db, organizationId, liveSessionId, l
             ${pdfPageSelect} AS pdf_page_number
      FROM comments
      WHERE organization_id = ?1 AND live_session_id = ?2
+       AND retained_until > ?3
      ORDER BY created_at ASC, id ASC
-     LIMIT ?3`
-  ).bind(organizationId, liveSessionId, limit + 1).all();
+     LIMIT ?4`
+  ).bind(organizationId, liveSessionId, nowIso, limit + 1).all();
   const rows = rowsOf(result);
   return { rows: rows.slice(0, limit).map(commentResponse), truncated: rows.length > limit };
 }
@@ -248,7 +271,7 @@ export async function runCommentRetention(db, options = {}) {
   };
 }
 
-async function findCommentByIdempotency(db, liveSessionId, key) {
+async function findCommentByIdempotency(db, liveSessionId, key, participantTokenHash, nowIso) {
   const pdfPageSelect = await pdfPageSelectExpression(db, "comments");
   return db.prepare(
     `SELECT id, nickname, message, display_message, message_length, moderation_state,
@@ -256,8 +279,31 @@ async function findCommentByIdempotency(db, liveSessionId, key) {
             detected_language, language_confidence_milli, unsupported_language,
             created_at, updated_at, retained_until, deleted_at,
             ${pdfPageSelect} AS pdf_page_number
-     FROM comments WHERE live_session_id = ?1 AND idempotency_key = ?2 LIMIT 1`
-  ).bind(liveSessionId, key).first();
+     FROM comments
+     WHERE live_session_id = ?1 AND idempotency_key = ?2
+       AND retained_until > ?3
+       AND participant_id = (
+         SELECT id FROM participants
+         WHERE live_session_id = ?1 AND token_hash = ?4 LIMIT 1
+       )
+     LIMIT 1`
+  ).bind(liveSessionId, key, nowIso, participantTokenHash).first();
+}
+
+async function activeIdempotencyKeyExists(db, liveSessionId, key, nowIso) {
+  const row = await db.prepare(
+    `SELECT 1 AS present FROM comments
+     WHERE live_session_id = ?1 AND idempotency_key = ?2 AND retained_until > ?3
+     LIMIT 1`
+  ).bind(liveSessionId, key, nowIso).first();
+  return Boolean(row?.present);
+}
+
+async function releaseExpiredIdempotencyKey(db, liveSessionId, key, nowIso) {
+  await db.prepare(
+    `DELETE FROM comments
+     WHERE live_session_id = ?1 AND idempotency_key = ?2 AND retained_until <= ?3`
+  ).bind(liveSessionId, key, nowIso).run();
 }
 
 async function findCommentById(db, id) {

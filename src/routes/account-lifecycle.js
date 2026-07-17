@@ -325,7 +325,12 @@ async function handleInvitationRevoke(request, env, invitationId) {
       actorRole: auth.role,
       action: "organization.invitation.revoked",
       targetType: "organization_invitation",
-      targetId: invitationId
+      targetId: invitationId,
+      createdAt: now,
+      condition: {
+        sql: "EXISTS (SELECT 1 FROM organization_invitations WHERE id = ?11 AND organization_id = ?12 AND revoked_at = ?13)",
+        bindings: [invitationId, auth.organizationId, now]
+      }
     })
   ]);
   if (Number(results?.[0]?.meta?.changes || 0) !== 1) throw new AuthError(409, "INVITATION_UPDATE_CONFLICT");

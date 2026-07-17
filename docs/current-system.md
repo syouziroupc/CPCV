@@ -1,101 +1,69 @@
 # CPCV 現行システム基準
 
-更新基準: Stage 8.1 v0.8.1
+更新基準: Stage 8.2。package version `0.8.2`。
 
-## 1. 構成
+## 構成
 
 | 項目 | 現在値 |
 |---|---|
 | Worker | `class-pdf-comment-viewer-v01` |
 | entry | `src/index.js` |
-| package version | `0.8.1` |
 | Node.js | 22系 |
-| 旧互換D1 | `DB` / `class_comment_db` |
-| 新版正本D1 | `DB_V2` / `class_comment_db_v2` |
+| legacy D1 | `DB` / `class_comment_db` |
+| application source of truth | `DB_V2` / `class_comment_db_v2` |
 | Durable Object | `COMMENT_ROOM` / `CommentRoom` |
-| メール送信 | `EMAIL` / Cloudflare Email Service |
-| AI実行 | `AI` / Workers AI |
-| AI非同期処理 | `AI_JOBS_QUEUE` / Cloudflare Queues |
-| 認証 | 確認済みメール + password + HttpOnly Cookie + CSRF + Origin完全一致 |
-| コメント正本 | `DB_V2.comments` |
-| Realtime順序正本 | `DB_V2.realtime_events` |
-| 辞書filter正本 | `content_filter_terms`ほか |
-| PDF | 先生端末内だけで処理 |
-| PDF分析正本 | `pdf_documents`。`session_pdf_bindings`。`pdf_page_events`。`comment_page_links`。`understanding_signals`。`analytics_snapshots` |
+| email | `EMAIL` / Cloudflare Email Service |
+| AI | `AI` / Workers AI |
+| Queue | `AI_JOBS_QUEUE` / `cpcv-ai-jobs` |
+| assets | `ASSETS` / `public/` |
+| migration | `migrations-v2/0001`〜`0017` |
+| scheduled recovery | 5分ごと |
+| daily retention | UTC 03:17 |
 
-## 2. 変更禁止の基礎契約
+## データ境界
 
-- sessionは一つのorganizationへ固定
-- request bodyのorganization IDを権限根拠にしない
-- Studentは匿名参加者
-- raw認証tokenをD1へ保存しない
-- PDF bytes。filename。page text。画像をserverへ送らない
-- AIは手動moderation stateを自動変更しない
-- 翻訳は原文と別保存
-- Realtime順序正本はD1
+`DB_V2`が正本です。legacy `DB`は互換投影先です。授業終了と削除でV2側が失敗した場合はlegacy投影を復元します。復元できない場合は`SESSION_PROJECTION_INCONSISTENT`で停止します。
 
-## 3. PDF分析
+Stage 8.2 migration `0017_final_integrity_hardening.sql`は組織・session・comment・AI jobのcontextをtriggerで強制します。永続triggerは42本です。既存不整合が一件でもある場合はmigrationを中止します。
 
-serverへ保存するPDF情報はSHA-256。任意fingerprint。page数。file sizeだけです。
+## 認証
 
-- PDF bindingは組織と授業へ固定
-- 同一PDF再選択は状態を初期化しない
-- 別PDFへ切替える前に旧分析snapshotを自動作成
-- コメントはserverの現在pageへ紐付け
-- 理解度は`understood`。`unsure`。`confused`
-- page切替競合時は理解度を保存しない
-- コメント受付OFFでも授業中なら理解度を送信可能
-- distinct participantが3人未満なら理解度内訳を非表示
-- snapshotはJSONとSHA-256 checksumを保存
-- snapshot読出し時にもchecksumを再計算
-- コメント。理解度。page event。snapshotは保持期限後に即座に集計対象外
+- HttpOnly Cookie
+- productionでSecureとSameSite=Strict
+- unsafe requestでOrigin完全一致。JSON。CSRF
+- PBKDF2-HMAC-SHA-256。600000 iterations
+- login IPとaccountのRate Limiting
+- limiter障害時は503でfail closed
+- password変更は組織context取得後に一括確定
+- session GETはcontext確認後にCSRF tokenを発行
 
-## 4. DB_V2 migration
+## コメントとRealtime
 
-1. `0001_initial_schema.sql`
-2. `0002_auth_security.sql`
-3. `0003_comments.sql`
-4. `0004_precision_hardening.sql`
-5. `0005_comment_content_guards.sql`
-6. `0006_manual_moderation.sql`
-7. `0007_realtime.sql`
-8. `0008_email_auth.sql`
-9. `0009_account_lifecycle.sql`
-10. `0010_ai_moderation_translation.sql`
-11. `0011_dictionary_content_filter.sql`
-12. `0012_multilingual_filter_usability.sql`
-13. `0013_bilingual_filter_translation_safety.sql`
-14. `0014_filter_pack_expansion.sql`
-15. `0015_pdf_page_analytics.sql`
-16. `0016_stage08_precision_hardening.sql`
+- participant tokenはhash保存
+- idempotency keyはparticipant単位
+- 期限切れcommentはcron前でも読取対象外
+- Realtime sequenceの正本はD1
+- 期限切れeventはcatch-upとsnapshotから除外
+- WebSocket ticketは一回だけ原子的に消費
+- 接続中認証は5分ごとに再検証
 
-`0016`はpage範囲。組織境界。document整合性。証拠行の作成後不変性をD1 triggerで強制します。既存migrationを編集しません。
+## filterとAI
 
-## 5. Cleanupと論理期限
+- filterは全termを評価する
+- response evidenceだけ100件に制限する
+- active term上限2000件をD1 triggerで強制する
+- mutationとauditは同じD1 batch
+- AI resultはjob claim identityが一致する場合だけ確定する
+- stale workerはresult。translation。Realtimeを更新できない
+- 期限切れcomment本文をWorkers AIへ送らない
+- Queue失敗jobは5分ごとに回収する
 
-scheduled cleanupは期限切れの理解度。snapshot。page event。終了済みbinding。孤立PDF metadataを削除します。
+## PDF分析
 
-cronの遅延中もquery側が現在時刻と`expires_at`を比較します。期限切れdataを集計。CSV。snapshot取得へ戻しません。
+browserから送る値はSHA-256。補助fingerprint。page count。file size。現在pageです。PDF bytes。filename。page textは送信しません。
 
-## 6. 検査
+page更新は実際の更新件数とevent IDで勝者を確定します。理解度はactive sessionと表示中pageが一致する場合だけ保存します。切断後の推定滞在時間は加算しません。snapshotとauditは同じbatchで確定します。
 
-```bash
-npm ci
-npm run check
-npm run check:project
-npm run check:pdf-links
-npm run check:stage08
-npm run test:owner-bootstrap
-npm run visual:stage08
-npm run deploy:dry-run
-npm audit
-npm audit --omit=dev
-```
+## deploy状態
 
-Remote確認は`node scripts/verify-remote-d1.mjs`を使用します。migration 0016とStage 8.1 triggerを確認します。
-
-## 7. Deployment状態
-
-GitHub push。Remote D1 migration。staging deploy。production deployは未実施です。
-
-Codexは`docs/stage-08-precision-cloudflare-deployment.md`に従います。Remote D1のTime Travel bookmarkを先に記録し。migration。Remote検査。staging smoke。productionの順で実施します。
+sourceとlocal検査はrelease candidateです。productionは未設定外部値のためblockedです。未設定一覧は`docs/final-stage08/17_CLOUDFLARE_PENDING_VALUES.md`を正本とします。

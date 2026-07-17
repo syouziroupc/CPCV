@@ -1,40 +1,34 @@
-# Class PDF Comment Viewer v0.8.1
+# Class PDF Comment Viewer v0.8.2
 
-Cloudflare Workers。D1。Durable Objects。Queues。Workers AIを使う授業向けPDFコメント表示システムです。
+Cloudflare Workers。D1。Durable Objects。Queues。Workers AIを使う授業向けPDFコメントシステムです。
 
-PDFは先生端末のbrowserで読み込みます。PDF本体をCloudflareへ保存しません。コメント。認証。組織。授業。moderation。Realtime。辞書。AI。PDF page metadata。匿名集計の正本は`DB_V2`です。
+PDF本体は教員端末のbrowser内だけで処理します。PDF bytes。ファイル名。page text。画像をCloudflareへ保存しません。コメント。認証。組織。授業。moderation。Realtime。辞書filter。AI。PDF page metadata。匿名集計の正本は`DB_V2`です。
 
-## 開発状態
+## 現在の状態
 
-- Stage 1～7.8: 完了
-- Stage 8: ローカルPDF連動と匿名理解度分析 完了
-- Stage 8.1: 精密デバッグと証拠整合性強化 完了
+- Stage 1〜8.1: 完了
+- Stage 8.2 final hardening: 実装済み
+- 既知71件の監査指摘: 修正済み
+- migration: `0001`〜`0017`
+- local機能回帰: 通過
 - Cloudflare remote反映: 未実施
+- production deploy: 外部実値が未設定のため禁止
 
-## Stage 8.1で強化した点
+## Stage 8.2の主要修正
 
-- 同じPDFの再選択をidempotent化
-- 別PDFへの切替前に旧分析snapshotを自動確定
-- PDF読込競合で古い選択結果が画面を上書きしない
-- コメント受付OFFでも理解度回答を許可
-- PDF page切替競合時の理解度誤紐付けを拒否
-- 保持期限切れのコメント。理解度。page event。snapshotをcron前でも集計対象外にする
-- 全体理解度の3人抑制をdistinct participant数で判定
-- snapshot取得時にSHA-256を再検証
-- D1 triggerでpage分析証拠の組織境界。page範囲。作成後不変性を強制
-- 旧DB互換とStage 1～8回帰を維持
-- Remote D1検査をmigration 0016まで拡張
+- 保持期限切れdataを一覧。CSV。Realtime。moderation。AIから除外
+- 20種類の組織・context境界をD1 triggerで強制
+- insertとupdateを含む永続trigger 42本をRemote検査
+- 100件の証拠上限後も強制reject語を評価
+- AI jobの古いworkerによる上書きを防止
+- 3回目処理中断jobを回収
+- PDF page更新。理解度。snapshot。auditを競合安全化
+- password変更。logout。招待取消。CSRF。メール状態更新を原子的に修正
+- Rate Limiting障害時をfail-closed化
+- Realtime接続の認証を5分ごとに再検証
+- 旧DBとDB_V2の終了・削除失敗時に旧投影を補償復元
 
-## migration
-
-```text
-migrations-v2/0015_pdf_page_analytics.sql
-migrations-v2/0016_stage08_precision_hardening.sql
-```
-
-既存0001～0015は削除しません。Remoteへ未適用のmigrationだけを連番で適用します。
-
-## local検査
+## local最終検査
 
 ```bash
 npm ci
@@ -43,26 +37,22 @@ npm run check:project
 npm run check:pdf-links
 npm run check:stage08
 npm run test:owner-bootstrap
-npm run visual:stage08
+npm run verify:final-docs
 npm run deploy:dry-run
 npm audit
 npm audit --omit=dev
 ```
 
-## Cloudflare反映
+`npm run verify:deployment`は外部実値を設定するまで失敗するのが正しい状態です。失敗を無視してdeployしてはいけません。
 
-Codexは次を読む。
+## 正本資料
+
+最初に次を読みます。
 
 ```text
-docs/stage-08-precision-cloudflare-deployment.md
-docs/stage-08-precision-rollback.md
-docs/stage-08-codex-cloudflare-deployment.md
+docs/final-stage08/00_INDEX.md
+docs/final-stage08/20_CODEX_DEPLOY_INSTRUCTION_FINAL.md
+docs/final-stage08/19_DEPLOYMENT_FINAL_CHECKLIST.md
 ```
 
-migrationを先にRemote `DB_V2`へ適用する。その後staging。productionの順でWorkerをdeployします。PDF本体をCloudflareへ送る変更は禁止です。
-
-## Stage 8 final specification
-
-Cloudflareへ反映する前に`docs/final-stage08/00_INDEX.md`を読む。
-Stage 1〜8.1の統合仕様。Cloudflare resource表。Codex runbook。staging受入試験。production rollbackを収録している。
-
+段階別の旧報告書は履歴資料です。Cloudflare反映手順の正本には使いません。

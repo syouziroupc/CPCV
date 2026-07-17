@@ -22,11 +22,10 @@ export function evaluateFilterMessage(message, context) {
   const normalized = normalizeForFilter(message);
   const policies = new Map((context.policies || []).filter((policy) => policy.enabled).map((policy) => [policy.category, policy]));
   const terms = (context.terms || []).slice(0, MAX_TERMS);
-  const matches = [];
+  const allMatches = [];
   let fuzzyCount = 0;
 
   for (const term of terms) {
-    if (matches.length >= MAX_MATCHES) break;
     const policy = policies.get(term.category);
     if (!policy) continue;
     const compactTerm = String(term.compactTerm || "");
@@ -37,10 +36,9 @@ export function evaluateFilterMessage(message, context) {
       : findNormalizedMatches(normalized, term);
 
     for (const match of deterministicMatches) {
-      if (matches.length >= MAX_MATCHES) break;
       const policyAction = actionForSeverity(policy, term.severity);
       if (policyAction === "allow") continue;
-      matches.push({
+      allMatches.push({
         ...match,
         category: term.category,
         severity: term.severity,
@@ -49,7 +47,7 @@ export function evaluateFilterMessage(message, context) {
       });
     }
 
-    if (deterministicMatches.length || matches.length >= MAX_MATCHES) continue;
+    if (deterministicMatches.length) continue;
     let ambiguousMatch = null;
     if (normalized.skeleton !== normalized.compact) ambiguousMatch = findConfusableMatch(normalized, term);
     if (!ambiguousMatch && term.fuzzyEnabled && fuzzyCount < MAX_FUZZY_CANDIDATES) {
@@ -57,7 +55,7 @@ export function evaluateFilterMessage(message, context) {
       ambiguousMatch = fuzzyMatch(normalized, term);
     }
     if (!ambiguousMatch) continue;
-    matches.push({
+    allMatches.push({
       ...ambiguousMatch,
       category: term.category,
       severity: term.severity,
@@ -66,10 +64,18 @@ export function evaluateFilterMessage(message, context) {
     });
   }
 
-  const action = strongestAction(matches.map((match) => match.action));
-  const maskSpans = matches.filter((match) => match.action === "mask" && !match.ambiguous).map((match) => match.span);
+  const action = strongestAction(allMatches.map((match) => match.action));
+  const maskSpans = allMatches.filter((match) => match.action === "mask" && !match.ambiguous).map((match) => match.span);
   const displayMessage = maskSpans.length ? maskSourceSpans(message, maskSpans, context.settings.maskCharacter) : null;
-  const ambiguous = matches.some((match) => match.ambiguous || match.action === "review");
+  const ambiguous = allMatches.some((match) => match.ambiguous || match.action === "review");
+  const matches = allMatches
+    .sort((left, right) => (
+      (ACTION_WEIGHT[right.action] || 0) - (ACTION_WEIGHT[left.action] || 0)
+      || Number(right.severity || 0) - Number(left.severity || 0)
+      || Number(right.confidenceMilli || 0) - Number(left.confidenceMilli || 0)
+      || String(left.term?.id || "").localeCompare(String(right.term?.id || ""))
+    ))
+    .slice(0, MAX_MATCHES);
   const aiRequired = context.settings.aiRoutingMode === "all"
     || (context.settings.aiRoutingMode === "ambiguous" && ambiguous);
   return {

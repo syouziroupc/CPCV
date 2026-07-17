@@ -436,6 +436,11 @@ async function updateSettings(request, env, auth, current, ctx) {
 
 async function endSession(env, auth, current, next, ctx) {
   const nowIso = new Date().toISOString();
+  const legacyBefore = await loadLegacyProjection(env.DB, current.id);
+  if (!legacyBefore) {
+    await recordProjectionInconsistency(env.DB_V2, auth, current.id, "end_missing_legacy");
+    throw new AuthError(500, "SESSION_PROJECTION_INCONSISTENT");
+  }
   const stopped = await stopLegacyProjection(env.DB, current.id, "ended", nowIso);
   if (changesOf(stopped) !== 1) {
     await recordProjectionInconsistency(env.DB_V2, auth, current.id, "end_legacy_not_changed");
@@ -465,12 +470,14 @@ async function endSession(env, auth, current, next, ctx) {
       ...realtime.statements
     ]);
   } catch (error) {
-    await recordProjectionInconsistency(env.DB_V2, auth, current.id, "end_v2_failed");
+    const restored = await tryRestoreLegacy(env, auth, current.id, legacyBefore, "end_v2_failed");
+    if (!restored) throw new AuthError(500, "SESSION_PROJECTION_INCONSISTENT");
     throw error;
   }
   if (changesOf(results?.[0]) !== 1 || changesOf(results?.[3]) !== 1 || changesOf(results?.[4]) !== 1) {
-    await recordProjectionInconsistency(env.DB_V2, auth, current.id, "end_v2_conflict");
-    throw new AuthError(500, "SESSION_PROJECTION_INCONSISTENT");
+    const restored = await tryRestoreLegacy(env, auth, current.id, legacyBefore, "end_v2_conflict");
+    if (!restored) throw new AuthError(500, "SESSION_PROJECTION_INCONSISTENT");
+    throw new AuthError(409, "SESSION_UPDATE_CONFLICT");
   }
   const event = await getRealtimeEventById(env.DB_V2, realtime.eventId);
   scheduleRealtimeDispatch(ctx, env, current.id, event, auth, true);
@@ -494,6 +501,11 @@ async function deleteSession(request, env, auth, current, ctx) {
   if (current.status === "deleted") return authJson({ ok: true });
 
   const nowIso = new Date().toISOString();
+  const legacyBefore = await loadLegacyProjection(env.DB, current.id);
+  if (!legacyBefore) {
+    await recordProjectionInconsistency(env.DB_V2, auth, current.id, "delete_missing_legacy");
+    throw new AuthError(500, "SESSION_PROJECTION_INCONSISTENT");
+  }
   const stopped = await stopLegacyProjection(env.DB, current.id, "deleted", nowIso);
   if (changesOf(stopped) !== 1) {
     await recordProjectionInconsistency(env.DB_V2, auth, current.id, "delete_legacy_not_changed");
@@ -521,12 +533,14 @@ async function deleteSession(request, env, auth, current, ctx) {
       ...realtime.statements
     ]);
   } catch (error) {
-    await recordProjectionInconsistency(env.DB_V2, auth, current.id, "delete_v2_failed");
+    const restored = await tryRestoreLegacy(env, auth, current.id, legacyBefore, "delete_v2_failed");
+    if (!restored) throw new AuthError(500, "SESSION_PROJECTION_INCONSISTENT");
     throw error;
   }
   if (changesOf(results?.[0]) !== 1 || changesOf(results?.[3]) !== 1 || changesOf(results?.[4]) !== 1) {
-    await recordProjectionInconsistency(env.DB_V2, auth, current.id, "delete_v2_conflict");
-    throw new AuthError(500, "SESSION_PROJECTION_INCONSISTENT");
+    const restored = await tryRestoreLegacy(env, auth, current.id, legacyBefore, "delete_v2_conflict");
+    if (!restored) throw new AuthError(500, "SESSION_PROJECTION_INCONSISTENT");
+    throw new AuthError(409, "SESSION_UPDATE_CONFLICT");
   }
   const event = await getRealtimeEventById(env.DB_V2, realtime.eventId);
   scheduleRealtimeDispatch(ctx, env, current.id, event, auth, true);
@@ -1110,7 +1124,7 @@ function teacherResponse(auth) {
   return {
     id: auth.userId,
     loginId: auth.loginId,
-    email: `${auth.loginId}@user.local`,
+    email: auth.email || null,
     name: auth.displayName,
     role: auth.role
   };

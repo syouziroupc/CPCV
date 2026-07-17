@@ -1,5 +1,9 @@
 # CPCV 開発資料
 
+## 現行正本
+
+Cloudflare反映担当は最初に`final-stage08/00_INDEX.md`を読みます。現行versionは`0.8.2`です。migrationは`0017`までです。Codex指示は`final-stage08/20_CODEX_DEPLOY_INSTRUCTION_FINAL.md`だけを使用します。以下の段階別資料は履歴です。
+
 最初に`stage-01-spec.md`を読む。
 
 | ファイル | 内容 |

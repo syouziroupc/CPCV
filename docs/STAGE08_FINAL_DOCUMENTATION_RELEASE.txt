@@ -1,7 +1,7 @@
-CPCV Stage 8 final documentation release
-Date: 2026-07-16
-Documentation release: stage08-final-spec-1
-Code version: 0.8.1
-Base Git commit: 7d740e699ec4661cf3ec35f5bd4a86a2887422c9
-Code changes: none
-Added: integrated Stage 1-8 specifications and Cloudflare Codex deployment runbook
+CPCV Stage 8.2 final documentation
+Code version: 0.8.2
+Migrations: 0001-0017
+Canonical index: docs/final-stage08/00_INDEX.md
+Codex instruction: docs/final-stage08/20_CODEX_DEPLOY_INSTRUCTION_FINAL.md
+Production status: BLOCKED until external Cloudflare values and staging acceptance evidence are complete.
+Historical Stage 8.1 documents are not deployment instructions.

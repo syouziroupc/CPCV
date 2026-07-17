@@ -10,11 +10,9 @@ binding = "DB"
 database_name = "class_comment_db"
 database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"
 
-# Stage 2 database. The remote database_id is intentionally omitted until the
-# separate class_comment_db_v2 resource is created and its real UUID is known.
-# Local migrations and schema tests use this binding now. Do not run an actual
-# deploy until a separate remote D1 exists and its real UUID is configured. The
-# current Worker must continue to read and write env.DB only during Stage 2.
+# DB_V2 is the application source of truth. Its production database_id remains
+# intentionally absent because no verified Cloudflare UUID is present in this
+# handoff. Do not invent one. Deployment is blocked until the real UUID is set.
 [[d1_databases]]
 binding = "DB_V2"
 database_name = "class_comment_db_v2"
@@ -60,8 +58,8 @@ PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 
 # Daily retention and expired security-token cleanup. Cron uses UTC.
 [triggers]
-crons = [ "17 3 * * *" ]
+crons = [ "*/5 * * * *", "17 3 * * *" ]
 
-# Production deployment also requires two account-unique Rate Limiting bindings.
-# Do not invent namespace IDs. Add the real values immediately before deployment.
-# See docs/cloudflare-deployment-prerequisites.md.
+# Production deployment requires four distinct Rate Limiting bindings.
+# It also requires final email and Turnstile values plus a restricted EMAIL sender.
+# Do not invent external IDs or secrets. See docs/final-stage08/17_CLOUDFLARE_PENDING_VALUES.md.

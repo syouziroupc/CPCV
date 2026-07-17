@@ -1,29 +1,16 @@
-# Codex向け Cloudflare反映runbook
+# Codex Cloudflare反映runbook
 
-## 0. 作業方針
+このrunbookは`20_CODEX_DEPLOY_INSTRUCTION_FINAL.md`の実行手順です。
 
-このrunbookはStage 8完成codeをCloudflareへ反映するための実行順序である。
-Codexは設計を変更しない。
-実値を推測しない。
-productionへ直接deployしない。
-各phaseの結果を`deployment-records/`へ保存する。
+## 1. source固定
 
-## 1. 正本確認
+- outer handoffのSHA-256を検証する。
+- source manifestを検証する。
+- exact 40-character Git commitを確認する。
+- `git status --porcelain`が空であることを確認する。
+- sourceを修正した場合は検査をやり直し。新commitと新manifestを作る。
 
-完全引継ぎZIPを空folderへ展開する。
-
-確認する。
-
-- `00_READ_FIRST.md`
-- `FINAL_STAGE08_SPECIFICATION/00_INDEX.md`
-- source ZIP SHA-256
-- base commit
-- `package.json` version 0.8.1
-
-作業branchを作る。
-既存sourceを上書きしない。
-
-## 2. local preflight
+## 2. local validation
 
 ```bash
 npm ci
@@ -32,194 +19,106 @@ npm run check:project
 npm run check:pdf-links
 npm run check:stage08
 npm run test:owner-bootstrap
-npm run visual:stage08
+npm run verify:final-docs
 npm run deploy:dry-run
 npm audit
 npm audit --omit=dev
 ```
 
-一件でも失敗したらCloudflare操作を開始しない。
+一件でも失敗したらCloudflare操作をしません。
 
-## 3. Cloudflare loginとinventory
+## 3. external resource inventory
 
-```bash
-npx wrangler whoami
-npx wrangler d1 list
-npx wrangler queues list
-npx wrangler deployments list
-```
+`13_CONFIGURATION_WORKSHEET.md`を実値で埋めます。DashboardまたはWrangler出力だけを使用します。
 
-Dashboardでも次を確認する。
+必須です。
 
-- Email Service sending domain
-- Turnstile widget
-- Workers AI利用可能性
-- Queue metrics画面
-- D1 production storage version
-
-結果を保存する。
-
-## 4. production値の記入
-
-`13_CONFIGURATION_WORKSHEET.md`へ実値を記入する。
-次を推測しない。
-
-- account ID
+- productionとstagingの別Worker
+- productionとstagingの別DB_V2
+- productionとstagingの別Queue
 - production DB_V2 UUID
-- staging DB UUID
-- rate limit namespace ID
-- email sender
-- Turnstile site key
-- origin
+- 4個の異なるRate Limiting namespace ID
+- Email Service sending domain
+- `AUTH_EMAIL_FROM`
+- `AUTH_EMAIL_REPLY_TO`
+- `allowed_sender_addresses`
+- Turnstile site keyとsecret
+- rate-limit pepper 2個
+- productionとstaging origin
 
-## 5. staging resource
+任意の受信者へ送る場合はEmail Serviceの利用条件とaccount planをDashboardで確認します。
 
-productionと別resourceを使う。
-既存resourceがない場合だけ作る。
+## 4. production config gate
 
-```bash
-npx wrangler d1 create <STAGING_DB_NAME>
-npx wrangler queues create <STAGING_QUEUE_NAME>
-```
-
-作成outputのUUIDを記録する。
-Codexは勝手な名前でproduction resourceを作らない。
-
-staging用configを作る。
-production configを上書きしない。
-`wrangler.staging.toml`またはrepositoryで合意された`env.staging`を使う。
-
-## 6. secret設定
-
-stagingへ先に設定する。
-
-```bash
-npx wrangler secret put AUTH_RATE_LIMIT_PEPPER --config wrangler.staging.toml
-npx wrangler secret put PUBLIC_RATE_LIMIT_PEPPER --config wrangler.staging.toml
-npx wrangler secret put TURNSTILE_SECRET_KEY --config wrangler.staging.toml
-```
-
-production secretはstaging成功後に設定する。
-secret値をshell history。log。documentへ出さない。
-
-## 7. staging migration
-
-```bash
-npx wrangler d1 migrations apply <STAGING_DB_NAME> --remote --config wrangler.staging.toml
-node scripts/verify-remote-d1.mjs
-```
-
-`verify-remote-d1.mjs`が固定DB名を使う場合はstaging用の環境変数または安全な一時copyで実行する。
-production DBを検査対象にしない。
-
-## 8. staging deploy
-
-```bash
-npx wrangler deploy --config wrangler.staging.toml
-```
-
-deploy outputのversion IDとdeployment IDを記録する。
-
-## 9. staging acceptance
-
-`10_STAGING_ACCEPTANCE_TEST.md`を全件実施する。
-Network panelでPDF bytes。filename。page textが送信されないことを確認する。
-Email。AI。Queue。Realtime。辞書。理解度。CSV。snapshotを確認する。
-
-失敗した場合はproductionへ進まない。
-
-## 10. production D1復旧点
-
-```bash
-npx wrangler d1 info class_comment_db_v2
-npx wrangler d1 time-travel info class_comment_db_v2
-```
-
-現在bookmarkを記録する。
-D1 Time Travelはrestore可能な期間を持つ。
-restoreはDB全体を上書きするため通常rollbackには使わない。
-
-## 11. production config検査
-
-`wrangler.toml`へ実値を設定した後に実行する。
+実値反映後に実行します。
 
 ```bash
 npm run verify:deployment
 npm run verify:ai-ready
-npm run verify:email-auth-ready
 npm run deploy:dry-run
 ```
 
-未確認Ownerがいる場合は`EMAIL_AUTH_REQUIRED=0`を維持する。
+失敗を無視しません。
 
-## 12. production migration
+## 5. staging
+
+production resourceを共有しません。同じrelease commitをstagingへdeployします。`10_STAGING_ACCEPTANCE_TEST.md`を全件実行します。
+
+保存します。
+
+- staging commit
+- staging deploymentまたはversion ID
+- acceptance record
+- acceptance record SHA-256
+- resource inventory
+- test data cleanup記録
+
+## 6. production前停止
+
+次を提示して明示承認を得ます。
+
+- exact release commit
+- staging deployment ID
+- staging acceptance record SHA-256
+- production resource一覧
+- deploy前D1 bookmark
+- pending migration一覧
+- rollback先Worker deployment
+- 実行予定command
+
+## 7. D1
 
 ```bash
+npx wrangler d1 info class_comment_db_v2
+npx wrangler d1 time-travel info class_comment_db_v2
+npm run verify:stage82-preflight
+npx wrangler d1 migrations apply class_comment_db --remote
 npx wrangler d1 migrations apply class_comment_db_v2 --remote
 node scripts/verify-remote-d1.mjs
 ```
 
-legacy DBへ未適用migrationがある場合だけ次を実行する。
+legacy migrationはpendingがある場合だけ適用します。outputを保存します。
+
+## 8. secretとdeploy
 
 ```bash
-npx wrangler d1 migrations apply class_comment_db --remote
-```
-
-migration outputを保存する。
-
-## 13. production deploy
-
-推奨は既存safe scriptを使う。
-
-```powershell
-$env:AUTH_RATE_LIMIT_PEPPER = '<SECRET>'
-$env:PUBLIC_RATE_LIMIT_PEPPER = '<SECRET>'
-$env:TURNSTILE_SECRET_KEY = '<SECRET>'
-npm run deploy
-```
-
-scriptは`DEPLOY_PRODUCTION`の手入力を要求する。
-Codexはuserの明示承認なしに入力しない。
-
-手動deployを使う場合:
-
-```bash
+node scripts/configure-rate-limit-secret.mjs
 npx wrangler deploy
+node scripts/verify-remote-d1.mjs
+node scripts/smoke-production.mjs
+npx wrangler deployments status
+npx wrangler versions list
 ```
 
-## 14. production smoke
+## 9. 禁止
 
-- login
-- 授業作成
-- Student join
-- コメント投稿
-- moderation
-- Viewer Realtime
-- email request
-- dictionary pack
-- AI queue
-- PDF bind
-- page change
-- understanding
-- snapshot
-- CSV checksum
-- retention query
-
-Queue backlogとWorker errorを確認する。
-
-## 15. 作業記録
-
-最低限次を保存する。
-
-- 実行日時とtimezone
-- source SHA-256
-- Git commit
-- Wrangler version
-- Cloudflare account
-- resource ID一覧
-- D1 bookmark
-- migration output
-- staging URL。version ID
-- production version ID
-- smoke結果
-- rollback要否
+- design変更
+- unrelated refactor
+- external IDの推測
+- `0001`〜`0017`の編集
+- productionへ直接deploy
+- stagingとproductionのresource共有
+- user承認なしの`DEPLOY_PRODUCTION`
+- user承認なしのTime Travel restore
+- PDF本体またはpage textの送信
+- reviewed runbookなしのproduction data repair

@@ -1,42 +1,43 @@
 # Cloudflare反映前の未設定項目
 
-この文書は現行`wrangler.toml`とdry-run出力を基準にする。
-Codexは次を実値で設定するまでproduction deployを行わない。
+現行sourceのlocal検査とは別です。次は外部Cloudflare accountでしか確定できません。
 
-## 必須blocker
+## production blocker
 
-1. `DB_V2.database_id`が未設定
-2. `AUTH_LOGIN_IP_LIMITER`が未設定
-3. `AUTH_LOGIN_ACCOUNT_LIMITER`が未設定
-4. `PUBLIC_COMMENT_RATE_LIMITER`が未設定
-5. `AUTH_PUBLIC_EMAIL_LIMITER`が未設定
-6. `AUTH_EMAIL_FROM`が未設定
-7. `AUTH_EMAIL_REPLY_TO`が未設定
-8. `TURNSTILE_SITE_KEY`が未設定
-9. `AUTH_RATE_LIMIT_PEPPER` secretが未設定
-10. `PUBLIC_RATE_LIMIT_PEPPER` secretが未設定
-11. `TURNSTILE_SECRET_KEY` secretが未設定
-12. staging用Worker。DB_V2。Queue。originが未定
-13. Email Service sending domainのonboarding確認が必要
-14. `EMAIL` bindingは現在unrestrictedとしてdry-runへ表示される
+1. `DB_V2.database_id`
+2. `AUTH_LOGIN_IP_LIMITER.namespace_id`
+3. `AUTH_LOGIN_ACCOUNT_LIMITER.namespace_id`
+4. `PUBLIC_COMMENT_RATE_LIMITER.namespace_id`
+5. `AUTH_PUBLIC_EMAIL_LIMITER.namespace_id`
+6. `AUTH_EMAIL_FROM`
+7. `AUTH_EMAIL_REPLY_TO`
+8. `TURNSTILE_SITE_KEY`
+9. `EMAIL.allowed_sender_addresses`
+10. `AUTH_RATE_LIMIT_PEPPER` secret
+11. `PUBLIC_RATE_LIMIT_PEPPER` secret
+12. `TURNSTILE_SECRET_KEY` secret
+13. Email Service sending domain onboarding確認
+14. 任意受信者送信に必要なaccount plan確認
 
-## 設定済み
+## staging blocker
 
-- Worker name
-- legacy `DB` UUID
-- `DB_V2` database nameとmigration directory
-- Durable Object binding
-- Static Assets
-- Workers AI binding
-- AI model vars
-- production AI Queue名
-- Cron Trigger
-- production origin
-- `EMAIL_AUTH_REQUIRED=0`
+- staging Worker
+- staging legacy DBとDB_V2
+- staging Queue
+- staging Rate Limiting namespace 4個
+- staging EmailとTurnstile設定
+- staging origin
+- staging acceptance record
 
-## deploy禁止条件
+## 現行verify結果
 
-`npm run verify:deployment`が成功しない状態でdeployしない。
-Email bindingは可能な限りsender制限を追加する。
-四つのrate limit bindingは異なるnamespace IDを使う。
-未確認Ownerがいる場合は`EMAIL_AUTH_REQUIRED=0`を維持する。
+実値未設定の`wrangler.toml`に対する`npm run verify:deployment`は9件で失敗します。
+
+- DB_V2 UUID
+- Rate Limiting binding 4個
+- AUTH_EMAIL_FROM
+- AUTH_EMAIL_REPLY_TO
+- TURNSTILE_SITE_KEY
+- EMAIL sender allowlist
+
+secretとstagingはfileだけでは完全検証できません。Codexは失敗を消すために架空値を入れません。

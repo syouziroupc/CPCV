@@ -19,7 +19,7 @@ function serializeParticipantCookie(request, env, name, token, publicCode) {
   const secure = url.protocol === "https:" || !["local", "test"].includes(String(env?.APP_ENV || "").toLowerCase());
   const attributes = [
     `${name}=${encodeURIComponent(token)}`,
-    `Path=/api/public/sessions/${String(publicCode).toUpperCase()}`,
+    "Path=/api/public/sessions/",
     "Max-Age=2592000",
     "HttpOnly",
     "SameSite=Lax"

@@ -254,13 +254,13 @@ async function handleSession(request, env) {
   rejectOrganizationSelector(request);
   const auth = await requireAuth(request, env);
   const internal = getSessionInternal(auth);
+  const context = await loadSessionContext(env.DB_V2, auth.sessionId);
+  if (!context) throw new AuthError(401, "AUTH_REQUIRED");
   const issued = await issueSessionCsrfToken(
     env.DB_V2,
     auth.sessionId,
-    internal?.absoluteExpiresAt
+    context.absolute_expires_at || internal?.absoluteExpiresAt
   );
-  const context = await loadSessionContext(env.DB_V2, auth.sessionId);
-  if (!context) throw new AuthError(401, "AUTH_REQUIRED");
   return authJson(sessionResponseFromContext(context, issued.rawToken));
 }
 
@@ -285,7 +285,12 @@ async function handleLogout(request, env) {
       actorRole: auth.role,
       action: "auth.logout",
       targetType: "auth_session",
-      targetId: auth.sessionId
+      targetId: auth.sessionId,
+      createdAt: now,
+      condition: {
+        sql: "EXISTS (SELECT 1 FROM auth_sessions WHERE id = ?11 AND revoked_at = ?12)",
+        bindings: [auth.sessionId, now]
+      }
     })
   ]);
   return authJson({ ok: true }, 200, {
@@ -311,6 +316,16 @@ async function handlePasswordChange(request, env) {
     throw new AuthError(401, "CURRENT_PASSWORD_INVALID");
   }
   requireValidPassword(newPassword, user.email || user.login_id);
+  const organization = await env.DB_V2.prepare(
+    `SELECT name FROM organizations
+     WHERE id = ?1 AND status = 'active'
+       AND EXISTS (
+         SELECT 1 FROM organization_members
+         WHERE organization_id = ?1 AND user_id = ?2 AND status = 'active'
+       )
+     LIMIT 1`
+  ).bind(auth.organizationId, auth.userId).first();
+  if (!organization) throw new AuthError(401, "AUTH_REQUIRED");
 
   const now = new Date();
   const nowIso = now.toISOString();
@@ -370,9 +385,7 @@ async function handlePasswordChange(request, env) {
 
   const membership = {
     organization_id: auth.organizationId,
-    organization_name: (await env.DB_V2.prepare(
-      `SELECT name FROM organizations WHERE id = ?1 LIMIT 1`
-    ).bind(auth.organizationId).first())?.name || "",
+    organization_name: organization.name,
     role: auth.role
   };
   user.password_scheme = PASSWORD_SCHEME;
@@ -536,6 +549,9 @@ async function enforceLoginRateLimits(request, env, loginId) {
   const account = await checkRateLimit(env.AUTH_LOGIN_ACCOUNT_LIMITER, accountKey, {
     onFailure: () => onFailure("account")
   });
+  if (ip.unavailable || account.unavailable) {
+    throw new AuthError(503, "RATE_LIMIT_UNAVAILABLE", { headers: { "retry-after": "60" }, expose: true });
+  }
   if (!ip.success || !account.success) {
     await safeAudit(env.DB_V2, {
       actorType: "system",

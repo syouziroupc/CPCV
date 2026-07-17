@@ -1,82 +1,43 @@
-# 運用。監視。保守仕様
+# 運用と監視
 
-## 1. 毎日確認
+## scheduled jobs
 
-- Worker error rate
-- D1 error
-- Queue backlog
-- Queue retry
-- AI job failed。stale
-- Email failed
-- Cron実行
-- cleanup件数
+- `*/5 * * * *`: AI recovery。stale processing回収。再dispatch
+- `17 3 * * *`: retention。expired auth data。Realtime data。PDF analytics data
 
-## 2. 毎週確認
+CronはUTCです。
 
-- active organization
-- active Owner不在organization
-- unverified Owner
-- AI利用量
-- dictionary pack version
-- expired token残数
-- snapshot checksum error
-- audit log異常
+## 日常監視
 
-## 3. 毎月確認
+- Worker error率
+- D1 errorとlatency
+- Queue backlogとretry
+- AI quotaとprovider error
+- Email delivery attemptのpending残留
+- Rate Limiting unavailable audit
+- WebSocket auth revalidation failure
+- projection inconsistency audit
+- retention backlog
 
-- dependency update候補
-- Wrangler changelog
-- D1 migration status
-- Time Travel利用可能期間
-- Queue retentionとretry
-- Email domain DNS
-- Turnstile key管理
-- rate limit誤遮断
-- privacy review
+## 定期検査
 
-## 4. logとprivacy
-
-logへfull email。full IP。raw token。PDF内容を出さない。
-request ID。user ID。organization ID。action。masked emailを使う。
-production logを共有する場合は追加maskする。
-
-## 5. Queue監視
-
-Cloudflare Queue metricsで次を確認する。
-
-- backlog
-- consumer concurrency
-- successful operations
-- retry
-- failed delivery
-
-現行はDLQなしである。
-max retry到達messageは削除され得る。
-必要性を確認した場合は別stageでDLQを追加する。
-
-## 6. D1監視
-
-- `PRAGMA quick_check`
+- `node scripts/verify-remote-d1.mjs`
 - `PRAGMA foreign_key_check`
-- migration status
-- database size
-- query error
-- active Owner
+- `PRAGMA quick_check`
+- active Owner count
+- unverified Owner count
+- `d1_migrations`が`0017`まで存在
+- Stage 8.2永続trigger 42本
 
-Remote healthは`node scripts/verify-remote-d1.mjs`を使う。
+## migration規則
 
-## 7. release管理
+`0001`〜`0017`を編集しません。次の変更は`0018`以降へ追加します。
 
-- exact Git SHAへ固定
-- source ZIP SHA-256を記録
-- stagingとproduction version IDを記録
-- migration outputを保存
-- smoke testを保存
-- rollback対象versionを記録
+## incident
 
-## 8. 次段階へ変更する場合
-
-Stage 8完成後の変更はStage 9として扱う。
-既存`0001`〜`0016`を編集しない。
-新migrationは`0017`から開始する。
-PDF privacy境界。手動moderation優先。organization境界を変更しない。
+- authまたはdata境界異常は新規書込を停止する
+- limiter outageをfail openへ変更しない
+- production dataを直接修正しない
+- evidenceを保存する
+- reviewed repair SQLをstaging copyで検証する
+- production実行前にbookmarkと明示承認を得る

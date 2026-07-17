@@ -11,7 +11,7 @@ export async function buildRateLimitKey(value, pepper, prefix) {
 
 export async function checkRateLimit(limiter, key, options = {}) {
   if (!limiter || typeof limiter.limit !== "function") {
-    return { success: true, unavailable: true };
+    return { success: false, unavailable: true };
   }
   try {
     const result = await limiter.limit({ key });
@@ -21,15 +21,16 @@ export async function checkRateLimit(limiter, key, options = {}) {
       try {
         await options.onFailure(error);
       } catch {
-        // An unavailable limiter must not become an authentication outage because audit reporting also failed.
+        // Audit failure must not hide the limiter outage.
       }
     }
-    return { success: true, unavailable: true };
+    return { success: false, unavailable: true };
   }
 }
 
 export async function requireRateLimit(limiter, key, options = {}) {
   const result = await checkRateLimit(limiter, key, options);
+  if (result.unavailable) throw new AuthError(503, "RATE_LIMIT_UNAVAILABLE", { expose: true });
   if (!result.success) throw new AuthError(429, "RATE_LIMITED");
   return result;
 }

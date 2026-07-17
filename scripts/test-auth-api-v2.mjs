@@ -180,7 +180,7 @@ async function testLockAndRateLimit(h) {
   h.env.AUTH_LOGIN_IP_LIMITER = { limit: async () => { throw new Error("unavailable"); } };
   h.env.AUTH_LOGIN_ACCOUNT_LIMITER = { limit: async () => ({ success: true }) };
   response = await h.api("/api/auth/login", { method: "POST", body: { loginId: "teacher.a", password: DEFAULT_PASSWORD } });
-  check("limiter failure fails open while D1 authentication continues", response.status === 200);
+  check("limiter failure fails closed with service unavailable", response.status === 503 && response.headers.get("retry-after") === "60");
   check("limiter failure audit contains no raw IP or login ID", !JSON.stringify(h.rows("SELECT details_json FROM audit_logs WHERE action='auth.rate_limiter.unavailable'" )).includes("teacher.a") && !JSON.stringify(h.rows("SELECT details_json FROM audit_logs WHERE action='auth.rate_limiter.unavailable'" )).includes("127.0.0.1"));
 
   h.env.APP_ENV = "production";

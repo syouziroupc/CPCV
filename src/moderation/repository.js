@@ -17,7 +17,8 @@ export async function moderateComment(db, input) {
       `UPDATE comments
        SET moderation_state = ?1, updated_at = ?2, deleted_at = ?3
        WHERE id = ?4 AND organization_id = ?5 AND live_session_id = ?6
-         AND moderation_state = ?7 AND updated_at = ?8`
+         AND moderation_state = ?7 AND updated_at = ?8
+         AND retained_until > ?9`
     ).bind(
       toState,
       resultUpdatedAt,
@@ -26,7 +27,8 @@ export async function moderateComment(db, input) {
       input.organizationId,
       input.liveSessionId,
       current.moderation_state,
-      input.expectedUpdatedAt
+      input.expectedUpdatedAt,
+      resultUpdatedAt
     ),
     db.prepare(
       `INSERT INTO comment_moderation_actions (
@@ -38,7 +40,8 @@ export async function moderateComment(db, input) {
               ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9
        FROM comments
        WHERE id = ?10 AND organization_id = ?11 AND live_session_id = ?12
-         AND moderation_state = ?6 AND updated_at = ?9`
+         AND moderation_state = ?6 AND updated_at = ?9
+         AND retained_until > ?9`
     ).bind(
       actionId,
       input.actorUserId,
@@ -66,7 +69,8 @@ export async function moderateComment(db, input) {
                 ?2, 'user', ?3, ?4, ?5
          FROM comments
          WHERE id = ?6 AND organization_id = ?7 AND live_session_id = ?8
-           AND moderation_state = ?9 AND updated_at = ?5`
+           AND moderation_state = ?9 AND updated_at = ?5
+           AND retained_until > ?5`
       ).bind(
         makeId("cevt"),
         eventType,
@@ -92,6 +96,7 @@ export async function moderateComment(db, input) {
          SELECT 1 FROM comments
          WHERE id = ?6 AND organization_id = ?2 AND live_session_id = ?9
            AND moderation_state = ?10 AND updated_at = ?8
+           AND retained_until > ?8
        )`
     ).bind(
       makeId("aud"),
@@ -202,13 +207,16 @@ export function sessionModerationUpsertStatement(db, input) {
 }
 
 async function loadCommentForModeration(db, input) {
+  const nowIso = new Date(input.now ?? Date.now()).toISOString();
   return db.prepare(
     `SELECT id, organization_id, live_session_id, nickname, message,
             message_length, moderation_state, created_at, updated_at,
             retained_until, deleted_at
      FROM comments
-     WHERE id = ?1 AND organization_id = ?2 AND live_session_id = ?3 LIMIT 1`
-  ).bind(input.commentId, input.organizationId, input.liveSessionId).first();
+     WHERE id = ?1 AND organization_id = ?2 AND live_session_id = ?3
+       AND retained_until > ?4
+     LIMIT 1`
+  ).bind(input.commentId, input.organizationId, input.liveSessionId, nowIso).first();
 }
 
 function moderationEventType(action) {

@@ -4,12 +4,7 @@ const FORBIDDEN_DETAIL_KEY = /(password|token|hash|salt|cookie|authorization|ip)
 
 export function auditStatement(db, entry) {
   const details = sanitizeDetails(entry.details || null);
-  return db.prepare(
-    `INSERT INTO audit_logs (
-       id, organization_id, actor_type, actor_user_id, actor_role,
-       action, target_type, target_id, details_json, created_at
-     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
-  ).bind(
+  const values = [
     entry.id || makeId("aud"),
     entry.organizationId || null,
     entry.actorType || "system",
@@ -20,7 +15,24 @@ export function auditStatement(db, entry) {
     entry.targetId || null,
     details ? JSON.stringify(details) : null,
     entry.createdAt || new Date().toISOString()
-  );
+  ];
+  const condition = entry.condition;
+  if (condition) {
+    if (!condition.sql || !Array.isArray(condition.bindings)) throw new TypeError("INVALID_AUDIT_CONDITION");
+    return db.prepare(
+      `INSERT INTO audit_logs (
+         id, organization_id, actor_type, actor_user_id, actor_role,
+         action, target_type, target_id, details_json, created_at
+       ) SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+         WHERE ${condition.sql}`
+    ).bind(...values, ...condition.bindings);
+  }
+  return db.prepare(
+    `INSERT INTO audit_logs (
+       id, organization_id, actor_type, actor_user_id, actor_role,
+       action, target_type, target_id, details_json, created_at
+     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`
+  ).bind(...values);
 }
 
 export async function writeAudit(db, entry) {

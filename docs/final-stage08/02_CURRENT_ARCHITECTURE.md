@@ -1,95 +1,69 @@
-# 現行アーキテクチャ仕様
+# CPCV 現行システム基準
 
-## 1. 基準
+更新基準: Stage 8.2。package version `0.8.2`。
 
-- Worker name: `class-pdf-comment-viewer-v01`
-- entry: `src/index.js`
-- compatibility date: `2026-06-17`
-- code version: `0.8.1`
-- base commit: `7d740e699ec4661cf3ec35f5bd4a86a2887422c9`
-- Node.js: 22系
-- Wrangler: 4.110.0
+## 構成
 
-## 2. Cloudflare binding
+| 項目 | 現在値 |
+|---|---|
+| Worker | `class-pdf-comment-viewer-v01` |
+| entry | `src/index.js` |
+| Node.js | 22系 |
+| legacy D1 | `DB` / `class_comment_db` |
+| application source of truth | `DB_V2` / `class_comment_db_v2` |
+| Durable Object | `COMMENT_ROOM` / `CommentRoom` |
+| email | `EMAIL` / Cloudflare Email Service |
+| AI | `AI` / Workers AI |
+| Queue | `AI_JOBS_QUEUE` / `cpcv-ai-jobs` |
+| assets | `ASSETS` / `public/` |
+| migration | `migrations-v2/0001`〜`0017` |
+| scheduled recovery | 5分ごと |
+| daily retention | UTC 03:17 |
 
-| binding | Cloudflare resource | 役割 |
-|---|---|---|
-| `DB` | D1 `class_comment_db` | 旧互換投影 |
-| `DB_V2` | D1 `class_comment_db_v2` | 現行正本 |
-| `COMMENT_ROOM` | Durable Object `CommentRoom` | WebSocket broadcast |
-| `ASSETS` | Workers Static Assets | UI配信 |
-| `EMAIL` | Email Service | 確認。reset。招待。通知メール |
-| `AI` | Workers AI | moderation助言。翻訳 |
-| `AI_JOBS_QUEUE` | Queue `cpcv-ai-jobs` | 非同期AI job |
-| Rate Limiting 4 bindings | Workers Rate Limiting | login。公開投稿。公開メール |
+## データ境界
 
+`DB_V2`が正本です。legacy `DB`は互換投影先です。授業終了と削除でV2側が失敗した場合はlegacy投影を復元します。復元できない場合は`SESSION_PROJECTION_INCONSISTENT`で停止します。
 
-## 3. 実行handler
+Stage 8.2 migration `0017_final_integrity_hardening.sql`は組織・session・comment・AI jobのcontextをtriggerで強制します。永続triggerは42本です。既存不整合が一件でもある場合はmigrationを中止します。
 
-Workerは次のhandlerを持つ。
+## 認証
 
-- `fetch`: HTTP。API。Static Assets。WebSocket upgrade
-- `queue`: AI job consumer
-- `scheduled`: retention。expired token。stale job cleanup
+- HttpOnly Cookie
+- productionでSecureとSameSite=Strict
+- unsafe requestでOrigin完全一致。JSON。CSRF
+- PBKDF2-HMAC-SHA-256。600000 iterations
+- login IPとaccountのRate Limiting
+- limiter障害時は503でfail closed
+- password変更は組織context取得後に一括確定
+- session GETはcontext確認後にCSRF tokenを発行
 
-## 4. 主要source module
+## コメントとRealtime
 
-- `src/auth`: 認証。Cookie。CSRF。password。rate limit。email
-- `src/routes`: API routing
-- `src/comments`: コメントvalidation。repository。CSV
-- `src/moderation`: 手動moderation
-- `src/realtime`: Durable Object。event。ticket。edge limiter
-- `src/ai`: provider。processor。privacy。repository
-- `src/content-filter`: 言語判定。正規化。照合。pack
-- `src/pdf-analysis`: PDF metadata。page状態。理解度。集計。CSV
-- `src/db`: 旧DB投影
+- participant tokenはhash保存
+- idempotency keyはparticipant単位
+- 期限切れcommentはcron前でも読取対象外
+- Realtime sequenceの正本はD1
+- 期限切れeventはcatch-upとsnapshotから除外
+- WebSocket ticketは一回だけ原子的に消費
+- 接続中認証は5分ごとに再検証
 
-## 5. データフロー
+## filterとAI
 
-### 教員
+- filterは全termを評価する
+- response evidenceだけ100件に制限する
+- active term上限2000件をD1 triggerで強制する
+- mutationとauditは同じD1 batch
+- AI resultはjob claim identityが一致する場合だけ確定する
+- stale workerはresult。translation。Realtimeを更新できない
+- 期限切れcomment本文をWorkers AIへ送らない
+- Queue失敗jobは5分ごとに回収する
 
-1. メールとpasswordでloginする。
-2. WorkerはDB_V2でuser。membership。organizationを確認する。
-3. HttpOnly Cookie sessionを発行する。
-4. 教員は授業を作成する。
-5. DB_V2へ授業を保存する。
-6. 旧DBへ互換投影する。
-7. PDFをbrowserで読み込む。
-8. browserでSHA-256を計算する。
-9. metadataだけをDB_V2へ保存する。
-10. page変更をDB_V2へ保存する。
+## PDF分析
 
-### Student
+browserから送る値はSHA-256。補助fingerprint。page count。file size。現在pageです。PDF bytes。filename。page textは送信しません。
 
-1. 公開codeから授業へ参加する。
-2. 匿名participant token Cookieを取得する。
-3. コメントを投稿する。
-4. Durable Objectが検証済みrequestを受ける。
-5. 辞書filterとmoderation modeを評価する。
-6. D1へコメント。page link。Realtime eventを保存する。
-7. Durable ObjectがViewerへbroadcastする。
-8. 必要なAI jobだけQueueへ送る。
+page更新は実際の更新件数とevent IDで勝者を確定します。理解度はactive sessionと表示中pageが一致する場合だけ保存します。切断後の推定滞在時間は加算しません。snapshotとauditは同じbatchで確定します。
 
-### Viewer
+## deploy状態
 
-1. WebSocket ticketを取得する。
-2. Durable Objectへ接続する。
-3. sequence eventを受信する。
-4. 欠落時はD1 catch-upを取得する。
-5. 原文ではなく表示許可されたmessageと翻訳を表示する。
-
-## 6. 正本とcache
-
-- 認証。組織。授業。コメント。moderation。Realtime sequence。AI。辞書。PDF分析はDB_V2が正本である。
-- Durable Object memoryは接続中cacheである。
-- Static AssetsはUI配信物である。
-- 旧DBは互換投影である。正本ではない。
-- browser local stateは補助である。server状態より優先しない。
-
-## 7. 障害分離
-
-- AI障害でコメント投稿をrollbackしない。
-- Email障害で既存loginを停止しない。
-- Realtime通知失敗時はD1 catch-upで回復する。
-- 旧DB投影失敗時は補償処理とauditを行う。
-- Stage 8 migration未適用時はPDF分析だけを無効化する。既存投稿は継続する。
+sourceとlocal検査はrelease candidateです。productionは未設定外部値のためblockedです。未設定一覧は`docs/final-stage08/17_CLOUDFLARE_PENDING_VALUES.md`を正本とします。

@@ -22,15 +22,25 @@ if (new Set(limiterNamespaces).size !== limiterNamespaces.length) {
   failures.push("All Rate Limiting bindings must use different namespace_id values.");
 }
 
-
-const emailBinding = findArrayBlock("send_email", "name", "EMAIL");
-if (!emailBinding) failures.push("EMAIL send_email binding is missing.");
+const productionValues = {};
 for (const name of ["AUTH_EMAIL_FROM", "AUTH_EMAIL_REPLY_TO", "TURNSTILE_SITE_KEY"]) {
   const match = text.match(new RegExp(`^${name}\\s*=\\s*"([^"]+)"\\s*$`, "m"));
+  productionValues[name] = match?.[1] || "";
   if (!match || /REPLACE_|example\.(?:com|test)|localhost/i.test(match[1])) {
     failures.push(`${name} must contain the final production value.`);
   }
 }
+
+const emailBinding = findArrayBlock("send_email", "name", "EMAIL");
+if (!emailBinding) failures.push("EMAIL send_email binding is missing.");
+else {
+  const senderList = emailBinding.match(/^allowed_sender_addresses\s*=\s*\[([^\]]+)\]\s*$/m)?.[1] || "";
+  const senders = [...senderList.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  if (!productionValues.AUTH_EMAIL_FROM || !senders.includes(productionValues.AUTH_EMAIL_FROM)) {
+    failures.push("EMAIL binding must restrict allowed_sender_addresses to AUTH_EMAIL_FROM.");
+  }
+}
+
 const emailRequired = text.match(/^EMAIL_AUTH_REQUIRED\s*=\s*"([01])"\s*$/m)?.[1];
 if (!emailRequired) failures.push("EMAIL_AUTH_REQUIRED must be 0 or 1.");
 
@@ -42,9 +52,11 @@ for (const name of ["AUTH_ORIGIN", "PUBLIC_ORIGIN"]) {
     failures.push(`${name} must be the final HTTPS production origin.`);
   }
 }
-if (!/^\[triggers\]\s*$[\s\S]*?^crons\s*=\s*\[\s*"[^"\n]+"\s*\]\s*$/m.test(text)) {
-  failures.push("A production Cron Trigger is required for retention maintenance.");
-}
+
+const cronText = text.match(/^crons\s*=\s*\[([^\]]*)\]\s*$/m)?.[1] || "";
+const crons = [...cronText.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+if (!crons.includes("*/5 * * * *")) failures.push("The five-minute AI recovery Cron is required.");
+if (!crons.includes("17 3 * * *")) failures.push("The daily retention Cron is required.");
 
 if (failures.length) {
   for (const failure of failures) console.error(`[FAIL] ${failure}`);
@@ -55,7 +67,7 @@ console.log("production deployment configuration verified");
 function findArrayBlock(section, key, value) {
   const pattern = new RegExp(`\\[\\[${section}\\]\\]([\\s\\S]*?)(?=\\n\\[\\[|\\n\\[[^\\[]|$)`, "g");
   for (const match of text.matchAll(pattern)) {
-    if (new RegExp(`^${key}\\s*=\\s*"${value}"\\s*$`, "m").test(match[0])) return match[0];
+    if (new RegExp(`^${key}\\s*=\\s*"${escapeRegex(value)}"\\s*$`, "m").test(match[0])) return match[0];
   }
   return "";
 }
@@ -68,9 +80,7 @@ function verifyRateLimiter(name, limit, period) {
     return "";
   }
   const namespaceId = block.match(/^namespace_id\s*=\s*"([1-9][0-9]*)"\s*$/m)?.[1] || "";
-  if (!namespaceId) {
-    failures.push(`${name} namespace_id must be a real positive integer string.`);
-  }
+  if (!namespaceId) failures.push(`${name} namespace_id must be a real positive integer string.`);
   const inlineSimple = block.match(/^simple\s*=\s*\{([^}]+)\}\s*$/m)?.[1] || "";
   const simpleText = inlineSimple || block;
   if (!new RegExp(`(?:^|[,\\s])limit\\s*=\\s*${limit}(?:[,\\s]|$)`, "m").test(simpleText)
