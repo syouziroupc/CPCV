@@ -1,0 +1,82 @@
+#:schema ../../../node_modules/wrangler/config-schema.json
+# Copy this file OUTSIDE the source tree. Replace every angle-bracket value
+# with verified Cloudflare values. Do not commit the completed file.
+name = "<STAGING_WORKER_NAME>"
+main = "src/index.js"
+compatibility_date = "2026-06-17"
+
+assets = { directory = "./public", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
+
+[[d1_databases]]
+binding = "DB"
+database_name = "<STAGING_LEGACY_DB_NAME>"
+database_id = "<STAGING_LEGACY_DB_UUID>"
+
+[[d1_databases]]
+binding = "DB_V2"
+database_name = "<STAGING_DB_V2_NAME>"
+database_id = "<STAGING_DB_V2_UUID>"
+migrations_dir = "migrations-v2"
+
+[[send_email]]
+name = "EMAIL"
+allowed_sender_addresses = [ "<STAGING_AUTH_EMAIL_FROM>" ]
+
+[ai]
+binding = "AI"
+
+[[queues.producers]]
+binding = "AI_JOBS_QUEUE"
+queue = "<STAGING_QUEUE_NAME>"
+
+[[queues.consumers]]
+queue = "<STAGING_QUEUE_NAME>"
+max_batch_size = 5
+max_batch_timeout = 5
+max_retries = 3
+
+[[durable_objects.bindings]]
+name = "COMMENT_ROOM"
+class_name = "CommentRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = [ "CommentRoom" ]
+
+[[ratelimits]]
+name = "AUTH_LOGIN_IP_LIMITER"
+namespace_id = "<STAGING_RATE_NAMESPACE_1>"
+simple = { limit = 20, period = 60 }
+
+[[ratelimits]]
+name = "AUTH_LOGIN_ACCOUNT_LIMITER"
+namespace_id = "<STAGING_RATE_NAMESPACE_2>"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "PUBLIC_COMMENT_RATE_LIMITER"
+namespace_id = "<STAGING_RATE_NAMESPACE_3>"
+simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "AUTH_PUBLIC_EMAIL_LIMITER"
+namespace_id = "<STAGING_RATE_NAMESPACE_4>"
+simple = { limit = 30, period = 60 }
+
+[vars]
+APP_ENV = "production"
+AUTH_V2_ENABLED = "1"
+EMAIL_AUTH_REQUIRED = "0"
+AI_MODERATION_MODEL = "@cf/zai-org/glm-4.7-flash"
+AI_MODERATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+AI_TRANSLATION_MODEL = "@cf/zai-org/glm-4.7-flash"
+AI_TRANSLATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+AI_TIMEOUT_MS = "12000"
+AUTH_ORIGIN = "<STAGING_HTTPS_ORIGIN>"
+PUBLIC_ORIGIN = "<STAGING_HTTPS_ORIGIN>"
+AUTH_EMAIL_FROM = "<STAGING_AUTH_EMAIL_FROM>"
+AUTH_EMAIL_REPLY_TO = "<STAGING_AUTH_EMAIL_REPLY_TO>"
+TURNSTILE_SITE_KEY = "<STAGING_TURNSTILE_SITE_KEY>"
+
+[triggers]
+crons = [ "*/5 * * * *", "17 3 * * *" ]

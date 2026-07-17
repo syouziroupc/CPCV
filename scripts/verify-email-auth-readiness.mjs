@@ -1,9 +1,22 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { parseDeploymentOptions, withWranglerConfig } from "./deployment-cli.mjs";
 
-const database = "class_comment_db_v2";
-const config = readFileSync(resolve(process.cwd(), "wrangler.toml"), "utf8");
+const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+let target;
+try {
+  target = parseDeploymentOptions(process.argv.slice(2), {
+    defaultDatabase: "class_comment_db_v2",
+    defaultConfigPath: resolve(ROOT, "wrangler.toml")
+  });
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}
+const database = target.database;
+const config = readFileSync(target.configPath, "utf8");
 const emailAuthRequired = config.match(/^EMAIL_AUTH_REQUIRED\s*=\s*"([01])"\s*$/m)?.[1];
 if (emailAuthRequired !== "1") {
   console.log("EMAIL_AUTH_REQUIRED=0。メール必須化は要求されていないためOwner移行検査を省略します。");
@@ -20,9 +33,11 @@ const sql = `SELECT o.id AS organization_id, o.name AS organization_name,
              GROUP BY o.id,o.name
              HAVING verified_owner_count < active_owner_count
              ORDER BY o.id;`;
-const result = spawnSync(process.platform === "win32" ? "npx.cmd" : "npx", [
+const args = withWranglerConfig([
   "wrangler", "d1", "execute", database, "--remote", "--json", "--command", sql
-], { cwd: process.cwd(), env: process.env, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+], target.configPath);
+const result = spawnSync(process.platform === "win32" ? "npx.cmd" : "npx", args,
+  { cwd: ROOT, env: process.env, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
 if (result.status !== 0) {
   process.stderr.write(result.stderr || result.stdout || "Remote D1 query failed.\n");
   process.exit(result.status || 1);

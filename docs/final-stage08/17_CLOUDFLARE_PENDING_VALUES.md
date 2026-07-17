@@ -1,6 +1,6 @@
 # Cloudflare反映前の未設定項目
 
-現行sourceのlocal検査とは別です。次は外部Cloudflare accountでしか確定できません。
+source内で解決できない外部値です。架空値では埋めません。
 
 ## production blocker
 
@@ -25,13 +25,23 @@
 - staging legacy DBとDB_V2
 - staging Queue
 - staging Rate Limiting namespace 4個
-- staging EmailとTurnstile設定
+- staging Email設定
+- staging Turnstile設定
 - staging origin
-- staging acceptance record
+- staging secret 3個
+- staging acceptance実施
+
+## sourceに含む準備物
+
+- `templates/WRANGLER_STAGING_TEMPLATE.toml`
+- `templates/STAGING_ACCEPTANCE_RECORD_TEMPLATE.txt`
+- `scripts/verify-environment-separation.mjs`
+- `scripts/verify-staging-evidence.mjs`
+- `scripts/safe-deploy.ps1`
 
 ## 現行verify結果
 
-実値未設定の`wrangler.toml`に対する`npm run verify:deployment`は9件で失敗します。
+実値未設定の`wrangler.toml`に対する`npm run verify:deployment`は9件で停止します。
 
 - DB_V2 UUID
 - Rate Limiting binding 4個
@@ -40,4 +50,4 @@
 - TURNSTILE_SITE_KEY
 - EMAIL sender allowlist
 
-secretとstagingはfileだけでは完全検証できません。Codexは失敗を消すために架空値を入れません。
+この停止は意図したfail-closed動作です。

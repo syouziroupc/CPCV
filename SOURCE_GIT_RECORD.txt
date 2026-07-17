@@ -2,15 +2,18 @@ CPCV Stage 8.2 source record
 
 Version: 0.8.2
 Local reconstruction baseline commit: 3471c1354c66e6570d7db63c9093edce1e29fd1e
-Stage 8.2 content commit: 30a93355521aca62bdaa8abb4a126021a0aa759d
+Stage 8.2 implementation commit: 30a93355521aca62bdaa8abb4a126021a0aa759d
+Stage 8.2 verified application record commit: e624e178e3a08d97fd205f5b1682f029eb6616ec
 Original Stage 8 upstream record retained from the supplied handoff: 74fc8daed92c4469a6aa1c96092522a4ee8d0730
 
-Scope:
-- Stage 8 audit remediation for all 71 recorded findings
-- Migration 0017 final integrity hardening
-- Final regression and deployment-gate verification
-- Canonical Codex staging and production instructions
-- Stage 8.2 preflight and remote D1 verification
+Final package scope:
+- all 71 audit findings remediated
+- migration 0017 final integrity hardening
+- 889 functional regressions
+- staging and production resource separation gate
+- staging evidence file and SHA-256 verification
+- deployment evidence capture and manifest generation
+- canonical Codex staging and production instructions
 
 Remote staging deploy: not performed
 Remote production deploy: not performed

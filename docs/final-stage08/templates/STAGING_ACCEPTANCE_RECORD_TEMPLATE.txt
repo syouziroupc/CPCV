@@ -1,0 +1,13 @@
+# Fill only after every item in 10_STAGING_ACCEPTANCE_TEST.md passes.
+record_format=CPCV_STAGING_ACCEPTANCE_V1
+result=PASSED
+release_commit=<EXACT_40_CHARACTER_GIT_SHA>
+staging_deployment_id=<CLOUDFLARE_STAGING_DEPLOYMENT_OR_VERSION_ID>
+staging_config_sha256=<SHA256_OF_EXTERNAL_STAGING_WRANGLER_CONFIG>
+acceptance_items_total=<POSITIVE_INTEGER>
+acceptance_items_failed=0
+production_resources_used=NO
+test_data_cleanup=COMPLETED
+pdf_data_egress=NONE
+executed_by=<NAME_OR_OPERATOR_ID>
+completed_at_utc=<YYYY-MM-DDTHH:MM:SSZ>

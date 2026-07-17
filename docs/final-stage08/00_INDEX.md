@@ -34,6 +34,8 @@ Cloudflare remote変更: 未実施
 16. `13_CONFIGURATION_WORKSHEET.md`
 17. `21_FINAL_VERIFICATION_REPORT.md`
 18. `15_REFERENCES.md`
+19. `templates/WRANGLER_STAGING_TEMPLATE.toml`
+20. `templates/STAGING_ACCEPTANCE_RECORD_TEMPLATE.txt`
 
 ## 絶対条件
 
@@ -43,5 +45,6 @@ Cloudflare remote変更: 未実施
 - PDF bytes。filename。page text。画像をCloudflareへ送らない。
 - dirty tree。hash不一致。試験失敗。config検査失敗で停止する。
 - staging合格記録がないcommitをproductionへdeployしない。
+- staging configと受入記録の実ファイルをhashと内容で検査する。
 - Time Travel restoreは破壊的操作として明示承認なしに実行しない。
 - `22_AUDIT_FIX_MATRIX.md` / `.csv`: 元監査71件の修正対応表

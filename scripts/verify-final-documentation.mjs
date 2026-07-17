@@ -29,12 +29,16 @@ for (const phrase of [
   "npm run verify:stage82-preflight",
   "npx wrangler d1 time-travel info class_comment_db_v2",
   "node scripts/verify-remote-d1.mjs",
+  "node scripts/verify-environment-separation.mjs",
+  "node scripts/verify-staging-evidence.mjs",
+  "WRANGLER_STAGING_TEMPLATE.toml",
   "npx wrangler deployments status"
 ]) check(`Codex instruction includes: ${phrase}`, codex.includes(phrase));
 
 const checklist = text("docs/final-stage08/19_DEPLOYMENT_FINAL_CHECKLIST.md");
 check("deployment checklist requires clean exact commit", checklist.includes("exact 40-character commit") && checklist.includes("clean working tree"));
-check("deployment checklist requires staging evidence", checklist.includes("acceptance record SHA-256") && checklist.includes("staging commitがrelease commitと一致"));
+check("deployment checklist requires staging evidence", checklist.includes("acceptance record SHA-256") && checklist.includes("staging commitがrelease commitと一致") && checklist.includes("verify-staging-evidence"));
+check("deployment checklist requires resource separation", checklist.includes("verify-environment-separation") && checklist.includes("resource共有"));
 check("deployment checklist requires post-deploy DB verification", checklist.includes("Remote D1再検査"));
 
 const pending = text("docs/final-stage08/17_CLOUDFLARE_PENDING_VALUES.md");
@@ -45,6 +49,9 @@ for (const phrase of ["DB_V2.database_id", "AUTH_LOGIN_IP_LIMITER.namespace_id",
 const workflow = text(".github/workflows/deploy-production.yml");
 check("production workflow requires staging commit", workflow.includes("staging_commit_sha") && workflow.includes("STAGING_PASSED"));
 check("production workflow requires staging record hash", workflow.includes("staging_test_record_sha256") && workflow.includes("[0-9a-fA-F]{64}"));
+check("production workflow materializes staging evidence files", workflow.includes("staging_config_base64") && workflow.includes("staging_test_record_base64") && workflow.includes("base64 --decode"));
+check("production workflow verifies staging evidence contents", workflow.includes("verify-staging-evidence.mjs") && workflow.includes("verify-environment-separation.mjs"));
+check("production workflow archives staging evidence", workflow.includes("00-wrangler-staging.toml") && workflow.includes("00-staging-acceptance-record.txt"));
 check("production workflow records Time Travel bookmark", workflow.includes("d1 time-travel info class_comment_db_v2"));
 check("production workflow runs Stage 8.2 preflight", workflow.includes("npm run verify:stage82-preflight"));
 check("production workflow reverifies DB after deploy", workflow.includes("Reverify production DB_V2 after deployment"));
@@ -55,9 +62,17 @@ check("CI allows full regression duration", text(".github/workflows/ci.yml").inc
 const safeDeploy = text("scripts/safe-deploy.ps1");
 check("safe deploy requires clean tree", safeDeploy.includes("git status --porcelain"));
 check("safe deploy requires staging evidence", safeDeploy.includes("CPCV_STAGING_COMMIT_SHA") && safeDeploy.includes("CPCV_STAGING_TEST_RECORD_SHA256") && safeDeploy.includes("CPCV_STAGING_CONFIRMATION"));
+check("safe deploy verifies evidence files and separation", safeDeploy.includes("CPCV_STAGING_CONFIG_PATH") && safeDeploy.includes("verify-staging-evidence.mjs") && safeDeploy.includes("verify-environment-separation.mjs"));
+check("safe deploy helper functions precede first invocation", safeDeploy.indexOf("function Resolve-ExternalFile") < safeDeploy.indexOf("Resolve-ExternalFile -Value") && safeDeploy.indexOf("function Invoke-RecordedNative") < safeDeploy.indexOf("Invoke-RecordedNative 'Staging evidence verification'"));
+check("safe deploy records SHA-256 manifest", safeDeploy.includes("SHA256SUMS.txt") && safeDeploy.includes("Get-FileHash"));
 check("safe deploy runs final documentation validation", safeDeploy.includes("npm run verify:final-docs"));
 check("safe deploy runs Stage 8.2 preflight", safeDeploy.includes("npm run verify:stage82-preflight"));
 check("safe deploy records deployed state", safeDeploy.includes("wrangler deployments status") && safeDeploy.includes("wrangler versions list"));
+
+const stagingTemplate = text("docs/final-stage08/templates/WRANGLER_STAGING_TEMPLATE.toml");
+check("staging config template is external-value only", stagingTemplate.includes("<STAGING_DB_V2_UUID>") && stagingTemplate.includes("<STAGING_RATE_NAMESPACE_4>") && !/AUTH_RATE_LIMIT_PEPPER\s*=/.test(stagingTemplate));
+const stagingRecordTemplate = text("docs/final-stage08/templates/STAGING_ACCEPTANCE_RECORD_TEMPLATE.txt");
+check("staging evidence template has fail-closed fields", stagingRecordTemplate.includes("record_format=CPCV_STAGING_ACCEPTANCE_V1") && stagingRecordTemplate.includes("acceptance_items_failed=0") && stagingRecordTemplate.includes("production_resources_used=NO") && stagingRecordTemplate.includes("pdf_data_egress=NONE"));
 
 for (const legacy of ["docs/stage-08-codex-cloudflare-deployment.md", "docs/stage-08-precision-cloudflare-deployment.md"]) {
   const value = text(legacy);

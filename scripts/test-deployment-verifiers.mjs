@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const temp = mkdtempSync(join(tmpdir(), "cpcv-deploy-verifiers-"));
@@ -38,6 +39,56 @@ try {
   writeFileSync(duplicateLimiterPath, validConfig.replace('namespace_id = "1002"', 'namespace_id = "1001"'));
   const duplicateLimiter = run("scripts/verify-deployment-config.mjs", [duplicateLimiterPath]);
   check("duplicate Rate Limiting namespaces are rejected", duplicateLimiter.status === 1 && duplicateLimiter.stderr.includes("different namespace_id"), duplicateLimiter);
+
+  const stagingConfig = validConfig
+    .replace(/^name = "class-pdf-comment-viewer-v01"$/m, 'name = "class-pdf-comment-viewer-v01-staging"')
+    .replace('database_name = "class_comment_db"\ndatabase_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"', 'database_name = "class_comment_db_staging"\ndatabase_id = "223e4567-e89b-42d3-a456-426614174001"')
+    .replace('database_name = "class_comment_db_v2"\ndatabase_id = "123e4567-e89b-42d3-a456-426614174000"', 'database_name = "class_comment_db_v2_staging"\ndatabase_id = "323e4567-e89b-42d3-a456-426614174002"')
+    .replaceAll('queue = "cpcv-ai-jobs"', 'queue = "cpcv-ai-jobs-staging"')
+    .replaceAll('https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev', 'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev')
+    .replace('TURNSTILE_SITE_KEY = "0x4AAAAA-real-site-key"', 'TURNSTILE_SITE_KEY = "0x4AAAAA-staging-site-key"')
+    .replace('namespace_id = "1001"', 'namespace_id = "2001"')
+    .replace('namespace_id = "1002"', 'namespace_id = "2002"')
+    .replace('namespace_id = "1003"', 'namespace_id = "2003"')
+    .replace('namespace_id = "1004"', 'namespace_id = "2004"');
+  const stagingPath = join(temp, "staging.toml");
+  writeFileSync(stagingPath, stagingConfig);
+  const separated = run("scripts/verify-environment-separation.mjs", [validPath, stagingPath]);
+  check("separate production and staging resources are accepted", separated.status === 0 && separated.stdout.includes("separation verified"), separated);
+
+  const sharedDbPath = join(temp, "shared-db.toml");
+  writeFileSync(sharedDbPath, stagingConfig.replace('database_id = "323e4567-e89b-42d3-a456-426614174002"', 'database_id = "123e4567-e89b-42d3-a456-426614174000"'));
+  const sharedDb = run("scripts/verify-environment-separation.mjs", [validPath, sharedDbPath]);
+  check("shared production and staging D1 is rejected", sharedDb.status === 1 && sharedDb.stderr.includes("DB_V2 database_id"), sharedDb);
+
+  const sharedRatePath = join(temp, "shared-rate.toml");
+  writeFileSync(sharedRatePath, stagingConfig.replace('namespace_id = "2001"', 'namespace_id = "1001"'));
+  const sharedRate = run("scripts/verify-environment-separation.mjs", [validPath, sharedRatePath]);
+  check("shared production and staging Rate Limiting namespace is rejected", sharedRate.status === 1 && sharedRate.stderr.includes("share Rate Limiting namespace_id"), sharedRate);
+
+  const aiTarget = run("scripts/verify-ai-readiness.mjs", ["--config", validPath]);
+  check("AI readiness accepts an explicit Wrangler config", aiTarget.status === 0, aiTarget);
+  const stagingAiTarget = run("scripts/verify-ai-readiness.mjs", ["--config", stagingPath]);
+  check("AI readiness accepts a separated staging queue", stagingAiTarget.status === 0 && stagingAiTarget.stdout.includes("cpcv-ai-jobs-staging"), stagingAiTarget);
+  const emailTarget = run("scripts/verify-email-auth-readiness.mjs", ["--database", "class_comment_db_v2_staging", "--config", stagingPath]);
+  check("email readiness accepts explicit staging database and config", emailTarget.status === 0 && emailTarget.stdout.includes("EMAIL_AUTH_REQUIRED=0"), emailTarget);
+  const invalidTarget = run("scripts/verify-remote-d1.mjs", ["--unknown"]);
+  check("remote verifier rejects unknown target options before network access", invalidTarget.status === 2 && invalidTarget.stderr.includes("Unknown deployment option"), invalidTarget);
+  const invalidPreflightTarget = run("scripts/verify-stage82-preflight.mjs", ["--database", "bad database"]);
+  check("Stage 8.2 preflight rejects unsafe database names before network access", invalidPreflightTarget.status === 2 && invalidPreflightTarget.stderr.includes("unsupported characters"), invalidPreflightTarget);
+
+  const releaseCommit = "0123456789abcdef0123456789abcdef01234567";
+  const deploymentId = "staging-version-20260717";
+  const stagingConfigSha = createHash("sha256").update(stagingConfig).digest("hex");
+  const stagingRecord = `record_format=CPCV_STAGING_ACCEPTANCE_V1\nresult=PASSED\nrelease_commit=${releaseCommit}\nstaging_deployment_id=${deploymentId}\nstaging_config_sha256=${stagingConfigSha}\nacceptance_items_total=38\nacceptance_items_failed=0\nproduction_resources_used=NO\ntest_data_cleanup=COMPLETED\npdf_data_egress=NONE\nexecuted_by=test-runner\ncompleted_at_utc=2026-07-17T06:00:00Z\n`;
+  const stagingRecordPath = join(temp, "staging-acceptance.txt");
+  writeFileSync(stagingRecordPath, stagingRecord);
+  const stagingEvidence = run("scripts/verify-staging-evidence.mjs", [stagingRecordPath, "--commit", releaseCommit, "--deployment", deploymentId, "--config-sha256", stagingConfigSha]);
+  check("complete staging acceptance evidence is accepted", stagingEvidence.status === 0 && stagingEvidence.stdout.includes("evidence verified"), stagingEvidence);
+  const failedStagingRecordPath = join(temp, "staging-acceptance-failed.txt");
+  writeFileSync(failedStagingRecordPath, stagingRecord.replace("acceptance_items_failed=0", "acceptance_items_failed=1"));
+  const failedStagingEvidence = run("scripts/verify-staging-evidence.mjs", [failedStagingRecordPath, "--commit", releaseCommit, "--deployment", deploymentId, "--config-sha256", stagingConfigSha]);
+  check("failed staging acceptance evidence is rejected", failedStagingEvidence.status === 1 && failedStagingEvidence.stderr.includes("acceptance_items_failed"), failedStagingEvidence);
 
   const fixtures = {
     owner: [{ success: true, results: [{ active_owner_count: 1 }] }],

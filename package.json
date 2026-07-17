@@ -70,7 +70,9 @@
     "test:owner-bootstrap": "node scripts/test-bootstrap-owner-v2.mjs",
     "test:final-hardening": "node --no-warnings scripts/test-final-hardening.mjs",
     "verify:stage82-preflight": "node scripts/verify-stage82-preflight.mjs",
-    "verify:final-docs": "node scripts/verify-final-documentation.mjs"
+    "verify:final-docs": "node scripts/verify-final-documentation.mjs",
+    "verify:environment-separation": "node scripts/verify-environment-separation.mjs",
+    "verify:staging-evidence": "node scripts/verify-staging-evidence.mjs"
   },
   "devDependencies": {
     "wrangler": "4.110.0",

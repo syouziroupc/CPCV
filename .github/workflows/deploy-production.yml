@@ -23,20 +23,22 @@ on:
         description: SHA-256 of the completed staging acceptance record
         required: true
         type: string
+      staging_config_sha256:
+        description: SHA-256 of the validated external staging Wrangler config
+        required: true
+        type: string
+      staging_config_base64:
+        description: Base64 of the exact validated staging Wrangler config
+        required: true
+        type: string
+      staging_test_record_base64:
+        description: Base64 of the completed staging acceptance record
+        required: true
+        type: string
       staging_confirmation:
         description: Type STAGING_PASSED after all staging acceptance tests pass
         required: true
         type: string
-      apply_legacy_db_migrations:
-        description: Apply pending legacy DB migrations
-        required: true
-        default: true
-        type: boolean
-      apply_v2_db_migrations:
-        description: Apply pending DB_V2 migrations
-        required: true
-        default: true
-        type: boolean
 
 permissions:
   contents: read
@@ -60,6 +62,9 @@ jobs:
           STAGING_COMMIT_SHA: ${{ inputs.staging_commit_sha }}
           STAGING_DEPLOYMENT_ID: ${{ inputs.staging_deployment_id }}
           STAGING_TEST_RECORD_SHA256: ${{ inputs.staging_test_record_sha256 }}
+          STAGING_CONFIG_SHA256: ${{ inputs.staging_config_sha256 }}
+          STAGING_CONFIG_BASE64: ${{ inputs.staging_config_base64 }}
+          STAGING_TEST_RECORD_BASE64: ${{ inputs.staging_test_record_base64 }}
           STAGING_CONFIRMATION: ${{ inputs.staging_confirmation }}
         run: |
           test "$CONFIRMATION" = "DEPLOY_PRODUCTION"
@@ -69,6 +74,9 @@ jobs:
           test "${COMMIT_SHA,,}" = "${STAGING_COMMIT_SHA,,}"
           test -n "$STAGING_DEPLOYMENT_ID"
           [[ "$STAGING_TEST_RECORD_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]
+          [[ "$STAGING_CONFIG_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]
+          test -n "$STAGING_CONFIG_BASE64"
+          test -n "$STAGING_TEST_RECORD_BASE64"
 
       - name: Checkout selected commit
         uses: actions/checkout@v4
@@ -94,6 +102,30 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Materialize and verify staging evidence
+        shell: bash
+        env:
+          STAGING_CONFIG_BASE64: ${{ inputs.staging_config_base64 }}
+          STAGING_TEST_RECORD_BASE64: ${{ inputs.staging_test_record_base64 }}
+          STAGING_CONFIG_SHA256: ${{ inputs.staging_config_sha256 }}
+          STAGING_TEST_RECORD_SHA256: ${{ inputs.staging_test_record_sha256 }}
+          STAGING_COMMIT_SHA: ${{ inputs.staging_commit_sha }}
+          STAGING_DEPLOYMENT_ID: ${{ inputs.staging_deployment_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p .deployment-input
+          printf '%s' "$STAGING_CONFIG_BASE64" | base64 --decode > .deployment-input/wrangler.staging.toml
+          printf '%s' "$STAGING_TEST_RECORD_BASE64" | base64 --decode > .deployment-input/staging-acceptance-record.txt
+          test "$(sha256sum .deployment-input/wrangler.staging.toml | cut -d' ' -f1)" = "${STAGING_CONFIG_SHA256,,}"
+          test "$(sha256sum .deployment-input/staging-acceptance-record.txt | cut -d' ' -f1)" = "${STAGING_TEST_RECORD_SHA256,,}"
+          node scripts/verify-deployment-config.mjs .deployment-input/wrangler.staging.toml
+          node scripts/verify-environment-separation.mjs wrangler.toml .deployment-input/wrangler.staging.toml
+          node scripts/verify-staging-evidence.mjs .deployment-input/staging-acceptance-record.txt \
+            --commit "$STAGING_COMMIT_SHA" \
+            --deployment "$STAGING_DEPLOYMENT_ID" \
+            --config-sha256 "$STAGING_CONFIG_SHA256"
 
       - name: Verify clean immutable checkout
         shell: bash
@@ -132,46 +164,95 @@ jobs:
           npm audit
           npm audit --omit=dev
 
+      - name: Initialize deployment records
+        shell: bash
+        run: |
+          mkdir -p deployment-records
+          {
+            echo "requested_commit=${{ inputs.commit_sha }}"
+            echo "checked_out_commit=${{ steps.revision.outputs.sha }}"
+            echo "staging_commit=${{ inputs.staging_commit_sha }}"
+            echo "staging_deployment_id=${{ inputs.staging_deployment_id }}"
+            echo "staging_test_record_sha256=${{ inputs.staging_test_record_sha256 }}"
+            echo "staging_config_sha256=${{ inputs.staging_config_sha256 }}"
+            echo "started_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            echo "wrangler=$(npx wrangler --version | tail -n 1)"
+          } > deployment-records/00-metadata.txt
+          cp wrangler.toml deployment-records/00-wrangler-production.toml
+          cp .deployment-input/wrangler.staging.toml deployment-records/00-wrangler-staging.toml
+          cp .deployment-input/staging-acceptance-record.txt deployment-records/00-staging-acceptance-record.txt
+
       - name: Record DB_V2 Time Travel bookmark
-        run: npx wrangler d1 time-travel info class_comment_db_v2
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler d1 time-travel info class_comment_db_v2 2>&1 | tee deployment-records/01-d1-time-travel.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Verify Stage 8.2 existing data
-        run: npm run verify:stage82-preflight
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify:stage82-preflight 2>&1 | tee deployment-records/02-stage82-preflight.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Record pending migrations
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler d1 migrations list class_comment_db --remote 2>&1 | tee deployment-records/03-legacy-migrations-before.txt
+          npx wrangler d1 migrations list class_comment_db_v2 --remote 2>&1 | tee deployment-records/04-v2-migrations-before.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Apply legacy D1 migrations
-        if: ${{ inputs.apply_legacy_db_migrations }}
-        run: npx wrangler d1 migrations apply class_comment_db --remote
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee deployment-records/05-legacy-migrations-apply.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Apply DB_V2 migrations
-        if: ${{ inputs.apply_v2_db_migrations }}
-        run: npx wrangler d1 migrations apply class_comment_db_v2 --remote
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee deployment-records/06-v2-migrations-apply.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Verify DB_V2 integrity and active Owner
-        run: node scripts/verify-remote-d1.mjs
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/07-remote-d1-before-deploy.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Verify email-authentication cutover readiness
-        run: npm run verify:email-auth-ready
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify:email-auth-ready 2>&1 | tee deployment-records/08-email-auth-readiness.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Configure authentication secrets
-        run: node scripts/configure-rate-limit-secret.mjs
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/configure-rate-limit-secret.mjs 2>&1 | tee deployment-records/09-secret-configuration.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -180,27 +261,59 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
 
       - name: Deploy selected revision
-        run: npx wrangler deploy
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler deploy 2>&1 | tee deployment-records/10-worker-deploy.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Reverify production DB_V2 after deployment
-        run: node scripts/verify-remote-d1.mjs
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/11-remote-d1-after-deploy.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Run production smoke checks
-        run: node scripts/smoke-production.mjs
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/smoke-production.mjs 2>&1 | tee deployment-records/12-production-smoke.txt
 
       - name: Record deployed Worker state
+        shell: bash
         run: |
-          npx wrangler deployments status
-          npx wrangler versions list
+          set -o pipefail
+          npx wrangler deployments status 2>&1 | tee deployment-records/13-deployments-status.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/14-versions-list.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Finalize deployment records
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          mkdir -p deployment-records
+          {
+            echo "completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "job_status=${{ job.status }}"
+            echo "final_commit=$(git rev-parse HEAD 2>/dev/null || true)"
+          } > deployment-records/99-result.txt
+          find deployment-records -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > deployment-records/SHA256SUMS.txt
+
+      - name: Upload deployment records
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-production-deployment-records-${{ inputs.commit_sha }}
+          path: deployment-records/
+          if-no-files-found: warn
+          retention-days: 90
 
       - name: Write deployment summary
         if: ${{ always() }}
@@ -211,9 +324,9 @@ jobs:
             echo ""
             echo "- Requested commit: \`${{ inputs.commit_sha }}\`"
             echo "- Checked-out commit: \`${{ steps.revision.outputs.sha }}\`"
-            echo "- Legacy migrations: \`${{ inputs.apply_legacy_db_migrations }}\`"
-            echo "- DB_V2 migrations: \`${{ inputs.apply_v2_db_migrations }}\`"
             echo "- Staging commit: \`${{ inputs.staging_commit_sha }}\`"
             echo "- Staging deployment: \`${{ inputs.staging_deployment_id }}\`"
             echo "- Staging record SHA-256: \`${{ inputs.staging_test_record_sha256 }}\`"
+            echo "- Staging config SHA-256: \`${{ inputs.staging_config_sha256 }}\`"
+            echo "- Deployment record artifact: \`cpcv-production-deployment-records-${{ inputs.commit_sha }}\`"
           } >> "$GITHUB_STEP_SUMMARY"

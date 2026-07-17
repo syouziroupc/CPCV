@@ -56,3 +56,17 @@ docs/final-stage08/19_DEPLOYMENT_FINAL_CHECKLIST.md
 ```
 
 段階別の旧報告書は履歴資料です。Cloudflare反映手順の正本には使いません。
+
+## Stage 8.2 deployment gate
+
+production反映は外部実値とstaging証跡が揃うまでfail-closedです。
+
+```text
+docs/final-stage08/templates/WRANGLER_STAGING_TEMPLATE.toml
+docs/final-stage08/templates/STAGING_ACCEPTANCE_RECORD_TEMPLATE.txt
+scripts/verify-environment-separation.mjs
+scripts/verify-staging-evidence.mjs
+scripts/safe-deploy.ps1
+```
+
+staging configと受入記録はsource外に置きます。productionとstagingのresource共有を自動検査します。証跡はSHA-256と内容を両方検査します。

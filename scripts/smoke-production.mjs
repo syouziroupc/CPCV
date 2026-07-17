@@ -1,7 +1,21 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseDeploymentOptions } from "./deployment-cli.mjs";
 
-const config = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
-const origin = config.match(/^PUBLIC_ORIGIN\s*=\s*"([^"]+)"\s*$/m)?.[1] || "";
+const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+let target;
+try {
+  target = parseDeploymentOptions(process.argv.slice(2), {
+    defaultConfigPath: resolve(ROOT, "wrangler.toml"),
+    allowOrigin: true
+  });
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}
+const config = readFileSync(target.configPath, "utf8");
+const origin = target.origin || config.match(/^PUBLIC_ORIGIN\s*=\s*"([^"]+)"\s*$/m)?.[1]?.replace(/\/$/, "") || "";
 if (!/^https:\/\//.test(origin)) {
   console.error("A final HTTPS PUBLIC_ORIGIN is required for smoke testing.");
   process.exit(1);

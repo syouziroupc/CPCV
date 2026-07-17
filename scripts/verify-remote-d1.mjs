@@ -1,6 +1,20 @@
 import { spawnSync } from "node:child_process";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { parseDeploymentOptions, withWranglerConfig } from "./deployment-cli.mjs";
 
-const DATABASE = "class_comment_db_v2";
+const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+let target;
+try {
+  target = parseDeploymentOptions(process.argv.slice(2), {
+    defaultDatabase: "class_comment_db_v2",
+    defaultConfigPath: resolve(ROOT, "wrangler.toml")
+  });
+} catch (error) {
+  console.error(error.message);
+  process.exit(2);
+}
+const DATABASE = target.database;
 
 const requiredTables = [
   "organizations", "users", "organization_members", "auth_sessions",
@@ -157,9 +171,11 @@ if (unverifiedOwnerCount > 0) {
 console.log(`remote DB_V2 health verified; ${requiredTables.length} required tables, migrations through Stage 8.2, moderation/realtime/quota/Stage8 precision and Stage8.2 integrity triggers (${stage82TriggerNames.length}), active Owners: ${ownerCount}, unverified Owners: ${unverifiedOwnerCount}`);
 
 function query(sql) {
-  const result = spawnSync(npxCommand(), [
+  const args = withWranglerConfig([
     "wrangler", "d1", "execute", DATABASE, "--remote", "--json", "--command", sql
-  ], { cwd: process.cwd(), env: process.env, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
+  ], target.configPath);
+  const result = spawnSync(npxCommand(), args,
+    { cwd: ROOT, env: process.env, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
   if (result.status !== 0) {
     process.stderr.write(result.stderr || result.stdout || "Remote D1 query failed.\n");
     process.exit(result.status || 1);

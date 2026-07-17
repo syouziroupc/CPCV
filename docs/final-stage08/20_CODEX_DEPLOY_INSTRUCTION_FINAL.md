@@ -5,7 +5,7 @@
 ```text
 添付のCPCV Stage 8.2完全引継ぎZIPだけを作業正本として扱ってください。
 
-目的はsourceを再設計することではありません。検証済みrelease candidateをCloudflare stagingで受入検査し。同じexact commitを明示承認後にproductionへ反映することです。
+目的は検証済みrelease candidateをCloudflare stagingで受入検査することです。その後に同じexact commitをproductionへ反映します。sourceの再設計はしません。
 
 最初に次を読んでください。
 1. 00_READ_FIRST.md
@@ -34,7 +34,7 @@
 - source manifestを検証する
 - exact 40-character Git commitを記録する
 - git status --porcelainが空であることを確認する
-- Node 22とWrangler versionを記録する
+- Node 22。npm。Wrangler versionを記録する
 
 localで次を全て実行する:
 npm ci
@@ -48,58 +48,83 @@ npm run deploy:dry-run
 npm audit
 npm audit --omit=dev
 
-`npm run check:stage08`は全段階回帰を含む。実行上限は最低120分にする。45分程度で打ち切らない。
-
-一件でも失敗したらCloudflareを変更しない。失敗内容と再現commandを報告する。
+npm run check:stage08の実行上限は最低120分にする。一件でも失敗したらCloudflareを変更しない。失敗内容と再現commandを報告する。
 
 Cloudflare操作前:
 - 13_CONFIGURATION_WORKSHEET.mdをDashboardまたはWrangler outputで埋める
-- DB_V2のreal UUIDを設定する
-- 4個のRate Limiting bindingへ異なるreal namespace IDを設定する
+- production DB_V2のreal UUIDを設定する
+- productionの4個のRate Limiting bindingへ異なるreal namespace IDを設定する
 - AUTH_EMAIL_FROM。AUTH_EMAIL_REPLY_TO。TURNSTILE_SITE_KEYを設定する
 - EMAIL bindingのallowed_sender_addressesをAUTH_EMAIL_FROMへ制限する
 - Email Service sending domainのonboardingを確認する
 - 任意受信者へ送る場合は必要なaccount planを確認する
-- secret 3個を用意する。文書またはGitへ書かない
+- production secret 3個を用意する。文書またはGitへ書かない
 - npm run verify:deploymentを成功させる
 - npm run verify:ai-readyを成功させる
 
-staging:
-- productionと別のWorker。legacy DB。DB_V2。Queue。Rate Limiting namespaceを使う
-- exact release commitをdeployする
-- 10_STAGING_ACCEPTANCE_TEST.mdを全件実行する
-- staging deployment IDを保存する
-- acceptance recordを保存する
-- acceptance recordのSHA-256を保存する
-- local safe-deployを使う場合はCPCV_STAGING_CONFIRMATION=STAGING_PASSEDを設定する
-- 一件でも失敗したらproductionへ進まない
+staging config:
+- source/docs/final-stage08/templates/WRANGLER_STAGING_TEMPLATE.tomlをsource外へコピーする
+- productionと別のWorker。legacy DB。DB_V2。Queue。Rate Limiting namespace 4個。originを設定する
+- staging secret 3個は文書またはGitへ書かない
+- 次を成功させる
 
-production直前で停止し。次をuserへ提示する:
+node scripts/verify-deployment-config.mjs /absolute/path/wrangler.staging.toml
+node scripts/verify-environment-separation.mjs wrangler.toml /absolute/path/wrangler.staging.toml
+node scripts/verify-ai-readiness.mjs --config /absolute/path/wrangler.staging.toml
+npx wrangler deploy --dry-run --config /absolute/path/wrangler.staging.toml
+
+staging:
+- exact release commitをdeployする
+- staging用database名と--configを全remote commandへ明示する
+- 10_STAGING_ACCEPTANCE_TEST.mdを全件実行する
+- test dataを削除する
+- staging deployment IDを保存する
+- staging configのSHA-256を保存する
+- templates/STAGING_ACCEPTANCE_RECORD_TEMPLATE.txtを埋める
+- acceptance recordのSHA-256を保存する
+- 次を成功させる
+
+node scripts/verify-staging-evidence.mjs /absolute/path/staging-acceptance-record.txt --commit <EXACT_COMMIT> --deployment <STAGING_DEPLOYMENT_ID> --config-sha256 <STAGING_CONFIG_SHA256>
+
+一件でも失敗したらproductionへ進まない。
+
+production直前で停止する。次をuserへ提示する:
 - exact release commit
 - staging commit
 - staging deployment ID
+- staging config SHA-256
 - staging acceptance record SHA-256
 - production resource一覧
 - deploy前DB_V2 Time Travel bookmark
 - pending migration一覧
-- rollback先Worker deployment
+- rollback先Worker version
 - 実行予定command
 
-明示承認後だけ実行する:
+明示承認後だけproductionへ進む。推奨commandはPowerShellのscripts/safe-deploy.ps1とする。次の環境変数を設定する。
+
+CPCV_STAGING_COMMIT_SHA
+CPCV_STAGING_DEPLOYMENT_ID
+CPCV_STAGING_CONFIG_PATH
+CPCV_STAGING_CONFIG_SHA256
+CPCV_STAGING_TEST_RECORD_PATH
+CPCV_STAGING_TEST_RECORD_SHA256
+CPCV_STAGING_CONFIRMATION=STAGING_PASSED
+AUTH_RATE_LIMIT_PEPPER
+PUBLIC_RATE_LIMIT_PEPPER
+TURNSTILE_SECRET_KEY
+
+safe-deployはstaging configと受入記録の実ファイルをhash照合する。内容もverify-staging-evidenceで検査する。productionとstagingのresource分離も再検査する。DEPLOY_PRODUCTIONの明示入力後だけmigrationとdeployを実行する。
+
+production実行順の確認用command:
 npx wrangler d1 time-travel info class_comment_db_v2
 npm run verify:stage82-preflight
-npx wrangler d1 migrations apply class_comment_db --remote
-npx wrangler d1 migrations apply class_comment_db_v2 --remote
 node scripts/verify-remote-d1.mjs
-npm run verify:email-auth-ready
-node scripts/configure-rate-limit-secret.mjs
-npx wrangler deploy
-node scripts/verify-remote-d1.mjs
-node scripts/smoke-production.mjs
 npx wrangler deployments status
 npx wrangler versions list
 
-legacy DB migrationはpendingがある場合だけ適用する。全outputをdeployment-recordsへ保存する。
+GitHub production workflowを使う場合はstaging configと受入記録のbase64も入力する。workflow内で復号。hash照合。内容照合。resource分離検査を行う。
+
+全outputをdeployment-recordsへ保存する。最後にSHA256SUMS.txtを生成する。
 
 最終成果物:
 - exact commit
@@ -108,6 +133,7 @@ legacy DB migrationはpendingがある場合だけ適用する。全outputをdep
 - D1 bookmark
 - migration output
 - stagingとproductionのdeployment ID
+- staging config
 - staging acceptance record
 - production smoke record
 - rollback手順
