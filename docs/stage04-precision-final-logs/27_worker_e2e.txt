@@ -1,0 +1,5 @@
+POST /api/auth/login 500 {
+  ok: false,
+  error: 'INTERNAL_ERROR',
+  requestId: 'req_2a7f384d34624b16865df05f3851f404'
+}

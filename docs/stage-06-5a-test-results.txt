@@ -1,0 +1,67 @@
+CPCV Stage 6.5-A final local verification
+Date: 2026-07-14
+
+Base source SHA-256:
+d58418bb1d5d3b908a6f550d7ec8778e1f3eb1880a09dc8f6badc8a3d4b5fa52
+
+Version:
+0.6.5-a.1
+
+Functional and boundary checks:
+- Stage 6.5-A boundary: 34 passed, 0 failed
+- Precision boundary: 97 passed, 0 failed
+- Stage 02 compatibility: 11 passed, 0 failed
+- Stage 03-A compatibility: 20 passed, 0 failed
+- Stage 03-B compatibility: 25 passed, 0 failed
+- Stage 03-C compatibility: 38 passed, 0 failed
+- Stage 04 compatibility: 46 passed, 0 failed
+- Stage 05 compatibility: 54 passed, 0 failed
+- Stage 05 boundary: 31 passed, 0 failed
+- Stage 06 compatibility: 54 passed, 0 failed
+- Stage 06 boundary: 48 passed, 0 failed
+- Stage compatibility commands: 7 passed, 0 failed
+- Deployment verifier: 11 passed, 0 failed
+- DB_V2 complete: 159 passed, 0 failed
+- Stage 3-A authentication: 120 passed, 0 failed
+- Stage 3-B authentication API: 118 passed, 0 failed
+- Stage 3-C private API: 50 passed, 0 failed
+- Stage 4 comments: 67 passed, 0 failed
+- Stage 5 moderation: 75 passed, 0 failed
+- Stage 6 realtime: 44 passed, 0 failed
+- Stage 6.5-A email authentication: 42 passed, 0 failed
+
+Aggregate:
+1151 passed, 0 failed
+
+Project checks:
+- npm ci: passed
+- npm run check: passed; 87 JavaScript modules
+- npm run check:project: passed
+- npm run check:pdf-links: passed
+- npm run deploy:dry-run: passed
+- npm audit: 0 vulnerabilities
+- npm audit --omit=dev: 0 vulnerabilities
+
+Dry-run bindings:
+- COMMENT_ROOM
+- EMAIL
+- DB
+- DB_V2
+- ASSETS
+- APP_ENV
+- AUTH_V2_ENABLED
+- EMAIL_AUTH_REQUIRED
+- AUTH_ORIGIN
+- PUBLIC_ORIGIN
+
+Visual checks:
+- 8 screenshots
+- no horizontal overflow
+- desktop 1440x1000
+- mobile 390x844
+
+Not tested:
+- production deployment
+- remote DB migration
+- real Email Service delivery
+- real Turnstile keys

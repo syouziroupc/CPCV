@@ -1,0 +1,1686 @@
+\n===== STATIC CHECK =====
+
+> class-pdf-comment-viewer-v01@0.7.7 check
+> node scripts/predeploy-check.mjs
+
+project verification passed
+predeploy check passed (115 JavaScript modules)
+\n===== PROJECT CHECK =====
+
+> class-pdf-comment-viewer-v01@0.7.7 check:project
+> node scripts/verify-project.mjs
+
+project verification passed
+\n===== PDF LINK CHECK =====
+
+> class-pdf-comment-viewer-v01@0.7.7 check:pdf-links
+> node scripts/verify-pdf-link-logic.mjs
+
+PDF link and reconnect logic verified
+\n===== DB V2 =====
+
+=== Stage 2 schema and constraint suite ===
+[PASS] migration applies to an empty local D1
+[PASS] first migration run applies 0001_initial_schema.sql
+[PASS] second migration apply exits successfully
+[PASS] second migration apply is a no-op
+[PASS] migration history contains exactly the Stage 2 and Stage 3-A migrations after the second apply
+[PASS] exactly the seven application tables exist
+[PASS] bootstrap schema fingerprint matches the migrated canonical schema
+[PASS] all table columns, types, nullability, defaults, and primary keys match the design
+[PASS] all foreign keys and ON DELETE rules match the design
+[PASS] all 17 specified indexes exist
+[PASS] PRAGMA foreign_key_check returns zero rows
+[PASS] D1-supported PRAGMA quick_check returns ok
+[PASS] underlying local SQLite PRAGMA integrity_check returns ok
+[PASS] seed organizations
+[PASS] seed users
+[PASS] seed organization memberships
+[PASS] organization rejects a NULL primary key
+[PASS] organization rejects an invalid status
+[PASS] organization rejects an empty name
+[PASS] organization rejects a whitespace-only name
+[PASS] organization names are not globally unique
+[PASS] organization rejects updated_at before created_at
+[PASS] active organization rejects deleted_at
+[PASS] deleted organization requires deleted_at
+[PASS] deleted organization accepts a consistent deleted_at
+[PASS] user rejects a NULL primary key
+[PASS] user rejects an exact duplicate login ID
+[PASS] user rejects a case-only duplicate login ID
+[PASS] user rejects an uppercase unique login ID
+[PASS] user rejects an empty login ID
+[PASS] user rejects forbidden login ID characters
+[PASS] user rejects an invalid status
+[PASS] user rejects a whitespace-only display name
+[PASS] user rejects a short password hash
+[PASS] user rejects password_changed_at before creation
+[PASS] active user rejects deleted_at
+[PASS] deleted user requires deleted_at
+[PASS] deleted user accepts a consistent deleted_at
+[PASS] membership rejects a duplicate organization and user pair
+[PASS] one user can belong to another organization
+[PASS] membership rejects a missing organization
+[PASS] membership rejects a missing user
+[PASS] membership rejects an invalid role
+[PASS] membership rejects an invalid status
+[PASS] active membership rejects removed_at
+[PASS] membership rejects updated_at before created_at
+[PASS] removed membership requires removed_at
+[PASS] removed membership accepts a consistent removed_at
+[PASS] auth session rejects a NULL primary key
+[PASS] valid organization-bound auth session is accepted
+[PASS] auth session rejects a user without membership
+[PASS] auth session rejects a duplicate token hash
+[PASS] auth session rejects a duplicate CSRF hash
+[PASS] auth session rejects a NULL organization
+[PASS] auth session rejects last_seen_at before creation
+[PASS] auth session rejects idle expiry at last_seen_at
+[PASS] auth session rejects idle expiry beyond absolute expiry
+[PASS] auth session rejects revoked_at before creation
+[PASS] password reset token rejects a NULL primary key
+[PASS] valid password reset token is accepted
+[PASS] password reset rejects duplicate token hash
+[PASS] password reset rejects a missing user
+[PASS] password reset rejects a missing creator
+[PASS] password reset rejects used_at and revoked_at together
+[PASS] password reset rejects used_at after expiry
+[PASS] password reset rejects revoked_at before creation
+[PASS] password reset rejects expiry at creation
+[PASS] live session rejects a NULL primary key
+[PASS] valid active live session is accepted
+[PASS] live session rejects a missing organization
+[PASS] live session rejects a NULL organization
+[PASS] live session rejects a whitespace-only title
+[PASS] live session rejects a creator outside the organization
+[PASS] live session rejects a duplicate public code
+[PASS] live session rejects a public code with wrong length
+[PASS] live session rejects forbidden public code characters
+[PASS] live session rejects lowercase public codes
+[PASS] live session rejects an invalid display mode
+[PASS] live session rejects display seconds below range
+[PASS] live session rejects display seconds above range
+[PASS] live session rejects posting boolean outside 0 and 1
+[PASS] live session rejects visibility boolean outside 0 and 1
+[PASS] ended live session rejects posting enabled
+[PASS] ended live session rejects comments visible
+[PASS] active live session rejects ended_at
+[PASS] live session rejects expiry at started_at
+[PASS] ended live session rejects ended_at before started_at
+[PASS] ended live session requires ended_at
+[PASS] deleted live session requires deleted_at
+[PASS] consistent ended live session is accepted
+[PASS] deleted live session rejects deleted_at before ended_at
+[PASS] consistent deleted live session is accepted
+[PASS] audit log rejects a NULL primary key
+[PASS] valid system audit log is accepted
+[PASS] global system audit log with no organization is accepted
+[PASS] valid user audit log is accepted
+[PASS] system audit rejects actor user ID
+[PASS] system audit rejects actor role
+[PASS] user audit requires actor user ID
+[PASS] audit log rejects invalid JSON
+[PASS] audit log rejects a whitespace-only action
+[PASS] audit log rejects a missing organization reference
+[PASS] audit log rejects a missing actor user
+[PASS] audit log rejects an invalid actor role
+[PASS] organization A-only user cannot create organization B auth session
+[PASS] organization A-only user cannot create organization B live session
+[PASS] multi-organization user can create organization A auth session
+[PASS] multi-organization user can create organization B auth session
+[PASS] organization physical deletion is restricted while memberships exist
+[PASS] user physical deletion is restricted while memberships exist
+[PASS] membership list query uses an index
+[PASS] organization owner query uses an index
+[PASS] active live session query uses an index
+[PASS] auth token lookup uses a unique index
+[PASS] expired auth cleanup query uses an index
+[PASS] organization audit query uses an index
+[PASS] foreign keys remain clean after all schema tests
+[PASS] D1 quick_check remains ok after all schema tests
+[PASS] local SQLite integrity_check remains ok after all schema tests
+
+DB_V2 test summary: 119 passed, 0 failed, 119 total.
+(node:42377) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Stage 2 Owner bootstrap suite ===
+[PASS] remote bootstrap verifies the actual D1 UUID and name before reading the password
+[PASS] bootstrap utility binds only to loopback and uses remote=true for remote D1 access
+[PASS] bootstrap verifies migration, table set, foreign keys, and quick_check before writing
+[PASS] remote bootstrap rejects a missing database ID
+[PASS] local bootstrap rejects a remote database ID argument
+[PASS] remote bootstrap rejects --password-stdin
+[PASS] remote bootstrap rejects the legacy DB UUID
+[PASS] remote bootstrap rejects non-TTY password input
+[PASS] bootstrap test database migration succeeds
+[PASS] bootstrap latest-schema extensions are installed
+[PASS] bootstrap accepts the required core schema after later migrations
+[PASS] latest-schema bootstrap creates exactly one organization
+[PASS] latest-schema bootstrap removes its temporary config
+[PASS] latest-schema bootstrap leaves the extended database healthy
+[PASS] coexisting legacy D1 fixture is installed
+[PASS] bootstrap selects DB_V2 when the persist directory also contains the legacy D1
+[PASS] coexisting-D1 bootstrap writes exactly one V2 organization
+[PASS] coexisting-D1 bootstrap does not modify the legacy sibling
+[PASS] coexisting-D1 bootstrap removes its temporary config
+[PASS] bootstrap missing-index fixture is installed
+[PASS] bootstrap rejects a DB whose schema objects differ even when all seven tables remain
+[PASS] missing-index bootstrap leaves the database empty
+[PASS] missing-index bootstrap removes its temporary config
+[PASS] bootstrap missing-index fixture is removed
+[PASS] bootstrap rollback trigger is installed
+[PASS] bootstrap reports failure when the audit insert is forced to fail
+[PASS] bootstrap output does not contain the plaintext password on failure
+[PASS] failed bootstrap removes its temporary config
+[PASS] failed bootstrap rolls back organization, user, membership, and audit together
+[PASS] bootstrap rollback trigger is removed
+[PASS] bootstrap creates the first Owner successfully
+[PASS] bootstrap output does not contain the plaintext password on success
+[PASS] successful bootstrap removes its temporary config
+[PASS] bootstrap creates organization, active Owner membership, and system audit
+[PASS] plaintext bootstrap password is absent from stored user fields
+[PASS] bootstrap output does not contain the stored password hash or salt
+[PASS] bootstrap rejects a second execution by default
+[PASS] second bootstrap output does not contain the plaintext password
+[PASS] rejected second bootstrap removes its temporary config
+[PASS] second bootstrap leaves exactly one organization
+
+DB_V2 bootstrap test summary: 40 passed, 0 failed, 40 total.
+(node:42868) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+DB_V2 complete test summary: 159 passed, 0 failed, 159 total.
+\n===== AUTH CORE =====
+(node:43068) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[PASS] 0001 and 0002 migrations apply to an empty local D1
+[PASS] migration output includes 0002_auth_security.sql
+[PASS] second Stage 3-A migration apply succeeds
+[PASS] second Stage 3-A migration apply is a no-op
+[PASS] users has all three Stage 3-A security columns
+[PASS] failed_login_count default is zero and NOT NULL
+[PASS] require_password_change default is zero and NOT NULL
+[PASS] idx_users_lock_state exists
+[PASS] failed_login_count CHECK rejects negative values
+[PASS] require_password_change CHECK rejects values outside 0 and 1
+[PASS] password salt contains at least 16 random bytes
+[PASS] session token contains at least 32 random bytes
+[PASS] two generated tokens differ
+[PASS] 11-character password is rejected
+[PASS] 12-character password is accepted
+[PASS] 128-character password is accepted
+[PASS] 129-character password is rejected
+[PASS] Unicode password is accepted
+[PASS] password identical to login ID is rejected
+[PASS] password whitespace is not trimmed
+[PASS] PBKDF2 v2 password verifies
+[PASS] wrong PBKDF2 v2 password does not verify
+[PASS] legacy PBKDF2 v1 password verifies during migration
+[PASS] legacy scheme requires rehash
+[PASS] current scheme does not require rehash
+[PASS] constant-time equality accepts equal strings
+[PASS] constant-time equality rejects different strings
+[PASS] token hash is deterministic
+[PASS] token hash does not equal raw token
+[PASS] empty token hash input is rejected
+[PASS] production cookie uses __Host prefix
+[PASS] production cookie has Secure
+[PASS] production cookie has HttpOnly
+[PASS] production cookie has SameSite Strict
+[PASS] production cookie has Path root
+[PASS] production cookie has no Domain attribute
+[PASS] production cookie has 12-hour Max-Age
+[PASS] logout cookie uses same production name
+[PASS] logout cookie has Max-Age zero
+[PASS] logout cookie preserves Secure and HttpOnly
+[PASS] local cookie uses development name
+[PASS] local cookie token is parsed
+[PASS] local cookie omits Secure
+[PASS] APP_ENV local is rejected on a remote hostname
+[PASS] cookie parser keeps first duplicate value
+[PASS] cookie parser decodes values
+[PASS] GET is not unsafe
+[PASS] POST is unsafe
+[PASS] exact Origin succeeds
+[PASS] Origin rejects different scheme
+[PASS] Origin rejects different host
+[PASS] Origin rejects different port
+[PASS] Origin rejects suffix attack
+[PASS] Origin rejects multiple values
+[PASS] Origin rejects missing value
+[PASS] misconfigured AUTH_ORIGIN is rejected
+[PASS] JSON content type is accepted
+[PASS] non-JSON content type is rejected
+[PASS] correct CSRF token succeeds
+[PASS] missing CSRF token is rejected
+[PASS] modified CSRF token is rejected
+[PASS] CSRF token from another session is rejected
+[PASS] GET does not require CSRF
+[PASS] owner permission owner:manage matches matrix
+[PASS] owner permission audit:read matches matrix
+[PASS] admin permission teacher:manage matches matrix
+[PASS] admin permission admin:manage matches matrix
+[PASS] admin permission owner:manage matches matrix
+[PASS] teacher permission session:manage_own matches matrix
+[PASS] teacher permission members:list matches matrix
+[PASS] teacher permission audit:read matches matrix
+[PASS] Owner can manage Admin
+[PASS] Owner cannot issue reset token to Owner
+[PASS] Admin can manage Teacher
+[PASS] Admin cannot manage Admin
+[PASS] Admin cannot manage Owner
+[PASS] Teacher cannot manage members
+[PASS] unknown member action is rejected
+[PASS] requirePermission returns authorized context
+[PASS] requirePermission rejects unauthorized role
+[PASS] requireRole returns allowed role
+[PASS] requireRole rejects disallowed role
+[PASS] rate-limit key is deterministic
+[PASS] rate-limit key does not contain raw identifier
+[PASS] rate limiter receives Cloudflare object argument
+[PASS] successful rate limiter allows request
+[PASS] failed rate limiter produces 429
+[PASS] limiter failure fails open
+[PASS] limiter failure callback runs
+[PASS] limiter and failure callback outage still fails open
+[PASS] missing local limiter fails open
+[PASS] session material has independent raw tokens
+[PASS] session token hash does not expose raw token
+[PASS] CSRF token hash does not expose raw token
+[PASS] session idle expiry is two hours
+[PASS] session absolute expiry is twelve hours
+[PASS] session does not refresh before five minutes
+[PASS] session refreshes at five minutes
+[PASS] idle refresh never exceeds absolute expiry
+[PASS] session internal data is accessible to middleware utilities
+[PASS] session internal data is not enumerable
+[PASS] middleware returns exact public AuthContext fields
+[PASS] middleware AuthContext uses session organization
+[PASS] middleware performs one JOIN lookup
+[PASS] middleware does not refresh last_seen before five minutes
+[PASS] lookup SQL uses a bound token hash
+[PASS] middleware refreshes last_seen after five minutes
+[PASS] middleware refresh is conditional on old last_seen value
+[PASS] refreshed idle expiry does not exceed absolute expiry
+[PASS] missing session cookie is rejected
+[PASS] unknown session token is rejected
+[PASS] revoked session is rejected
+[PASS] idle-expired session is rejected
+[PASS] absolute-expired session is rejected
+[PASS] invalid last_seen_at is rejected
+[PASS] suspended user is rejected
+[PASS] suspended organization is rejected
+[PASS] suspended membership is rejected
+[PASS] removed membership is rejected
+[PASS] invalid database role is rejected
+
+Stage 3-A test summary: 120 passed, 0 failed, 120 total.
+\n===== AUTH API =====
+[PASS] single-organization login succeeds and ignores supplied organizationId
+[PASS] login response uses no-store security headers
+[PASS] login response does not expose raw session token
+[PASS] login selects the server-side active organization
+[PASS] local login sets HttpOnly SameSite Strict dev cookie
+[PASS] D1 stores only session token hash
+[PASS] D1 stores only CSRF token hash
+[PASS] session lookup succeeds
+[PASS] GET session issues an additional CSRF token
+[PASS] separate tab receives a distinct CSRF token
+[PASS] primary login CSRF hash remains stable
+[PASS] secondary CSRF hashes are stored separately
+[PASS] secondary CSRF storage is capped at eight tokens
+[PASS] oldest secondary CSRF token is evicted after the cap
+[PASS] login CSRF token remains valid
+[PASS] latest tab CSRF token remains valid
+[PASS] authenticated query organization selector is rejected
+[PASS] organization selector separator variants are rejected
+[PASS] logout without CSRF is rejected
+[PASS] logout rejects body organization selector
+[PASS] logout succeeds with Origin and CSRF
+[PASS] logout clears identical cookie name
+[PASS] logged-out token replay is rejected
+[PASS] unknown user and wrong password share generic response
+[PASS] suspended user receives generic 401
+[PASS] suspended membership receives generic 401
+[PASS] multiple active organizations require selection
+[PASS] invalid selected organization remains generic
+[PASS] valid selected organization creates scoped session
+[PASS] login rejects a different Origin
+[PASS] login rejects a missing Origin
+[PASS] authentication JSON body is capped
+[PASS] each login issues a new session token
+[PASS] suspended organization receives generic 401
+[PASS] email reset request endpoint validates its input
+[PASS] deleted user receives generic 401
+[PASS] user without membership receives generic 401
+[PASS] legacy password scheme is rehashed on successful login
+[PASS] legacy rehash preserves actual password change time
+[PASS] failed login 1 returns generic 401
+[PASS] failed login 2 returns generic 401
+[PASS] failed login 3 returns generic 401
+[PASS] failed login 4 returns generic 401
+[PASS] failed login 5 returns generic 401
+[PASS] fifth failure sets a 15-minute account lock
+[PASS] correct password is rejected while locked
+[PASS] login succeeds after lock expiry
+[PASS] successful login clears failure count and lock
+[PASS] IP limiter rejection returns 429 and Retry-After
+[PASS] account limiter rejection returns 429
+[PASS] limiter failure fails open while D1 authentication continues
+[PASS] limiter failure audit contains no raw IP or login ID
+req_a25a20f5210f4b8199cb81232c88495a AuthError: AUTH_RATE_LIMITER_NOT_CONFIGURED
+    at enforceLoginRateLimits (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/routes/auth.js:518:11)
+    at handleLogin (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/routes/auth.js:71:9)
+    at async Object.fetch (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/index.js:38:49)
+    at async testLockAndRateLimit (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:188:14)
+    at async runGroup (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:39:5)
+    at async main (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:25:3)
+    at async file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:783:1 {
+  status: 500,
+  code: 'AUTH_RATE_LIMITER_NOT_CONFIGURED',
+  headers: {},
+  expose: false
+}
+[PASS] production refuses login without rate limiter bindings
+req_e63eca8b5a9a4419afb1262ba03ede1e AuthError: AUTH_CLIENT_IP_UNAVAILABLE
+    at enforceLoginRateLimits (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/routes/auth.js:515:42)
+    at handleLogin (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/routes/auth.js:71:9)
+    at async Object.fetch (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/index.js:38:49)
+    at async testLockAndRateLimit (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:191:14)
+    at async runGroup (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:39:5)
+    at async main (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:25:3)
+    at async file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:783:1 {
+  status: 500,
+  code: 'AUTH_CLIENT_IP_UNAVAILABLE',
+  headers: {},
+  expose: false
+}
+[PASS] production refuses login without Cloudflare client IP
+[PASS] password change rejects incorrect current password
+[PASS] password change enforces 12-character minimum
+[PASS] password change rejects body organization selector
+[PASS] password change succeeds and issues a fresh session
+[PASS] password change revokes the old session
+[PASS] old password no longer authenticates
+[PASS] new password authenticates
+[PASS] password change audit exists
+[PASS] owner can read current organization
+[PASS] owner can list members with stable pagination
+[PASS] member cursor returns remaining members
+[PASS] owner creates a new teacher
+[PASS] new member requires password change
+[PASS] global duplicate login ID returns 409
+[PASS] owner can add an explicit existing user membership
+[PASS] admin cannot create another admin
+[PASS] admin can create a teacher
+[PASS] admin can suspend a teacher
+[PASS] membership suspension invalidates existing session
+[PASS] admin cannot manage another admin
+[PASS] admin cannot promote a teacher to admin
+[PASS] teacher cannot list organization members
+[PASS] owner may demote a non-final owner
+[PASS] role change revokes the target session
+[PASS] CSRF token from another session is rejected
+
+===== AUTH API RETRY =====
+[PASS] single-organization login succeeds and ignores supplied organizationId
+[PASS] login response uses no-store security headers
+[PASS] login response does not expose raw session token
+[PASS] login selects the server-side active organization
+[PASS] local login sets HttpOnly SameSite Strict dev cookie
+[PASS] D1 stores only session token hash
+[PASS] D1 stores only CSRF token hash
+[PASS] session lookup succeeds
+[PASS] GET session issues an additional CSRF token
+[PASS] separate tab receives a distinct CSRF token
+[PASS] primary login CSRF hash remains stable
+[PASS] secondary CSRF hashes are stored separately
+[PASS] secondary CSRF storage is capped at eight tokens
+[PASS] oldest secondary CSRF token is evicted after the cap
+[PASS] login CSRF token remains valid
+[PASS] latest tab CSRF token remains valid
+[PASS] authenticated query organization selector is rejected
+[PASS] organization selector separator variants are rejected
+[PASS] logout without CSRF is rejected
+[PASS] logout rejects body organization selector
+[PASS] logout succeeds with Origin and CSRF
+[PASS] logout clears identical cookie name
+[PASS] logged-out token replay is rejected
+[PASS] unknown user and wrong password share generic response
+[PASS] suspended user receives generic 401
+[PASS] suspended membership receives generic 401
+[PASS] multiple active organizations require selection
+[PASS] invalid selected organization remains generic
+[PASS] valid selected organization creates scoped session
+[PASS] login rejects a different Origin
+[PASS] login rejects a missing Origin
+[PASS] authentication JSON body is capped
+[PASS] each login issues a new session token
+[PASS] suspended organization receives generic 401
+[PASS] email reset request endpoint validates its input
+[PASS] deleted user receives generic 401
+[PASS] user without membership receives generic 401
+[PASS] legacy password scheme is rehashed on successful login
+[PASS] legacy rehash preserves actual password change time
+[PASS] failed login 1 returns generic 401
+[PASS] failed login 2 returns generic 401
+[PASS] failed login 3 returns generic 401
+[PASS] failed login 4 returns generic 401
+[PASS] failed login 5 returns generic 401
+[PASS] fifth failure sets a 15-minute account lock
+[PASS] correct password is rejected while locked
+[PASS] login succeeds after lock expiry
+[PASS] successful login clears failure count and lock
+[PASS] IP limiter rejection returns 429 and Retry-After
+[PASS] account limiter rejection returns 429
+[PASS] limiter failure fails open while D1 authentication continues
+[PASS] limiter failure audit contains no raw IP or login ID
+req_2c9c10e35d6942dcaeeddd12f855447b AuthError: AUTH_RATE_LIMITER_NOT_CONFIGURED
+    at enforceLoginRateLimits (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/routes/auth.js:518:11)
+    at handleLogin (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/routes/auth.js:71:9)
+    at async Object.fetch (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/index.js:38:49)
+    at async testLockAndRateLimit (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:188:14)
+    at async runGroup (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:39:5)
+    at async main (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:25:3)
+    at async file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:783:1 {
+  status: 500,
+  code: 'AUTH_RATE_LIMITER_NOT_CONFIGURED',
+  headers: {},
+  expose: false
+}
+[PASS] production refuses login without rate limiter bindings
+req_0c9779d171874468a45268ccdd2af600 AuthError: AUTH_CLIENT_IP_UNAVAILABLE
+    at enforceLoginRateLimits (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/routes/auth.js:515:42)
+    at handleLogin (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/routes/auth.js:71:9)
+    at async Object.fetch (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/src/index.js:38:49)
+    at async testLockAndRateLimit (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:191:14)
+    at async runGroup (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:39:5)
+    at async main (file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:25:3)
+    at async file:///mnt/data/stage77_work/CPCV_stage07_6_complete_source/scripts/test-auth-api-v2.mjs:783:1 {
+  status: 500,
+  code: 'AUTH_CLIENT_IP_UNAVAILABLE',
+  headers: {},
+  expose: false
+}
+[PASS] production refuses login without Cloudflare client IP
+[PASS] password change rejects incorrect current password
+[PASS] password change enforces 12-character minimum
+[PASS] password change rejects body organization selector
+[PASS] password change succeeds and issues a fresh session
+[PASS] password change revokes the old session
+[PASS] old password no longer authenticates
+[PASS] new password authenticates
+[PASS] password change audit exists
+[PASS] owner can read current organization
+[PASS] owner can list members with stable pagination
+[PASS] member cursor returns remaining members
+[PASS] owner creates a new teacher
+[PASS] new member requires password change
+[PASS] global duplicate login ID returns 409
+[PASS] owner can add an explicit existing user membership
+[PASS] admin cannot create another admin
+[PASS] admin can create a teacher
+[PASS] admin can suspend a teacher
+[PASS] membership suspension invalidates existing session
+[PASS] admin cannot manage another admin
+[PASS] admin cannot promote a teacher to admin
+[PASS] teacher cannot list organization members
+[PASS] owner may demote a non-final owner
+[PASS] role change revokes the target session
+[PASS] CSRF token from another session is rejected
+[PASS] last active owner cannot be suspended
+[PASS] last active owner cannot be removed
+[PASS] owner can remove a teacher membership
+[PASS] removed membership cannot be silently reactivated by PATCH
+[PASS] reset email request accepts an omitted JSON body
+[PASS] owner can request a one-time reset email for admin
+[PASS] manager reset stores only a new SHA-256 token hash
+[PASS] issuing a new reset email revokes the previous token
+[PASS] admin cannot request reset for admin
+[PASS] admin can request reset email for a teacher
+[PASS] owner reset token issuance is forbidden
+[PASS] multi-organization user reset requires system operator
+[PASS] expired reset token is rejected
+[PASS] revoked reset token is rejected
+[PASS] issued reset token changes password
+[PASS] reset success revokes other unused tokens
+[PASS] used reset token cannot be replayed
+[PASS] password reset revokes all existing sessions
+[PASS] reset password authenticates
+[PASS] owner can read organization audit log
+[PASS] admin can read organization audit log
+[PASS] multi-organization session remains fixed to authenticated organization
+[PASS] audit action filter is exact
+[PASS] audit response contains no password or raw reset token
+[PASS] organization header selector is rejected
+[PASS] malformed encoded member path returns a controlled 400
+[PASS] member update reports failure when its audit write fails
+[PASS] failed member update rolls back membership state
+[PASS] failed member update rolls back session revocation
+[PASS] member creation reports failure when its audit write fails
+[PASS] failed member creation rolls back the new user
+[PASS] password change reports failure when its audit write fails
+[PASS] failed password change rolls back session revocation
+[PASS] failed password change preserves the old password
+[PASS] failed password change does not install the new password
+[PASS] password reset reports failure when its audit write fails
+[PASS] failed password reset leaves token unused
+[PASS] failed password reset rolls back session revocation
+[PASS] reset token remains usable after rolled-back failure
+
+Stage 3-B API test summary: 118 passed, 0 failed, 118 total.
+\n===== PRIVATE API =====
+[PASS] V2 flag disables legacy teacher login with 410
+[PASS] V2 flag disables all legacy master APIs with 410
+[PASS] Bearer token cannot authenticate V2 private API
+[PASS] HttpOnly-cookie session authenticates private API
+[PASS] private API rejects organization selector query
+[PASS] production refuses AUTH_V2_ENABLED=0
+[PASS] teacher creates a session
+[PASS] DB_V2 and legacy DB use identical session identity
+[PASS] legacy teacher projection uses V2 user id
+[PASS] session creation audit is recorded
+[PASS] student public session API reads the V2 source of truth
+[PASS] legacy student message shape remains accepted
+[PASS] public message reaches the verified comment room path
+[PASS] teacher sees the created own session
+[PASS] Admin sees all organization sessions
+[PASS] Teacher cannot read another teacher session
+[PASS] other organization cannot read session by id
+[PASS] Teacher cannot update another teacher session
+[PASS] Admin updates a session in the same organization
+[PASS] settings update remains identical in both databases
+[PASS] settings update reaches comment room state
+[PASS] settings body cannot select another organization
+[PASS] legacy projection failure never returns success
+[PASS] failed create is compensated to deleted in DB_V2
+[PASS] failed create records projection audit
+[PASS] failed create leaves no legacy session
+[PASS] compensation audit failure never returns success
+[PASS] audit failure fallback still deletes the orphan V2 session
+[PASS] audit failure fallback leaves no legacy session
+[PASS] audit failure fallback records projection inconsistency
+[PASS] V2 settings failure returns an error
+[PASS] legacy settings are rolled back after V2 failure
+[PASS] V2 settings remain unchanged after atomic batch failure
+[PASS] rollback failure returns generic 500
+[PASS] failed rollback is left visible as safe-side legacy state
+[PASS] rollback failure records projection inconsistency
+[PASS] V2 end failure returns error
+[PASS] end failure keeps legacy projection safely stopped
+[PASS] end failure does not falsely end DB_V2
+[PASS] end failure records projection inconsistency
+[PASS] V2 delete failure returns error
+[PASS] delete failure keeps legacy projection safely deleted
+[PASS] delete failure records projection inconsistency
+[PASS] authenticated clear operation succeeds
+[PASS] clear reaches unchanged comment room endpoint
+[PASS] clear operation is audited
+[PASS] authenticated viewer receives a one-time live ticket
+[PASS] ticket-authenticated WebSocket bridge reaches comment room
+[PASS] V2 WebSocket bridge strips obsolete token subprotocol
+[PASS] cross-origin WebSocket request is rejected
+
+Stage 3-C integration test summary: 50 passed, 0 failed, 50 total.
+\n===== COMMENTS =====
+[PASS] Stage 4 creates three comment tables
+[PASS] comment indexes exist
+[PASS] live session organization composite unique index exists
+[PASS] foreign key check is clean after migration
+[PASS] quick check is ok
+[PASS] database comment content guards exist
+[PASS] database rejects an overlong comment
+[PASS] database rejects a mismatched message length
+[PASS] database rejects an overlong nickname
+[PASS] public session GET succeeds
+[PASS] participant cookie is HttpOnly and session-scoped
+[PASS] GET does not create participant row
+[PASS] public comment JSON body is capped
+[PASS] new public comment returns 201
+[PASS] participant is persisted once
+[PASS] comment is persisted once
+[PASS] created event is persisted atomically
+[PASS] stored comment uses normalized content
+[PASS] stored comment belongs to session organization
+[PASS] comment response uses persistent id
+[PASS] new comment is broadcast with persistent id
+[PASS] same idempotency key returns existing comment
+[PASS] duplicate does not add database rows
+[PASS] duplicate is not broadcast again
+[PASS] different immediate post is rate limited
+[PASS] rate-limited post is not persisted
+[PASS] legacy client without idempotency key remains accepted after rate window is reset
+[PASS] legacy missing key receives compatibility key
+[PASS] NFKC and control normalization is applied
+[PASS] URL is rejected
+[PASS] invalid idempotency key is rejected
+[PASS] overlong message is rejected
+[PASS] direct unverified Durable Object post is rejected
+[PASS] privacy test comment is stored
+[PASS] schema has no IP or user-agent columns
+[PASS] broadcast payload contains no IP or participant token
+[PASS] session owner teacher reads comment history
+[PASS] comment history cursor paginates without duplicate
+[PASS] same organization Admin reads history
+[PASS] another Teacher cannot read history
+[PASS] other organization cannot read history
+[PASS] CSV export succeeds with attachment headers
+[PASS] CSV formula injection is neutralized
+[PASS] CSV does not contain IP address column
+[PASS] csvCell neutralizes leading whitespace formula
+[PASS] buildCommentsCsv quotes embedded double quote
+[PASS] retention fixtures inserted
+[PASS] retention physically deletes only expired comments
+[PASS] comment events cascade with deleted comment
+[PASS] orphan participant is deleted
+[PASS] Admin cannot manually run retention
+[PASS] Owner can run retention maintenance
+[PASS] participant retention obeys the batch limit
+[PASS] scheduled maintenance drains participant backlog
+[PASS] scheduled maintenance prunes expired secondary CSRF tokens
+[PASS] scheduled maintenance removes old expired auth sessions
+[PASS] auth session deletion cascades secondary CSRF rows
+[PASS] scheduled maintenance removes only old reset tokens
+[PASS] event insert fault rejects comment operation
+[PASS] event fault rolls back participant and comment
+[PASS] scheduled handler runs retention without remote services
+[PASS] join client no longer stores persistent client id in localStorage
+[PASS] join client sends idempotency key
+[PASS] join client counts Unicode code points
+[PASS] join form avoids UTF-16 maxlength for Unicode limits
+[PASS] viewer CSV uses authenticated server export
+[PASS] viewer local cache no longer records IP
+
+Stage 4 comment persistence test summary: 67 passed, 0 failed, 67 total.
+\n===== MODERATION =====
+[PASS] Stage 5 creates moderation tables
+[PASS] moderation transition and timestamp triggers exist
+[PASS] Stage 5 foreign keys are clean
+[PASS] Stage 5 quick check is ok
+[PASS] database rejects visible to pending
+[PASS] database requires moderation timestamp advance
+[PASS] database rejects invalid moderation mode
+[PASS] database blocks direct deleted to visible restore
+[PASS] public session advertises approval requirement
+[PASS] premoderated comment returns 202
+[PASS] premoderated comment is stored pending
+[PASS] pending comment is not broadcast
+[PASS] pending state filter returns pending comment
+[PASS] visible filter excludes pending comment
+[PASS] invalid state filter is rejected
+[PASS] visible comment can be hidden
+[PASS] hide broadcasts removal
+[PASS] hidden comment can be restored visible
+[PASS] restore broadcasts full comment
+[PASS] visible comment can be logically deleted
+[PASS] deleted restore returns to hidden safe-side state
+[PASS] second restore makes hidden comment visible
+[PASS] all moderation actions are preserved with normalized reason
+[PASS] generic audit logs are written without comment content
+[PASS] invalid visible approve is rejected
+[PASS] stale optimistic version is rejected
+[PASS] malformed expected timestamp is rejected
+[PASS] overlong moderation reason is rejected
+[PASS] validation failures do not change comment state
+[PASS] concurrent same-version moderation has one winner
+[PASS] concurrent loser receives version conflict
+[PASS] concurrent conflict writes one action and one audit
+[PASS] teacher cannot moderate another teacher session
+[PASS] other organization cannot moderate comment
+[PASS] same organization admin can moderate
+[PASS] direct unverified moderation broadcast is rejected
+[PASS] bulk fixtures are pending
+[PASS] bulk operation returns per-item partial results
+[PASS] bulk successful actions persist independently
+[PASS] bulk failed item remains unchanged
+[PASS] bulk unexpected item failure remains a per-item result
+[PASS] bulk continues after an unexpected item failure
+[PASS] bulk operation is capped at 25
+[PASS] bulk operation rejects duplicate comment ids
+[PASS] moderation fault is surfaced
+[PASS] moderation action failure rolls back comment state
+[PASS] moderation action failure rolls back audit
+[PASS] display clear succeeds
+[PASS] display clear does not change moderation state
+[PASS] retention physically deletes expired comment
+[PASS] retention cascades moderation actions
+[PASS] teacher can enable premoderation on own session
+[PASS] session moderation mode is stored separately
+[PASS] session response includes moderation mode
+[PASS] new session can start in premoderation mode
+[PASS] new session setting is inserted atomically
+[PASS] URL-like content is detected: ftp://example.com
+[PASS] URL-like comment is rejected: ftp://example.com
+[PASS] URL-like content is detected: example.com
+[PASS] URL-like comment is rejected: example.com
+[PASS] URL-like content is detected: www.example.com
+[PASS] URL-like comment is rejected: www.example.com
+[PASS] URL-like content is detected: 192.168.1.1
+[PASS] URL-like comment is rejected: 192.168.1.1
+[PASS] URL-like content is detected: javascript:alert(1)
+[PASS] URL-like comment is rejected: javascript:alert(1)
+[PASS] URL-like content is detected: mailto:test@example.com
+[PASS] URL-like comment is rejected: mailto:test@example.com
+[PASS] decimal number is not treated as URL
+[PASS] viewer handles moderation removal
+[PASS] viewer handles approved and restored comments
+[PASS] admin includes moderation API operations
+[PASS] admin stops moderation polling when leaving a session
+[PASS] admin moderation UI exists
+[PASS] student UI explains pending submission
+
+Stage 5 manual moderation test summary: 75 passed, 0 failed, 75 total.
+\n===== REALTIME =====
+[PASS] Stage 6 creates realtime tables
+[PASS] comment realtime triggers exist
+[PASS] realtime foreign keys are clean
+[PASS] realtime quick check is ok
+[PASS] live ticket expires after sixty seconds
+[PASS] live ticket preserves reconnect sequence
+[PASS] live ticket is one-time
+[PASS] ticket cannot cross users
+[PASS] expired ticket is rejected
+[PASS] ticket consumption revalidates the auth session
+[PASS] ticket consumption revalidates active membership
+[PASS] ticket consumption revalidates the live session
+[PASS] visible comment receives sequence one
+[PASS] manual realtime event increments sequence
+[PASS] sequences are gapless
+[PASS] catch-up returns missing events in order
+[PASS] up-to-date reconnect has no duplicate events
+[PASS] clear sequence is persisted for snapshot reconstruction
+[PASS] pending comment creates no viewer event
+[PASS] approval creates restoration event
+[PASS] hide creates removal event
+[PASS] pruned history requests a snapshot reset
+[PASS] snapshot contains only currently visible comments
+[PASS] snapshot does not resurrect comments from before the last clear
+[PASS] future client sequence forces reset
+[PASS] scheduled maintenance prunes realtime events
+[PASS] scheduled maintenance prunes tickets
+[PASS] edge limiter receives a pseudonymous key
+[PASS] production requires public limiter binding
+[PASS] edge limiter rejection returns rate limit
+[PASS] auth-session revalidation is safely chunked for many sockets
+[PASS] ack updates serialized hibernation attachment
+[PASS] ack beyond sent sequence is ignored
+[PASS] oversized client frame closes socket
+[PASS] hibernation broadcast sends sequence envelope
+[PASS] same sequence is not sent twice
+[PASS] revoked auth session closes an existing socket before delivery
+[PASS] room closure closes hibernated sockets
+[PASS] viewer requests one-time live tickets
+[PASS] viewer uses bounded exponential reconnect
+[PASS] viewer discards duplicate sequence
+[PASS] viewer detects sequence gaps
+[PASS] viewer persists only non-secret sequence state
+[PASS] viewer stops reconnecting when room closes
+
+Stage 6 realtime test summary: 44 passed, 0 failed, 44 total.
+\n===== EMAIL AUTH =====
+[PASS] email normalization lowercases and trims
+[PASS] email rejects Unicode addresses in Stage 6.5-A
+[PASS] email rejects consecutive dots
+[PASS] email rejects a domain without a dot
+[PASS] email rejects CRLF
+[PASS] registration request is accepted
+[PASS] registration sends one verification email
+[PASS] verification email uses a path token
+[PASS] pending registration stores normalized email
+[PASS] raw verification token is not stored
+[PASS] plaintext password is absent from pending registration
+[PASS] verification creates an authenticated Owner
+[PASS] verification sets an HttpOnly session cookie
+[PASS] verification creates one user
+[PASS] verification creates one organization
+[PASS] verification creates one Owner membership
+[PASS] verification creates organization origin
+[PASS] verification creates organization quota
+[PASS] verified email timestamp is stored
+[PASS] verification token cannot be replayed
+[PASS] verified email login succeeds
+[PASS] legacy login ID is rejected when email auth is required
+[PASS] unknown reset address receives the generic response
+[PASS] unknown reset address sends no email
+[PASS] password reset request is accepted
+[PASS] password reset email contains a path token
+[PASS] raw reset token is not stored
+[PASS] password reset snapshots the verified email
+[PASS] emailed reset token changes the password
+[PASS] password reset revokes every existing session
+[PASS] password reset token cannot be replayed
+[PASS] old password is rejected after reset
+[PASS] new password authenticates after reset
+[PASS] public email issuance requires Turnstile
+[PASS] verification email race returns completed conflict
+[PASS] verification email race leaves pending token unconsumed
+[PASS] verification email race rolls back organization side effects
+[PASS] daily recipient limit is aggregate across email purposes
+[PASS] sixth public email request is rate limited
+[PASS] registration remains accepted when email delivery fails
+[PASS] email delivery failure is recorded without message content
+[PASS] delivery log masks the recipient
+
+Stage 6.5-A email authentication summary: 42 passed, 0 failed, 42 total.
+\n===== ACCOUNT LIFECYCLE =====
+[PASS] self-registration returns Owner session
+[PASS] Owner can create a teacher invitation
+[PASS] invitation email contains a path token
+[PASS] invitation stores only token hash
+[PASS] invitation delivery is attributed to organization
+[PASS] public invitation inspection exposes only masked address
+[PASS] new user accepts invitation and receives session
+[PASS] accepted invitation creates active membership
+[PASS] invitation token cannot be replayed
+[PASS] account endpoint returns verified email and memberships
+[PASS] manager reset sends email without returning a raw token
+[PASS] manager reset token is emailed
+[PASS] manager reset token is hashed in D1
+[PASS] a logged-in user with another email cannot consume an invitation
+[PASS] existing user can join a second organization
+[PASS] existing invitation acceptance does not create a duplicate user
+[PASS] existing user now has two active memberships
+[PASS] manager reset blocks a multi-organization account
+[PASS] verified user can request email change
+[PASS] email change confirmation uses a path token
+[PASS] email change raw token is absent from D1
+[PASS] email change confirmation succeeds
+[PASS] email change revokes all sessions
+[PASS] old address receives a change notice
+[PASS] email change token cannot be replayed
+[PASS] legacy account can enroll its first email
+[PASS] legacy email enrollment becomes verified
+[PASS] temporary-password member creation is disabled
+[PASS] Owner can invite Admin
+[PASS] Admin cannot invite Admin
+[PASS] Admin can invite Teacher
+[PASS] pending invitation quota is enforced
+[PASS] daily invitation email quota is enforced
+[PASS] invitation resend rotates successfully below quota
+[PASS] active member quota rejects invitation acceptance
+
+Stage 6.5 account lifecycle summary: 35 passed, 0 failed, 35 total.
+\n===== AI =====
+[PASS] Stage 7 creates all AI tables
+[PASS] Stage 7 foreign keys are clean
+[PASS] Stage 7 quick check is ok
+[PASS] organization AI defaults disabled
+[PASS] session AI defaults disabled
+[PASS] new organizations receive disabled AI settings
+[PASS] session AI can enable moderation and translation
+[PASS] safe comment creates two jobs
+[PASS] queue receives job IDs only
+[PASS] moderation job succeeds
+[PASS] translation job succeeds
+[PASS] AI moderation does not change human moderation state
+[PASS] AI translation does not change original text
+[PASS] structured moderation result is persisted
+[PASS] translation is persisted separately
+[PASS] translation receives a Stage 6 sequence event
+[PASS] translation realtime dispatch was attempted
+[PASS] teacher comment list includes AI advice
+[PASS] teacher comment list includes AI translation
+[PASS] reset snapshot includes latest translation
+[PASS] Workers AI receives direct JSON Schema
+[PASS] AI Gateway disables cache when configured
+[PASS] PII is detected locally
+[PASS] PII moderation is local review advice
+[PASS] PII translation is not sent externally
+[PASS] prompt injection signal is retained as a category
+[PASS] prompt injection text remains data not instruction
+[PASS] invalid primary response falls back to the secondary model
+[PASS] primary and fallback model calls are both counted
+[PASS] translation and realtime event fail as one atomic operation
+[PASS] translation retry persists translation and realtime event together
+[PASS] daily quota stops provider execution
+[PASS] retryable provider failure enters retry
+[PASS] provider failure stops after three attempts
+[PASS] each primary and fallback call consumes one quota event
+[PASS] terminal job message is idempotently ignored
+[PASS] terminal failed job is not redispatched
+[PASS] disabled organization creates no jobs
+AI queue dispatch failed Error
+[PASS] queue dispatch failure does not throw into posting flow
+[PASS] missing or disabled comment scheduling stays non-fatal
+[PASS] invalid queue messages are acknowledged
+[PASS] moderation output validator accepts bounded schema
+[PASS] translation output validator trims valid output
+[PASS] unsupported target languages are rejected
+[PASS] admin labels AI verdict as reference only
+[PASS] viewer labels translated content
+[PASS] viewer never replaces original message with translation
+
+Stage 7 AI test summary: 47 passed, 0 failed, 47 total.
+\n===== CONTENT FILTER =====
+[PASS] content-filter tables exist
+[PASS] foreign keys clean
+[PASS] quick check ok
+[PASS] all category policies are initialized
+[PASS] session filter defaults disabled and ambiguous routing
+[PASS] dictionary stores language metadata
+[PASS] dictionary stores boundary mode
+[PASS] punctuation insertion is normalized to a deterministic match
+[PASS] punctuation-obfuscated term is masked
+[PASS] deterministic mask does not require AI in ambiguous-only mode
+[PASS] Katakana and Hiragana are folded for matching
+[PASS] level 5 term reaches reject policy
+[PASS] political category is inactive by default
+[PASS] one-edit evasion becomes an ambiguous review
+[PASS] ambiguous match is routed to AI
+[PASS] safe comment skips moderation AI in ambiguous-only mode
+[PASS] ambiguous comment creates only moderation AI job
+[PASS] ambiguous comment remains pending until human or later policy decision
+[PASS] original and masked display text are stored separately
+[PASS] filter match evidence is stored without duplicating the term text
+[PASS] realtime event contains masked text only
+[PASS] teacher view keeps original and display forms
+[PASS] teacher view includes dictionary evidence
+[PASS] same spelling can be registered for different languages
+[PASS] English auto boundary avoids substring false positive
+[PASS] English standalone word still matches
+[PASS] all repeated deterministic matches are masked
+[PASS] strict match maps zero-width obfuscation to the correct original span
+[PASS] Thai combining marks are preserved for matching
+[PASS] Devanagari combining marks are preserved for matching
+
+Stage 7.6 content-filter summary: 30 passed, 0 failed, 30 total.
+\n===== BILINGUAL FILTER =====
+[PASS] comments store detected language
+[PASS] translations store filtered display text
+[PASS] Japanese and English packs are available but not silently installed
+[PASS] both starter packs install as editable organization terms
+[PASS] pack installation is idempotent
+[PASS] pack contains no political category terms
+[PASS] Japanese pack masks punctuation evasion before translation
+[PASS] English pack masks a whole English word before translation
+[PASS] English word boundaries avoid matching inside assignment or class
+[PASS] non-Japanese and non-English text is held for review
+[PASS] unsupported language requests AI reference review
+[PASS] unsupported language comment is persisted pending
+[PASS] unsupported language creates a moderation AI job even when ordinary AI moderation is off
+[PASS] pending unsupported comment is not translated before human approval
+[PASS] translated English text is checked by the English pack
+[PASS] raw translation and filtered display translation are stored separately
+[PASS] translation realtime never leaks the unfiltered translation
+[PASS] high-severity translated text is rejected from display
+[PASS] rejected translation is held and no realtime event is created
+
+Stage 7.7 bilingual filter summary: 19 passed, 0 failed, 19 total.
+\n===== STAGE 7.7 BOUNDARIES =====
+[PASS] Stage 7.7 migration is append-only as 0013
+[PASS] comment language metadata is added
+[PASS] translation filtering metadata is added
+[PASS] pack installation table is added
+[PASS] existing non-Japanese and non-English translation targets are migrated
+[PASS] Japanese and English built-in packs exist
+[PASS] pack CSV files use documented columns
+[PASS] built-in packs contain no political category
+[PASS] packs are copied into editable organization terms
+[PASS] unsupported languages are detected before persistence
+[PASS] unsupported languages force AI reference routing
+[PASS] pending unsupported comments are not translated
+[PASS] translation output is filtered before persistence
+[PASS] realtime sends filtered translation text only
+[PASS] teacher comment list uses filtered translation text
+[PASS] dictionary language options are restricted to Japanese and English
+[PASS] translation targets are restricted to Japanese and English
+[PASS] simple UI exposes bilingual pack status
+[PASS] recommended preset auto-installs bilingual packs
+[PASS] advanced UI exposes translation re-filter and unsupported language mode
+[PASS] Stage 8 files remain absent
+
+Stage 7.7 boundary summary: 21 passed, 0 failed, 21 total.
+\n===== STAGE 7.6 BOUNDARIES =====
+[PASS] Stage 7.6 migration 0012 remains present
+[PASS] dictionary migration avoids compound-select backfill
+[PASS] dictionary organization trigger avoids multi-row VALUES
+[PASS] language metadata is stored
+[PASS] boundary mode is stored
+[PASS] combining marks are retained
+[PASS] mask spans map to original graphemes
+[PASS] word-boundary protection exists
+[PASS] multiple deterministic matches are collected
+[PASS] language codes are validated
+[PASS] boundary modes are validated
+[PASS] API supports language and boundary fields
+[PASS] simple organization preset exists
+[PASS] simple session mode exists
+[PASS] advanced settings are separated
+[PASS] dictionary terms can be edited
+[PASS] dictionary can be exported as CSV
+[PASS] Stage 8 files remain absent
+
+Stage 7.6 boundary summary: 18 passed, 0 failed, 18 total.
+\n===== STAGE 7.5 BOUNDARIES =====
+[PASS] Stage 7.5 migration 0011 remains present
+[PASS] dictionary table exists: content_filter_terms
+[PASS] dictionary table exists: organization_content_filter_policies
+[PASS] dictionary table exists: session_content_filter_settings
+[PASS] dictionary table exists: comment_filter_matches
+[PASS] original and display text are separate
+[PASS] filter defaults are disabled
+[PASS] political policy starts disabled without mask/reject
+[PASS] realtime uses display text
+[PASS] NFKC normalization is applied
+[PASS] Katakana is folded to Hiragana
+[PASS] punctuation insertion is compacted
+[PASS] confusable matching is limited
+[PASS] fuzzy matching is bounded
+[PASS] ambiguous matches cannot directly reject
+[PASS] exact filtering runs before persistence
+[PASS] rejected comments are not persisted
+[PASS] original message is retained
+[PASS] match evidence is persisted atomically
+[PASS] AI routing reads dictionary decision
+[PASS] organization dictionary API exists
+[PASS] session filter API exists
+[PASS] term changes are audited without storing term text
+[PASS] admin UI manages terms and policy thresholds
+[PASS] student receives neutral rejection message
+[PASS] Stage 8 files remain absent
+
+Stage 7.5 boundary summary: 26 passed, 0 failed, 26 total.
+\n===== PRECISION BOUNDARIES =====
+[PASS] precision migrations are append-only
+[PASS] secondary CSRF table has session cascade
+[PASS] secondary CSRF expiry index exists
+[PASS] database enforces public comment character limits
+[PASS] JSON readers enforce actual streamed byte limits
+[PASS] public message body uses 4KiB limit
+[PASS] CSRF accepts primary and scoped secondary tokens
+[PASS] secondary CSRF tokens expire and are capped
+[PASS] participant cleanup is bounded
+[PASS] scheduled maintenance drains all bounded queues
+[PASS] scheduled maintenance reports a remaining bounded backlog
+[PASS] scheduled maintenance includes realtime retention
+[PASS] WebSocket input closes oversized client frames
+[PASS] HTML security policy is applied
+[PASS] security header configured: content-security-policy
+[PASS] security header configured: x-frame-options
+[PASS] security header configured: permissions-policy
+[PASS] security header configured: strict-transport-security
+[PASS] HSTS does not force unrelated subdomains
+[PASS] CSP blocks framing and objects
+[PASS] production login refuses absent limiter bindings
+[PASS] production login requires Cloudflare client IP
+[PASS] V2 WebSocket bridge omits obsolete bearer subprotocol
+[PASS] expired authentication records are pruned with a retention delay and batch limit
+[PASS] participant token cookie accepts only the issued token length
+[PASS] viewer local logs have retention and hard cap
+[PASS] viewer pruning avoids quadratic object lookups
+[PASS] viewer cache version was advanced
+[PASS] page grid cannot expand beyond the mobile viewport
+[PASS] cards and nested layout containers may shrink below min-content width
+[PASS] local log table scrolls inside its bounded container
+[PASS] static mirror matches served page: public/admin/index.html
+[PASS] static mirror matches served page: public/j/index.html
+[PASS] static mirror matches served page: public/viewer/index.html
+[PASS] visual viewport has no page-level horizontal overflow: join-desktop
+[PASS] visual viewport has no page-level horizontal overflow: join-mobile
+[PASS] visual viewport has no page-level horizontal overflow: admin-desktop
+[PASS] visual viewport has no page-level horizontal overflow: admin-mobile
+[PASS] visual viewport has no page-level horizontal overflow: master-desktop
+[PASS] visual viewport has no page-level horizontal overflow: master-mobile
+[PASS] visual viewport has no page-level horizontal overflow: viewer-desktop
+[PASS] visual viewport has no page-level horizontal overflow: viewer-mobile
+[PASS] retention Cron is configured
+[PASS] no invented Rate Limiting namespace is committed
+[PASS] CI runs all implemented-stage tests
+[PASS] CI has no Cloudflare credentials or deploy command
+[PASS] production deployment is manual
+[PASS] production deployment requires an immutable full commit SHA
+[PASS] production deployment applies both migration sets
+[PASS] production deployment verifies D1 integrity and active Owner
+[PASS] production deployment requires rate-limit peppers and Turnstile secret
+[PASS] production deployment runs post-deploy smoke tests
+[PASS] legacy MASTER_TOKEN deployment was removed
+[PASS] local Owner bootstrap uses direct SQLite transaction instead of a local dev Worker
+[PASS] bootstrap validates required core schema while allowing later migrations
+[PASS] remote bootstrap terminates detached Wrangler descendants
+[PASS] bootstrap tests cover latest schema rollback and repeat rejection
+[PASS] local bootstrap selects DB_V2 when legacy D1 coexists
+[PASS] organization 204 responses retain the full auth security header set
+[PASS] QR SVG responses use restrictive security headers
+[PASS] precision test script covers deployment verifiers and Stage 2-6
+[PASS] Stage 6.5 check covers email registration and account lifecycle
+[PASS] safe deploy executes the current Stage 7.7 check
+[PASS] safe deploy checks email cutover readiness and Turnstile secret
+[PASS] authentication secret configurator includes Turnstile
+[PASS] remote DB_V2 migration script uses database name
+[PASS] deployment config verifier exists
+[PASS] local dev supplies both non-production rate-limit peppers
+[PASS] reusable local Stage 4 smoke test is available
+[PASS] reusable local Stage 5 smoke test is available
+[PASS] reusable local Stage 6 smoke test is available
+[PASS] syntax: src/auth/request.js
+[PASS] syntax: src/auth/csrf.js
+[PASS] syntax: src/auth/csrf-tokens.js
+[PASS] syntax: src/auth/maintenance.js
+[PASS] syntax: src/routes/auth.js
+[PASS] syntax: src/routes/public-v2.js
+[PASS] syntax: src/routes/private-v2.js
+[PASS] syntax: src/comments/repository.js
+[PASS] syntax: src/realtime/repository.js
+[PASS] syntax: src/realtime/comment-room.js
+[PASS] syntax: src/realtime/edge-rate-limit.js
+[PASS] syntax: src/security-headers.js
+[PASS] syntax: src/index.js
+[PASS] syntax: public/assets/viewer.js
+[PASS] syntax: scripts/predeploy-check.mjs
+[PASS] syntax: scripts/verify-deployment-config.mjs
+[PASS] syntax: scripts/verify-d1-query-result.mjs
+[PASS] syntax: scripts/print-production-origin.mjs
+[PASS] syntax: scripts/verify-remote-d1.mjs
+[PASS] syntax: scripts/verify-email-auth-readiness.mjs
+[PASS] syntax: scripts/configure-rate-limit-secret.mjs
+[PASS] syntax: scripts/smoke-production.mjs
+[PASS] syntax: scripts/test-deployment-verifiers.mjs
+[PASS] syntax: scripts/test-realtime-v2.mjs
+[PASS] syntax: scripts/test-email-auth-v2.mjs
+[PASS] syntax: scripts/test-account-lifecycle-v2.mjs
+[PASS] syntax: scripts/test-ai-v2.mjs
+[PASS] syntax: scripts/smoke-local-stage06.mjs
+[PASS] syntax: scripts/verify-stage06-boundaries.mjs
+[PASS] syntax: scripts/verify-stage06-5-boundaries.mjs
+[PASS] syntax: scripts/verify-stage07-boundaries.mjs
+[PASS] syntax: scripts/verify-stage07-5-boundaries.mjs
+[PASS] syntax: scripts/test-content-filter-v2.mjs
+[PASS] syntax: scripts/verify-ai-readiness.mjs
+[PASS] syntax: scripts/bootstrap-owner.mjs
+[PASS] syntax: scripts/bootstrap-owner-worker.mjs
+[PASS] syntax: scripts/test-bootstrap-owner-v2.mjs
+[PASS] syntax: scripts/test-db-v2.mjs
+[PASS] syntax: scripts/test-db-v2-schema.mjs
+
+Precision boundary summary: 110 passed, 0 failed, 110 total.
+\n===== STAGE COMPATIBILITY =====
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+
+stage02 compatibility summary: 11 passed, 0 failed, 11 total.
+[PASS] stage02 compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+
+stage03a compatibility summary: 20 passed, 0 failed, 20 total.
+[PASS] stage03a compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+
+stage03b compatibility summary: 25 passed, 0 failed, 25 total.
+[PASS] stage03b compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+[PASS] src/routes/private-v2.js exists
+[PASS] src/db/live-session-projection.js exists
+[PASS] public/assets/admin.js exists
+[PASS] public/assets/master.js exists
+[PASS] public/assets/viewer.js exists
+[PASS] AUTH_V2 is required in production
+[PASS] public/assets/admin.js has no legacy Bearer browser authentication
+[PASS] public/assets/admin.js restores a Cookie session
+[PASS] public/assets/master.js has no legacy Bearer browser authentication
+[PASS] public/assets/master.js restores a Cookie session
+[PASS] public/assets/viewer.js has no legacy Bearer browser authentication
+[PASS] public/assets/viewer.js restores a Cookie session
+[PASS] Viewer WebSocket uses the authenticated ticket bridge
+
+stage03c compatibility summary: 38 passed, 0 failed, 38 total.
+[PASS] stage03c compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+[PASS] src/routes/private-v2.js exists
+[PASS] src/db/live-session-projection.js exists
+[PASS] public/assets/admin.js exists
+[PASS] public/assets/master.js exists
+[PASS] public/assets/viewer.js exists
+[PASS] AUTH_V2 is required in production
+[PASS] public/assets/admin.js has no legacy Bearer browser authentication
+[PASS] public/assets/admin.js restores a Cookie session
+[PASS] public/assets/master.js has no legacy Bearer browser authentication
+[PASS] public/assets/master.js restores a Cookie session
+[PASS] public/assets/viewer.js has no legacy Bearer browser authentication
+[PASS] public/assets/viewer.js restores a Cookie session
+[PASS] Viewer WebSocket uses the authenticated ticket bridge
+[PASS] migrations-v2/0003_comments.sql exists
+[PASS] src/comments/repository.js exists
+[PASS] src/routes/public-v2.js exists
+[PASS] scripts/test-comments-v2.mjs exists
+[PASS] comment persistence tables remain present
+[PASS] comment schema does not store IP, user-agent, or device fingerprint
+[PASS] student client sends idempotency keys without persistent browser identity
+[PASS] admin comment cache does not expose obsolete IP fields
+
+stage04 compatibility summary: 46 passed, 0 failed, 46 total.
+[PASS] stage04 compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+[PASS] src/routes/private-v2.js exists
+[PASS] src/db/live-session-projection.js exists
+[PASS] public/assets/admin.js exists
+[PASS] public/assets/master.js exists
+[PASS] public/assets/viewer.js exists
+[PASS] AUTH_V2 is required in production
+[PASS] public/assets/admin.js has no legacy Bearer browser authentication
+[PASS] public/assets/admin.js restores a Cookie session
+[PASS] public/assets/master.js has no legacy Bearer browser authentication
+[PASS] public/assets/master.js restores a Cookie session
+[PASS] public/assets/viewer.js has no legacy Bearer browser authentication
+[PASS] public/assets/viewer.js restores a Cookie session
+[PASS] Viewer WebSocket uses the authenticated ticket bridge
+[PASS] migrations-v2/0003_comments.sql exists
+[PASS] src/comments/repository.js exists
+[PASS] src/routes/public-v2.js exists
+[PASS] scripts/test-comments-v2.mjs exists
+[PASS] comment persistence tables remain present
+[PASS] comment schema does not store IP, user-agent, or device fingerprint
+[PASS] student client sends idempotency keys without persistent browser identity
+[PASS] admin comment cache does not expose obsolete IP fields
+[PASS] migrations-v2/0006_manual_moderation.sql exists
+[PASS] src/moderation/repository.js exists
+[PASS] src/moderation/validation.js exists
+[PASS] scripts/test-moderation-v2.mjs exists
+[PASS] manual moderation tables and transition guards remain present
+[PASS] single and bulk moderation APIs remain connected
+[PASS] Viewer retraction and restoration events remain supported
+[PASS] Stage 5 does not add AI or translation dependencies
+
+stage05 compatibility summary: 54 passed, 0 failed, 54 total.
+[PASS] src/auth/permissions.js retains the Stage 4 security contract
+[PASS] src/auth/csrf.js retains the Stage 4 security contract
+[PASS] src/auth/passwords.js retains the Stage 4 security contract
+[PASS] src/comments/cookies.js retains the Stage 4 security contract
+[PASS] moderation schema is organization and session scoped
+[PASS] moderation action rows are append-only records
+[PASS] deleted comments cannot restore directly to visible
+[PASS] moderation schema stores no IP or device identity
+[PASS] single moderation uses optimistic update predicates
+[PASS] concurrent duplicate action conflicts map to 409
+[PASS] moderation audit does not embed comment body
+[PASS] bulk moderation is capped and reports per-item results
+[PASS] unexpected bulk item failures do not erase known item outcomes
+[PASS] moderation request scope comes from the authorized session
+[PASS] clear display remains separate from moderation state
+[PASS] bulk moderation limit is 25
+[PASS] moderation reasons are normalized and limited
+[PASS] pending comments are not broadcast
+[PASS] Viewer receives both retraction and restoration events
+[PASS] Viewer removes moderated comments from queue DOM and local storage
+[PASS] Admin uses expectedUpdatedAt for every moderation request
+[PASS] Admin stops polling outside a selected session
+[PASS] Admin does not expose IP or device identifiers
+[PASS] student UI distinguishes approval-pending submission
+[PASS] Stage 5 static mirror matches served page: public/admin/index.html
+[PASS] Stage 5 static mirror matches served page: public/j/index.html
+[PASS] Stage 5 static mirror matches served page: public/viewer/index.html
+[PASS] Stage 5 test is part of the full precision suite
+[PASS] Stage 5 local smoke command exists
+[PASS] remote deployment verifies Stage 5 tables and migration
+[PASS] remote deployment verifies moderation guard triggers
+
+Stage 5 boundary summary: 31 passed, 0 failed, 31 total.
+[PASS] stage05 compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+[PASS] src/routes/private-v2.js exists
+[PASS] src/db/live-session-projection.js exists
+[PASS] public/assets/admin.js exists
+[PASS] public/assets/master.js exists
+[PASS] public/assets/viewer.js exists
+[PASS] AUTH_V2 is required in production
+[PASS] public/assets/admin.js has no legacy Bearer browser authentication
+[PASS] public/assets/admin.js restores a Cookie session
+[PASS] public/assets/master.js has no legacy Bearer browser authentication
+[PASS] public/assets/master.js restores a Cookie session
+[PASS] public/assets/viewer.js has no legacy Bearer browser authentication
+[PASS] public/assets/viewer.js restores a Cookie session
+[PASS] Viewer WebSocket uses the authenticated ticket bridge
+[PASS] migrations-v2/0003_comments.sql exists
+[PASS] src/comments/repository.js exists
+[PASS] src/routes/public-v2.js exists
+[PASS] scripts/test-comments-v2.mjs exists
+[PASS] comment persistence tables remain present
+[PASS] comment schema does not store IP, user-agent, or device fingerprint
+[PASS] student client sends idempotency keys without persistent browser identity
+[PASS] admin comment cache does not expose obsolete IP fields
+[PASS] migrations-v2/0006_manual_moderation.sql exists
+[PASS] src/moderation/repository.js exists
+[PASS] src/moderation/validation.js exists
+[PASS] scripts/test-moderation-v2.mjs exists
+[PASS] manual moderation tables and transition guards remain present
+[PASS] single and bulk moderation APIs remain connected
+[PASS] Viewer retraction and restoration events remain supported
+[PASS] Stage 5 does not add AI or translation dependencies
+
+stage06 compatibility summary: 54 passed, 0 failed, 54 total.
+[PASS] Stage 6 migration remains append-only before Stage 6.5
+[PASS] Stage 6 table exists in migration: realtime_session_state
+[PASS] Stage 6 table exists in migration: realtime_events
+[PASS] Stage 6 table exists in migration: realtime_connection_tickets
+[PASS] realtime sequence is unique per live session
+[PASS] ticket token hashes are unique
+[PASS] clear watermark cannot exceed current sequence
+[PASS] pending comments do not generate realtime events
+[PASS] connection ticket lifetime is sixty seconds
+[PASS] connection ticket consumption is one-time and atomic
+[PASS] ticket consumption revalidates auth, membership, and live session state
+[PASS] catch-up is bounded to 500 events
+[PASS] snapshot honors the last display clear watermark
+[PASS] realtime events and tickets have bounded retention
+[PASS] Durable Object uses WebSocket Hibernation API
+[PASS] Durable Object rejects oversized client frames
+[PASS] Durable Object suppresses already-sent sequences
+[PASS] Durable Object syncs clients before returning the socket
+[PASS] Durable Object chunks auth revalidation for large socket sets
+[PASS] authenticated one-time ticket endpoint is connected
+[PASS] WebSocket connect consumes the ticket before forwarding
+[PASS] legacy bearer WebSocket subprotocol is stripped
+[PASS] room events are persisted before dispatch
+[PASS] Viewer requests one-time tickets
+[PASS] Viewer applies sequence duplicate and gap guards
+[PASS] Viewer reconnect uses bounded exponential backoff
+[PASS] Viewer stores only non-secret sequence state
+[PASS] Viewer stops reconnecting on room closure and auth loss
+[PASS] public edge limiter hashes rather than stores the client address
+[PASS] production refuses a missing public limiter
+[PASS] new CommentRoom class is exported
+[PASS] scheduled maintenance prunes realtime state
+[PASS] remote verifier requires Stage 6 schema and migration
+[PASS] deployment verifier requires public comment limiter
+[PASS] production workflow requires public limiter pepper
+[PASS] package version preserves the Stage 6 lineage
+[PASS] Stage 6 test is in full precision suite
+[PASS] Stage 6 local smoke command exists
+[PASS] local development supplies both non-production rate-limit peppers
+[PASS] syntax: src/realtime/repository.js
+[PASS] syntax: src/realtime/comment-room.js
+[PASS] syntax: src/realtime/edge-rate-limit.js
+[PASS] syntax: src/routes/private-v2.js
+[PASS] syntax: src/routes/public-v2.js
+[PASS] syntax: public/assets/viewer.js
+[PASS] syntax: scripts/test-realtime-v2.mjs
+[PASS] syntax: scripts/smoke-local-stage06.mjs
+[PASS] syntax: scripts/verify-stage06-boundaries.mjs
+
+Stage 6 boundary summary: 48 passed, 0 failed, 48 total.
+[PASS] stage06 compatibility command
+
+Stage compatibility command summary: 7 passed, 0 failed, 7 total.
+\n===== DEPLOYMENT VERIFIERS =====
+[PASS] incomplete remote deployment configuration is rejected
+[PASS] complete deployment configuration is accepted
+[PASS] non-HTTPS production origin is rejected
+[PASS] duplicate Rate Limiting namespaces are rejected
+[PASS] active Owner result verifier accepts a positive count
+[PASS] active Owner result verifier rejects zero
+[PASS] foreign-key result verifier accepts no rows
+[PASS] foreign-key result verifier rejects rows
+[PASS] quick-check verifier accepts ok
+[PASS] quick-check verifier rejects corruption
+[PASS] production origin helper returns HTTPS URL
+
+Deployment verifier test summary: 11 passed, 0 failed, 11 total.
+\n===== DEPLOY DRY RUN =====
+
+> class-pdf-comment-viewer-v01@0.7.7 deploy:dry-run
+> node scripts/predeploy-check.mjs && wrangler deploy --dry-run
+
+project verification passed
+predeploy check passed (115 JavaScript modules)
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+✨ Read 44 files from the assets directory /mnt/data/stage77_work/CPCV_stage07_6_complete_source/public
+Total Upload: 496.41 KiB / gzip: 97.12 KiB
+Your Worker has access to the following bindings:
+Binding                                                                             Resource                  
+env.COMMENT_ROOM (CommentRoom)                                                      Durable Object            
+env.EMAIL (unrestricted)                                                            Send Email                
+env.AI_JOBS_QUEUE (cpcv-ai-jobs)                                                    Queue                     
+env.DB (class_comment_db)                                                           D1 Database               
+env.DB_V2 (class_comment_db_v2)                                                     D1 Database               
+env.AI                                                                              AI                        
+env.ASSETS                                                                          Assets                    
+env.APP_ENV ("production")                                                          Environment Variable      
+env.AUTH_V2_ENABLED ("1")                                                           Environment Variable      
+env.EMAIL_AUTH_REQUIRED ("0")                                                       Environment Variable      
+env.AI_MODERATION_MODEL ("@cf/zai-org/glm-4.7-flash")                               Environment Variable      
+env.AI_MODERATION_FALLBACK_MODEL ("@cf/qwen/qwen3-30b-a3b-fp8")                     Environment Variable      
+env.AI_TRANSLATION_MODEL ("@cf/zai-org/glm-4.7-flash")                              Environment Variable      
+env.AI_TRANSLATION_FALLBACK_MODEL ("@cf/qwen/qwen3-30b-a3b-fp8")                    Environment Variable      
+env.AI_TIMEOUT_MS ("12000")                                                         Environment Variable      
+env.AUTH_ORIGIN ("https://class-pdf-comment-viewer-v01....")                        Environment Variable      
+env.PUBLIC_ORIGIN ("https://class-pdf-comment-viewer-v01....")                      Environment Variable      
+
+--dry-run: exiting now.
+\n===== NPM AUDIT =====
+found 0 vulnerabilities
+\n===== NPM AUDIT PROD =====
+found 0 vulnerabilities
+
+===== BILINGUAL FILTER FINAL =====
+[PASS] comments store detected language
+[PASS] translations store filtered display text
+[PASS] Japanese and English packs are available but not silently installed
+[PASS] both starter packs install as editable organization terms
+[PASS] pack installation is idempotent
+[PASS] pack contains no political category terms
+[PASS] Japanese pack masks punctuation evasion before translation
+[PASS] English pack masks a whole English word before translation
+[PASS] English word boundaries avoid matching inside assignment or class
+[PASS] non-Japanese and non-English text is held for review
+[PASS] unsupported language requests AI reference review
+[PASS] shared short Latin words do not misclassify unsupported text as English
+[PASS] clear English sentence remains supported
+[PASS] unsupported language comment is persisted pending
+[PASS] unsupported language creates a moderation AI job even when ordinary AI moderation is off
+[PASS] pending unsupported comment is not translated before human approval
+[PASS] translated English text is checked by the English pack
+[PASS] raw translation and filtered display translation are stored separately
+[PASS] translation realtime never leaks the unfiltered translation
+[PASS] high-severity translated text is rejected from display
+[PASS] rejected translation is held and no realtime event is created
+
+Stage 7.7 bilingual filter summary: 21 passed, 0 failed, 21 total.
+
+===== CONTENT FILTER FINAL =====
+[PASS] content-filter tables exist
+[PASS] foreign keys clean
+[PASS] quick check ok
+[PASS] all category policies are initialized
+[PASS] session filter defaults disabled and ambiguous routing
+[PASS] dictionary stores language metadata
+[PASS] dictionary stores boundary mode
+[PASS] punctuation insertion is normalized to a deterministic match
+[PASS] punctuation-obfuscated term is masked
+[PASS] deterministic mask does not require AI in ambiguous-only mode
+[PASS] Katakana and Hiragana are folded for matching
+[PASS] level 5 term reaches reject policy
+[PASS] political category is inactive by default
+[PASS] one-edit evasion becomes an ambiguous review
+[PASS] ambiguous match is routed to AI
+[PASS] safe comment skips moderation AI in ambiguous-only mode
+[PASS] ambiguous comment creates only moderation AI job
+[PASS] ambiguous comment remains pending until human or later policy decision
+[PASS] original and masked display text are stored separately
+[PASS] filter match evidence is stored without duplicating the term text
+[PASS] realtime event contains masked text only
+[PASS] teacher view keeps original and display forms
+[PASS] teacher view includes dictionary evidence
+[PASS] same spelling can be registered for different languages
+[PASS] English auto boundary avoids substring false positive
+[PASS] English standalone word still matches
+[PASS] all repeated deterministic matches are masked
+[PASS] strict match maps zero-width obfuscation to the correct original span
+[PASS] Thai combining marks are preserved for matching
+[PASS] Devanagari combining marks are preserved for matching
+
+Stage 7.6 content-filter summary: 30 passed, 0 failed, 30 total.
+
+===== STAGE 7.7 BOUNDARIES FINAL =====
+[PASS] Stage 7.7 migration is append-only as 0013
+[PASS] comment language metadata is added
+[PASS] translation filtering metadata is added
+[PASS] pack installation table is added
+[PASS] existing non-Japanese and non-English translation targets are migrated
+[PASS] Japanese and English built-in packs exist
+[PASS] pack CSV files use documented columns
+[PASS] built-in packs contain no political category
+[PASS] packs are copied into editable organization terms
+[PASS] unsupported languages are detected before persistence
+[PASS] unsupported languages force AI reference routing
+[PASS] pending unsupported comments are not translated
+[PASS] translation output is filtered before persistence
+[PASS] realtime sends filtered translation text only
+[PASS] teacher comment list uses filtered translation text
+[PASS] dictionary language options are restricted to Japanese and English
+[PASS] translation targets are restricted to Japanese and English
+[PASS] simple UI exposes bilingual pack status
+[PASS] recommended preset auto-installs bilingual packs
+[PASS] advanced UI exposes translation re-filter and unsupported language mode
+[PASS] Stage 8 files remain absent
+
+Stage 7.7 boundary summary: 21 passed, 0 failed, 21 total.

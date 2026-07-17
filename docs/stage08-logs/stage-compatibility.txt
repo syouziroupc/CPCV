@@ -1,0 +1,354 @@
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+
+stage02 compatibility summary: 11 passed, 0 failed, 11 total.
+[PASS] stage02 compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+
+stage03a compatibility summary: 20 passed, 0 failed, 20 total.
+[PASS] stage03a compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+
+stage03b compatibility summary: 25 passed, 0 failed, 25 total.
+[PASS] stage03b compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+[PASS] src/routes/private-v2.js exists
+[PASS] src/db/live-session-projection.js exists
+[PASS] public/assets/admin.js exists
+[PASS] public/assets/master.js exists
+[PASS] public/assets/viewer.js exists
+[PASS] AUTH_V2 is required in production
+[PASS] public/assets/admin.js has no legacy Bearer browser authentication
+[PASS] public/assets/admin.js restores a Cookie session
+[PASS] public/assets/master.js has no legacy Bearer browser authentication
+[PASS] public/assets/master.js restores a Cookie session
+[PASS] public/assets/viewer.js has no legacy Bearer browser authentication
+[PASS] public/assets/viewer.js restores a Cookie session
+[PASS] Viewer WebSocket uses the authenticated ticket bridge
+
+stage03c compatibility summary: 38 passed, 0 failed, 38 total.
+[PASS] stage03c compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+[PASS] src/routes/private-v2.js exists
+[PASS] src/db/live-session-projection.js exists
+[PASS] public/assets/admin.js exists
+[PASS] public/assets/master.js exists
+[PASS] public/assets/viewer.js exists
+[PASS] AUTH_V2 is required in production
+[PASS] public/assets/admin.js has no legacy Bearer browser authentication
+[PASS] public/assets/admin.js restores a Cookie session
+[PASS] public/assets/master.js has no legacy Bearer browser authentication
+[PASS] public/assets/master.js restores a Cookie session
+[PASS] public/assets/viewer.js has no legacy Bearer browser authentication
+[PASS] public/assets/viewer.js restores a Cookie session
+[PASS] Viewer WebSocket uses the authenticated ticket bridge
+[PASS] migrations-v2/0003_comments.sql exists
+[PASS] src/comments/repository.js exists
+[PASS] src/routes/public-v2.js exists
+[PASS] scripts/test-comments-v2.mjs exists
+[PASS] comment persistence tables remain present
+[PASS] comment schema does not store IP, user-agent, or device fingerprint
+[PASS] student client sends idempotency keys without persistent browser identity
+[PASS] admin comment cache does not expose obsolete IP fields
+
+stage04 compatibility summary: 46 passed, 0 failed, 46 total.
+[PASS] stage04 compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+[PASS] src/routes/private-v2.js exists
+[PASS] src/db/live-session-projection.js exists
+[PASS] public/assets/admin.js exists
+[PASS] public/assets/master.js exists
+[PASS] public/assets/viewer.js exists
+[PASS] AUTH_V2 is required in production
+[PASS] public/assets/admin.js has no legacy Bearer browser authentication
+[PASS] public/assets/admin.js restores a Cookie session
+[PASS] public/assets/master.js has no legacy Bearer browser authentication
+[PASS] public/assets/master.js restores a Cookie session
+[PASS] public/assets/viewer.js has no legacy Bearer browser authentication
+[PASS] public/assets/viewer.js restores a Cookie session
+[PASS] Viewer WebSocket uses the authenticated ticket bridge
+[PASS] migrations-v2/0003_comments.sql exists
+[PASS] src/comments/repository.js exists
+[PASS] src/routes/public-v2.js exists
+[PASS] scripts/test-comments-v2.mjs exists
+[PASS] comment persistence tables remain present
+[PASS] comment schema does not store IP, user-agent, or device fingerprint
+[PASS] student client sends idempotency keys without persistent browser identity
+[PASS] admin comment cache does not expose obsolete IP fields
+[PASS] migrations-v2/0006_manual_moderation.sql exists
+[PASS] src/moderation/repository.js exists
+[PASS] src/moderation/validation.js exists
+[PASS] scripts/test-moderation-v2.mjs exists
+[PASS] manual moderation tables and transition guards remain present
+[PASS] single and bulk moderation APIs remain connected
+[PASS] Viewer retraction and restoration events remain supported
+[PASS] Stage 5 does not add AI or translation dependencies
+
+stage05 compatibility summary: 54 passed, 0 failed, 54 total.
+[PASS] src/auth/permissions.js retains the Stage 4 security contract
+[PASS] src/auth/csrf.js retains the Stage 4 security contract
+[PASS] src/auth/passwords.js retains the Stage 4 security contract
+[PASS] src/comments/cookies.js retains the Stage 4 security contract
+[PASS] moderation schema is organization and session scoped
+[PASS] moderation action rows are append-only records
+[PASS] deleted comments cannot restore directly to visible
+[PASS] moderation schema stores no IP or device identity
+[PASS] single moderation uses optimistic update predicates
+[PASS] concurrent duplicate action conflicts map to 409
+[PASS] moderation audit does not embed comment body
+[PASS] bulk moderation is capped and reports per-item results
+[PASS] unexpected bulk item failures do not erase known item outcomes
+[PASS] moderation request scope comes from the authorized session
+[PASS] clear display remains separate from moderation state
+[PASS] bulk moderation limit is 25
+[PASS] moderation reasons are normalized and limited
+[PASS] pending comments are not broadcast
+[PASS] Viewer receives both retraction and restoration events
+[PASS] Viewer removes moderated comments from queue DOM and local storage
+[PASS] Admin uses expectedUpdatedAt for every moderation request
+[PASS] Admin stops polling outside a selected session
+[PASS] Admin does not expose IP or device identifiers
+[PASS] student UI distinguishes approval-pending submission
+[PASS] Stage 5 static mirror matches served page: public/admin/index.html
+[PASS] Stage 5 static mirror matches served page: public/j/index.html
+[PASS] Stage 5 static mirror matches served page: public/viewer/index.html
+[PASS] Stage 5 test is part of the full precision suite
+[PASS] Stage 5 local smoke command exists
+[PASS] remote deployment verifies Stage 5 tables and migration
+[PASS] remote deployment verifies moderation guard triggers
+
+Stage 5 boundary summary: 31 passed, 0 failed, 31 total.
+[PASS] stage05 compatibility command
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+[PASS] src/routes/private-v2.js exists
+[PASS] src/db/live-session-projection.js exists
+[PASS] public/assets/admin.js exists
+[PASS] public/assets/master.js exists
+[PASS] public/assets/viewer.js exists
+[PASS] AUTH_V2 is required in production
+[PASS] public/assets/admin.js has no legacy Bearer browser authentication
+[PASS] public/assets/admin.js restores a Cookie session
+[PASS] public/assets/master.js has no legacy Bearer browser authentication
+[PASS] public/assets/master.js restores a Cookie session
+[PASS] public/assets/viewer.js has no legacy Bearer browser authentication
+[PASS] public/assets/viewer.js restores a Cookie session
+[PASS] Viewer WebSocket uses the authenticated ticket bridge
+[PASS] migrations-v2/0003_comments.sql exists
+[PASS] src/comments/repository.js exists
+[PASS] src/routes/public-v2.js exists
+[PASS] scripts/test-comments-v2.mjs exists
+[PASS] comment persistence tables remain present
+[PASS] comment schema does not store IP, user-agent, or device fingerprint
+[PASS] student client sends idempotency keys without persistent browser identity
+[PASS] admin comment cache does not expose obsolete IP fields
+[PASS] migrations-v2/0006_manual_moderation.sql exists
+[PASS] src/moderation/repository.js exists
+[PASS] src/moderation/validation.js exists
+[PASS] scripts/test-moderation-v2.mjs exists
+[PASS] manual moderation tables and transition guards remain present
+[PASS] single and bulk moderation APIs remain connected
+[PASS] Viewer retraction and restoration events remain supported
+[PASS] Stage 5 does not add AI or translation dependencies
+
+stage06 compatibility summary: 54 passed, 0 failed, 54 total.
+[PASS] Stage 6 migration remains append-only before Stage 6.5
+[PASS] Stage 6 table exists in migration: realtime_session_state
+[PASS] Stage 6 table exists in migration: realtime_events
+[PASS] Stage 6 table exists in migration: realtime_connection_tickets
+[PASS] realtime sequence is unique per live session
+[PASS] ticket token hashes are unique
+[PASS] clear watermark cannot exceed current sequence
+[PASS] pending comments do not generate realtime events
+[PASS] connection ticket lifetime is sixty seconds
+[PASS] connection ticket consumption is one-time and atomic
+[PASS] ticket consumption revalidates auth, membership, and live session state
+[PASS] catch-up is bounded to 500 events
+[PASS] snapshot honors the last display clear watermark
+[PASS] realtime events and tickets have bounded retention
+[PASS] Durable Object uses WebSocket Hibernation API
+[PASS] Durable Object rejects oversized client frames
+[PASS] Durable Object suppresses already-sent sequences
+[PASS] Durable Object syncs clients before returning the socket
+[PASS] Durable Object chunks auth revalidation for large socket sets
+[PASS] authenticated one-time ticket endpoint is connected
+[PASS] WebSocket connect consumes the ticket before forwarding
+[PASS] legacy bearer WebSocket subprotocol is stripped
+[PASS] room events are persisted before dispatch
+[PASS] Viewer requests one-time tickets
+[PASS] Viewer applies sequence duplicate and gap guards
+[PASS] Viewer reconnect uses bounded exponential backoff
+[PASS] Viewer stores only non-secret sequence state
+[PASS] Viewer stops reconnecting on room closure and auth loss
+[PASS] public edge limiter hashes rather than stores the client address
+[PASS] production refuses a missing public limiter
+[PASS] new CommentRoom class is exported
+[PASS] scheduled maintenance prunes realtime state
+[PASS] remote verifier requires Stage 6 schema and migration
+[PASS] deployment verifier requires public comment limiter
+[PASS] production workflow requires public limiter pepper
+[PASS] package version preserves the Stage 6 lineage
+[PASS] Stage 6 test is in full precision suite
+[PASS] Stage 6 local smoke command exists
+[PASS] local development supplies both non-production rate-limit peppers
+[PASS] syntax: src/realtime/repository.js
+[PASS] syntax: src/realtime/comment-room.js
+[PASS] syntax: src/realtime/edge-rate-limit.js
+[PASS] syntax: src/routes/private-v2.js
+[PASS] syntax: src/routes/public-v2.js
+[PASS] syntax: public/assets/viewer.js
+[PASS] syntax: scripts/test-realtime-v2.mjs
+[PASS] syntax: scripts/smoke-local-stage06.mjs
+[PASS] syntax: scripts/verify-stage06-boundaries.mjs
+
+Stage 6 boundary summary: 48 passed, 0 failed, 48 total.
+[PASS] stage06 compatibility command
+
+Stage compatibility command summary: 7 passed, 0 failed, 7 total.

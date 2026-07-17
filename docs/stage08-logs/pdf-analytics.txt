@@ -1,0 +1,32 @@
+[PASS] schema includes pdf_documents
+[PASS] schema includes session_pdf_bindings
+[PASS] schema includes session_pdf_state
+[PASS] schema includes pdf_page_events
+[PASS] schema includes comment_page_links
+[PASS] schema includes understanding_signals
+[PASS] schema includes analytics_snapshots
+[PASS] PDF metadata table excludes filename, bytes, text, and storage URL
+[PASS] PDF binds with hash metadata only
+[PASS] binding creates one page event
+[PASS] reordered page update is ignored
+[PASS] monotonic page update is accepted
+[PASS] comment is linked to server current PDF page
+[PASS] page link evidence is persisted
+[PASS] three anonymous signals are stored for page 2
+[PASS] understanding response is rejected when the displayed page has changed
+[PASS] analytics counts comments and question marks by page
+[PASS] group of three exposes aggregate understanding only
+[PASS] group smaller than three suppresses signal breakdown
+[PASS] analytics response contains no participant identifiers or comment text
+[PASS] page dwell is derived from page-change events
+[PASS] snapshot has deterministic SHA-256 checksum
+[PASS] snapshot reload preserves checksum and aggregate pages
+[PASS] snapshot appears in session-scoped list
+[PASS] analytics CSV is aggregate and has no personal columns
+[PASS] Stage 8 retention deletes expired signals and snapshots
+[PASS] Stage 8 migration preserves foreign keys
+[PASS] Stage 8 database quick_check is ok
+[PASS] pre-Stage-8 DB still accepts comments
+[PASS] pre-Stage-8 comment list returns null page instead of failing
+
+Stage 8 PDF analytics summary: 30 passed, 0 failed, 30 total.

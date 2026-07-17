@@ -1,0 +1,55 @@
+CPCV Stage 3-B 最終試験結果
+実施日: 2026-07-13 JST
+対象: Stage 3-B ローカル実装
+
+1. 全回帰試験
+コマンド: npm run check:stage03b
+結果:
+- Stage 2 DB_V2: 154 passed / 0 failed
+- Stage 3-A 認証基盤: 120 passed / 0 failed
+- Stage 3-B API・権限・rollback: 109 passed / 0 failed
+- 合計: 383 passed / 0 failed
+
+2. 境界検査
+コマンド: node scripts/verify-stage03b-boundaries.mjs
+結果: PASS
+確認事項:
+- Student UI。Viewer UI。旧D1 migration。旧route。deploy workflowは変更なし
+- Stage 3-Bの変更範囲は認証API。組織API。認証補助module。試験。文書に限定
+- syntax。secret漏えい。廃止endpoint。route境界検査に合格
+
+3. 既存プロジェクト検査
+- npm run check: PASS
+- npm run check:project: PASS
+- npm run check:pdf-links: PASS
+
+4. Worker bundle検査
+コマンド: npm run deploy:dry-run
+結果: PASS
+- upload size: 179.14 KiB
+- gzip size: 36.61 KiB
+- remote migrationなし
+- remote deployなし
+
+5. 依存関係
+- npm ls --all: PASS
+- npm audit --omit=dev: 0 vulnerabilities
+- dev依存を含む既知警告: low 1。high 4。合計5
+- 既知警告はWrangler系の推移依存。Stage 3-Bでは依存更新を混在させていない
+
+6. fault injection
+SQLite triggerでaudit insertを失敗させた。
+次の処理が全てrollbackされることを確認した。
+- member作成
+- member変更
+- session失効
+- password変更
+- password reset token消費
+
+7. 未実施
+- GitHub push・PR・merge
+- remote D1作成・migration
+- Cloudflare staging・production deploy
+- 実ドメインCookie試験
+
+結論: Stage 3-Bローカル実装は合格。Stage 3-Cへ進行可能。

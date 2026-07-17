@@ -1,0 +1,339 @@
+== DB full ==
+
+=== Stage 2 schema and constraint suite ===
+[PASS] migration applies to an empty local D1
+[PASS] first migration run applies 0001_initial_schema.sql
+[PASS] second migration apply exits successfully
+[PASS] second migration apply is a no-op
+[PASS] migration history contains exactly the Stage 2 and Stage 3-A migrations after the second apply
+[PASS] exactly the seven application tables exist
+[PASS] bootstrap schema fingerprint matches the migrated canonical schema
+[PASS] all table columns, types, nullability, defaults, and primary keys match the design
+[PASS] all foreign keys and ON DELETE rules match the design
+[PASS] all 17 specified indexes exist
+[PASS] PRAGMA foreign_key_check returns zero rows
+[PASS] D1-supported PRAGMA quick_check returns ok
+[PASS] underlying local SQLite PRAGMA integrity_check returns ok
+[PASS] seed organizations
+[PASS] seed users
+[PASS] seed organization memberships
+[PASS] organization rejects a NULL primary key
+[PASS] organization rejects an invalid status
+[PASS] organization rejects an empty name
+[PASS] organization rejects a whitespace-only name
+[PASS] organization names are not globally unique
+[PASS] organization rejects updated_at before created_at
+[PASS] active organization rejects deleted_at
+[PASS] deleted organization requires deleted_at
+[PASS] deleted organization accepts a consistent deleted_at
+[PASS] user rejects a NULL primary key
+[PASS] user rejects an exact duplicate login ID
+[PASS] user rejects a case-only duplicate login ID
+[PASS] user rejects an uppercase unique login ID
+[PASS] user rejects an empty login ID
+[PASS] user rejects forbidden login ID characters
+[PASS] user rejects an invalid status
+[PASS] user rejects a whitespace-only display name
+[PASS] user rejects a short password hash
+[PASS] user rejects password_changed_at before creation
+[PASS] active user rejects deleted_at
+[PASS] deleted user requires deleted_at
+[PASS] deleted user accepts a consistent deleted_at
+[PASS] membership rejects a duplicate organization and user pair
+[PASS] one user can belong to another organization
+[PASS] membership rejects a missing organization
+[PASS] membership rejects a missing user
+[PASS] membership rejects an invalid role
+[PASS] membership rejects an invalid status
+[PASS] active membership rejects removed_at
+[PASS] membership rejects updated_at before created_at
+[PASS] removed membership requires removed_at
+[PASS] removed membership accepts a consistent removed_at
+[PASS] auth session rejects a NULL primary key
+[PASS] valid organization-bound auth session is accepted
+[PASS] auth session rejects a user without membership
+[PASS] auth session rejects a duplicate token hash
+[PASS] auth session rejects a duplicate CSRF hash
+[PASS] auth session rejects a NULL organization
+[PASS] auth session rejects last_seen_at before creation
+[PASS] auth session rejects idle expiry at last_seen_at
+[PASS] auth session rejects idle expiry beyond absolute expiry
+[PASS] auth session rejects revoked_at before creation
+[PASS] password reset token rejects a NULL primary key
+[PASS] valid password reset token is accepted
+[PASS] password reset rejects duplicate token hash
+[PASS] password reset rejects a missing user
+[PASS] password reset rejects a missing creator
+[PASS] password reset rejects used_at and revoked_at together
+[PASS] password reset rejects used_at after expiry
+[PASS] password reset rejects revoked_at before creation
+[PASS] password reset rejects expiry at creation
+[PASS] live session rejects a NULL primary key
+[PASS] valid active live session is accepted
+[PASS] live session rejects a missing organization
+[PASS] live session rejects a NULL organization
+[PASS] live session rejects a whitespace-only title
+[PASS] live session rejects a creator outside the organization
+[PASS] live session rejects a duplicate public code
+[PASS] live session rejects a public code with wrong length
+[PASS] live session rejects forbidden public code characters
+[PASS] live session rejects lowercase public codes
+[PASS] live session rejects an invalid display mode
+[PASS] live session rejects display seconds below range
+[PASS] live session rejects display seconds above range
+[PASS] live session rejects posting boolean outside 0 and 1
+[PASS] live session rejects visibility boolean outside 0 and 1
+[PASS] ended live session rejects posting enabled
+[PASS] ended live session rejects comments visible
+[PASS] active live session rejects ended_at
+[PASS] live session rejects expiry at started_at
+[PASS] ended live session rejects ended_at before started_at
+[PASS] ended live session requires ended_at
+[PASS] deleted live session requires deleted_at
+[PASS] consistent ended live session is accepted
+[PASS] deleted live session rejects deleted_at before ended_at
+[PASS] consistent deleted live session is accepted
+[PASS] audit log rejects a NULL primary key
+[PASS] valid system audit log is accepted
+[PASS] global system audit log with no organization is accepted
+[PASS] valid user audit log is accepted
+[PASS] system audit rejects actor user ID
+[PASS] system audit rejects actor role
+[PASS] user audit requires actor user ID
+[PASS] audit log rejects invalid JSON
+[PASS] audit log rejects a whitespace-only action
+[PASS] audit log rejects a missing organization reference
+[PASS] audit log rejects a missing actor user
+[PASS] audit log rejects an invalid actor role
+[PASS] organization A-only user cannot create organization B auth session
+[PASS] organization A-only user cannot create organization B live session
+[PASS] multi-organization user can create organization A auth session
+[PASS] multi-organization user can create organization B auth session
+[PASS] organization physical deletion is restricted while memberships exist
+[PASS] user physical deletion is restricted while memberships exist
+[PASS] membership list query uses an index
+[PASS] organization owner query uses an index
+[PASS] active live session query uses an index
+[PASS] auth token lookup uses a unique index
+[PASS] expired auth cleanup query uses an index
+[PASS] organization audit query uses an index
+[PASS] foreign keys remain clean after all schema tests
+[PASS] D1 quick_check remains ok after all schema tests
+[PASS] local SQLite integrity_check remains ok after all schema tests
+
+DB_V2 test summary: 119 passed, 0 failed, 119 total.
+(node:25699) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Stage 2 Owner bootstrap suite ===
+[PASS] remote bootstrap verifies the actual D1 UUID and name before reading the password
+[PASS] bootstrap utility binds only to loopback and uses remote=true for remote D1 access
+[PASS] bootstrap verifies migration, table set, foreign keys, and quick_check before writing
+[PASS] remote bootstrap rejects a missing database ID
+[PASS] local bootstrap rejects a remote database ID argument
+[PASS] remote bootstrap rejects --password-stdin
+[PASS] remote bootstrap rejects the legacy DB UUID
+[PASS] remote bootstrap rejects non-TTY password input
+[PASS] bootstrap test database migration succeeds
+[PASS] bootstrap latest-schema extensions are installed
+[PASS] bootstrap accepts the required core schema after later migrations
+[PASS] latest-schema bootstrap creates exactly one organization
+[PASS] latest-schema bootstrap removes its temporary config
+[PASS] latest-schema bootstrap leaves the extended database healthy
+[PASS] coexisting legacy D1 fixture is installed
+[PASS] bootstrap selects DB_V2 when the persist directory also contains the legacy D1
+[PASS] coexisting-D1 bootstrap writes exactly one V2 organization
+[PASS] coexisting-D1 bootstrap does not modify the legacy sibling
+[PASS] coexisting-D1 bootstrap removes its temporary config
+[PASS] bootstrap missing-index fixture is installed
+[PASS] bootstrap rejects a DB whose schema objects differ even when all seven tables remain
+[PASS] missing-index bootstrap leaves the database empty
+[PASS] missing-index bootstrap removes its temporary config
+[PASS] bootstrap missing-index fixture is removed
+[PASS] bootstrap rollback trigger is installed
+[PASS] bootstrap reports failure when the audit insert is forced to fail
+[PASS] bootstrap output does not contain the plaintext password on failure
+[PASS] failed bootstrap removes its temporary config
+[PASS] failed bootstrap rolls back organization, user, membership, and audit together
+[PASS] bootstrap rollback trigger is removed
+[PASS] bootstrap creates the first Owner successfully
+[PASS] bootstrap output does not contain the plaintext password on success
+[PASS] successful bootstrap removes its temporary config
+[PASS] bootstrap creates organization, active Owner membership, and system audit
+[PASS] plaintext bootstrap password is absent from stored user fields
+[PASS] bootstrap output does not contain the stored password hash or salt
+[PASS] bootstrap rejects a second execution by default
+[PASS] second bootstrap output does not contain the plaintext password
+[PASS] rejected second bootstrap removes its temporary config
+[PASS] second bootstrap leaves exactly one organization
+
+DB_V2 bootstrap test summary: 40 passed, 0 failed, 40 total.
+(node:26190) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+DB_V2 complete test summary: 159 passed, 0 failed, 159 total.
+== Stage 7.6 content filter ==
+[PASS] content-filter tables exist
+[PASS] foreign keys clean
+[PASS] quick check ok
+[PASS] all category policies are initialized
+[PASS] session filter defaults disabled and ambiguous routing
+[PASS] dictionary stores language metadata
+[PASS] dictionary stores boundary mode
+[PASS] punctuation insertion is normalized to a deterministic match
+[PASS] punctuation-obfuscated term is masked
+[PASS] deterministic mask does not require AI in ambiguous-only mode
+[PASS] Katakana and Hiragana are folded for matching
+[PASS] level 5 term reaches reject policy
+[PASS] political category is inactive by default
+[PASS] one-edit evasion becomes an ambiguous review
+[PASS] ambiguous match is routed to AI
+[PASS] safe comment skips moderation AI in ambiguous-only mode
+[PASS] ambiguous comment creates only moderation AI job
+[PASS] ambiguous comment remains pending until human or later policy decision
+[PASS] original and masked display text are stored separately
+[PASS] filter match evidence is stored without duplicating the term text
+[PASS] realtime event contains masked text only
+[PASS] teacher view keeps original and display forms
+[PASS] teacher view includes dictionary evidence
+[PASS] same spelling can be registered for different languages
+[PASS] English auto boundary avoids substring false positive
+[PASS] English standalone word still matches
+[PASS] all repeated deterministic matches are masked
+[PASS] strict match maps zero-width obfuscation to the correct original span
+[PASS] Thai combining marks are preserved for matching
+[PASS] Devanagari combining marks are preserved for matching
+
+Stage 7.6 content-filter summary: 30 passed, 0 failed, 30 total.
+== Stage 7.6 boundaries ==
+[PASS] Stage 7.6 migration is append-only as 0012
+[PASS] language metadata is stored
+[PASS] boundary mode is stored
+[PASS] combining marks are retained
+[PASS] mask spans map to original graphemes
+[PASS] word-boundary protection exists
+[PASS] multiple deterministic matches are collected
+[PASS] language codes are validated
+[PASS] boundary modes are validated
+[PASS] API supports language and boundary fields
+[PASS] simple organization preset exists
+[PASS] simple session mode exists
+[PASS] advanced settings are separated
+[PASS] dictionary terms can be edited
+[PASS] dictionary can be exported as CSV
+[PASS] Stage 8 files remain absent
+
+Stage 7.6 boundary summary: 16 passed, 0 failed, 16 total.
+== precision boundaries ==
+[PASS] precision migrations are append-only
+[PASS] secondary CSRF table has session cascade
+[PASS] secondary CSRF expiry index exists
+[PASS] database enforces public comment character limits
+[PASS] JSON readers enforce actual streamed byte limits
+[PASS] public message body uses 4KiB limit
+[PASS] CSRF accepts primary and scoped secondary tokens
+[PASS] secondary CSRF tokens expire and are capped
+[PASS] participant cleanup is bounded
+[PASS] scheduled maintenance drains all bounded queues
+[PASS] scheduled maintenance reports a remaining bounded backlog
+[PASS] scheduled maintenance includes realtime retention
+[PASS] WebSocket input closes oversized client frames
+[PASS] HTML security policy is applied
+[PASS] security header configured: content-security-policy
+[PASS] security header configured: x-frame-options
+[PASS] security header configured: permissions-policy
+[PASS] security header configured: strict-transport-security
+[PASS] HSTS does not force unrelated subdomains
+[PASS] CSP blocks framing and objects
+[PASS] production login refuses absent limiter bindings
+[PASS] production login requires Cloudflare client IP
+[PASS] V2 WebSocket bridge omits obsolete bearer subprotocol
+[PASS] expired authentication records are pruned with a retention delay and batch limit
+[PASS] participant token cookie accepts only the issued token length
+[PASS] viewer local logs have retention and hard cap
+[PASS] viewer pruning avoids quadratic object lookups
+[PASS] viewer cache version was advanced
+[PASS] page grid cannot expand beyond the mobile viewport
+[PASS] cards and nested layout containers may shrink below min-content width
+[PASS] local log table scrolls inside its bounded container
+[PASS] static mirror matches served page: public/admin/index.html
+[PASS] static mirror matches served page: public/j/index.html
+[PASS] static mirror matches served page: public/viewer/index.html
+[PASS] visual viewport has no page-level horizontal overflow: join-desktop
+[PASS] visual viewport has no page-level horizontal overflow: join-mobile
+[PASS] visual viewport has no page-level horizontal overflow: admin-desktop
+[PASS] visual viewport has no page-level horizontal overflow: admin-mobile
+[PASS] visual viewport has no page-level horizontal overflow: master-desktop
+[PASS] visual viewport has no page-level horizontal overflow: master-mobile
+[PASS] visual viewport has no page-level horizontal overflow: viewer-desktop
+[PASS] visual viewport has no page-level horizontal overflow: viewer-mobile
+[PASS] retention Cron is configured
+[PASS] no invented Rate Limiting namespace is committed
+[PASS] CI runs all implemented-stage tests
+[PASS] CI has no Cloudflare credentials or deploy command
+[PASS] production deployment is manual
+[PASS] production deployment requires an immutable full commit SHA
+[PASS] production deployment applies both migration sets
+[PASS] production deployment verifies D1 integrity and active Owner
+[PASS] production deployment requires rate-limit peppers and Turnstile secret
+[PASS] production deployment runs post-deploy smoke tests
+[PASS] legacy MASTER_TOKEN deployment was removed
+[PASS] local Owner bootstrap uses direct SQLite transaction instead of a local dev Worker
+[PASS] bootstrap validates required core schema while allowing later migrations
+[PASS] remote bootstrap terminates detached Wrangler descendants
+[PASS] bootstrap tests cover latest schema rollback and repeat rejection
+[PASS] local bootstrap selects DB_V2 when legacy D1 coexists
+[PASS] organization 204 responses retain the full auth security header set
+[PASS] QR SVG responses use restrictive security headers
+[PASS] precision test script covers deployment verifiers and Stage 2-6
+[PASS] Stage 6.5 check covers email registration and account lifecycle
+[PASS] safe deploy executes the current Stage 7.6 check
+[PASS] safe deploy checks email cutover readiness and Turnstile secret
+[PASS] authentication secret configurator includes Turnstile
+[PASS] remote DB_V2 migration script uses database name
+[PASS] deployment config verifier exists
+[PASS] local dev supplies both non-production rate-limit peppers
+[PASS] reusable local Stage 4 smoke test is available
+[PASS] reusable local Stage 5 smoke test is available
+[PASS] reusable local Stage 6 smoke test is available
+[PASS] syntax: src/auth/request.js
+[PASS] syntax: src/auth/csrf.js
+[PASS] syntax: src/auth/csrf-tokens.js
+[PASS] syntax: src/auth/maintenance.js
+[PASS] syntax: src/routes/auth.js
+[PASS] syntax: src/routes/public-v2.js
+[PASS] syntax: src/routes/private-v2.js
+[PASS] syntax: src/comments/repository.js
+[PASS] syntax: src/realtime/repository.js
+[PASS] syntax: src/realtime/comment-room.js
+[PASS] syntax: src/realtime/edge-rate-limit.js
+[PASS] syntax: src/security-headers.js
+[PASS] syntax: src/index.js
+[PASS] syntax: public/assets/viewer.js
+[PASS] syntax: scripts/predeploy-check.mjs
+[PASS] syntax: scripts/verify-deployment-config.mjs
+[PASS] syntax: scripts/verify-d1-query-result.mjs
+[PASS] syntax: scripts/print-production-origin.mjs
+[PASS] syntax: scripts/verify-remote-d1.mjs
+[PASS] syntax: scripts/verify-email-auth-readiness.mjs
+[PASS] syntax: scripts/configure-rate-limit-secret.mjs
+[PASS] syntax: scripts/smoke-production.mjs
+[PASS] syntax: scripts/test-deployment-verifiers.mjs
+[PASS] syntax: scripts/test-realtime-v2.mjs
+[PASS] syntax: scripts/test-email-auth-v2.mjs
+[PASS] syntax: scripts/test-account-lifecycle-v2.mjs
+[PASS] syntax: scripts/test-ai-v2.mjs
+[PASS] syntax: scripts/smoke-local-stage06.mjs
+[PASS] syntax: scripts/verify-stage06-boundaries.mjs
+[PASS] syntax: scripts/verify-stage06-5-boundaries.mjs
+[PASS] syntax: scripts/verify-stage07-boundaries.mjs
+[PASS] syntax: scripts/verify-stage07-5-boundaries.mjs
+[PASS] syntax: scripts/test-content-filter-v2.mjs
+[PASS] syntax: scripts/verify-ai-readiness.mjs
+[PASS] syntax: scripts/bootstrap-owner.mjs
+[PASS] syntax: scripts/bootstrap-owner-worker.mjs
+[PASS] syntax: scripts/test-bootstrap-owner-v2.mjs
+[PASS] syntax: scripts/test-db-v2.mjs
+[PASS] syntax: scripts/test-db-v2-schema.mjs
+
+Precision boundary summary: 110 passed, 0 failed, 110 total.

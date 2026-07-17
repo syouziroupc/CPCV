@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>投影画面</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.12.0">
+</head>
+<body class="viewer-body">
+  <div id="viewerStage" class="viewer-stage">
+    <div id="pdfStage" class="pdf-stage hidden">
+      <div id="pdfPageContainer" class="pdf-page-container">
+        <canvas id="pdfCanvas" class="pdf-canvas" aria-label="PDF資料。リンク以外をクリックすると次のページへ移動します。"></canvas>
+        <div id="pdfAnnotationLayer" class="pdf-annotation-layer" aria-label="PDFリンク"></div>
+      </div>
+    </div>
+
+    <div id="viewerLogin" class="empty-document">
+      <div>
+        <h1>先生ログイン</h1>
+        <p>発行された先生IDとパスワードを入力してください。</p>
+        <input id="viewerLoginId" class="input" autocomplete="username" placeholder="メールアドレス">
+        <input id="viewerPassword" class="input" type="password" autocomplete="current-password" placeholder="パスワード">
+        <div id="viewerOrganizationGroup" class="hidden">
+          <label class="label" for="viewerOrganization">組織</label>
+          <select id="viewerOrganization" class="select"></select>
+        </div>
+        <button id="viewerLoginButton" class="button primary file-button">ログイン</button>
+        <p id="viewerLoginStatus" class="status"></p>
+      </div>
+    </div>
+
+    <div id="emptyDocument" class="empty-document hidden">
+      <div>
+        <h1>PDFを選択してください</h1>
+        <p>PDFはこの端末だけで表示します。</p>
+        <label for="localPdfInput" class="button primary file-button">PDFを選択</label>
+        <p id="localPdfInfo" class="muted"></p>
+      </div>
+    </div>
+
+    <div id="topBar" class="viewer-topbar hidden">
+      <span id="viewerTitle">投影画面</span>
+      <label class="viewer-file-button">
+        PDFを選択
+        <input id="localPdfInput" type="file" accept="application/pdf">
+      </label>
+      <button id="qrButton" class="viewer-file-button" type="button">QR大</button>
+      <button id="qrCornerButton" class="viewer-file-button" type="button">QR隅</button>
+      <div id="pdfPageControls" class="pdf-page-controls hidden">
+        <button id="previousPageButton" class="viewer-file-button" type="button" aria-label="前のページ">‹</button>
+        <span id="pdfPageState">1 / 1</span>
+        <button id="nextPageButton" class="viewer-file-button" type="button" aria-label="次のページ">›</button>
+      </div>
+      <button id="downloadLogButton" class="viewer-file-button" type="button" title="サーバー保存コメントをCSVでダウンロード">CSV</button>
+      <button id="clearLogButton" class="viewer-file-button" type="button" title="この端末の表示用cacheを削除">ログ消去</button>
+      <span id="localLogState" class="local-log-state">ログ準備中</span>
+      <button id="viewerLogoutButton" class="viewer-file-button" type="button" title="先生アカウントからログアウト">退出</button>
+      <span id="connectionState">接続中</span>
+    </div>
+
+    <div id="commentPanel" class="comment-panel hidden">
+      <div id="commentList" class="comment-list"></div>
+      <div id="scrollCommentLayer" class="scroll-comment-layer"></div>
+    </div>
+
+    <div id="qrOverlay" class="qr-overlay hidden">
+      <div class="qr-card">
+        <h2>学生投稿リンク</h2>
+        <img id="qrImage" class="qr-image" alt="学生投稿リンクのQRコード">
+        <p id="joinUrlText"></p>
+        <p class="muted">学生にはこのリンクまたはQRコードだけを共有してください。</p>
+      </div>
+    </div>
+    <button id="qrCorner" class="qr-corner hidden" type="button" aria-label="学生投稿リンクのQRコードを拡大表示">
+      <img id="qrCornerImage" alt="学生投稿リンクの小型QRコード">
+    </button>
+  </div>
+  <script src="/assets/viewer.js?v=0.8.1" type="module"></script>
+</body>
+</html>

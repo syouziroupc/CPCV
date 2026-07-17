@@ -1,0 +1,6 @@
+
+> class-pdf-comment-viewer-v01@0.6.0 check
+> node scripts/predeploy-check.mjs
+
+project verification passed
+predeploy check passed (75 JavaScript modules)

@@ -1,0 +1,51 @@
+# Stage 5 変更ファイル
+
+```text
+ M README.md
+ M docs/INDEX.md
+ M docs/current-system.md
+ M docs/database-schema.md
+ M docs/known-issues.md
+ M package-lock.json
+ M package.json
+ M public/_admin_spa.html
+ M public/_j_spa.html
+ M public/_viewer_spa.html
+ M public/admin/index.html
+ M public/assets/admin.js
+ M public/assets/app.css
+ M public/assets/join.js
+ M public/assets/viewer.js
+ M public/j/index.html
+ M public/master/index.html
+ M public/viewer/index.html
+ M requirements-manual.txt
+ M scripts/create_manual_pdf.py
+ M scripts/stage-compatibility-checks.mjs
+ M scripts/test-comments-v2.mjs
+ M scripts/test-private-v2.mjs
+ M scripts/test-stage-compatibility.mjs
+ M scripts/verify-precision-boundaries.mjs
+ M scripts/verify-remote-d1.mjs
+ M src/comments/repository.js
+ M src/comments/validation.js
+ M src/index.js
+ M src/routes/private-v2.js
+ M src/routes/public-v2.js
+?? docs/stage-05-debug-report.md
+?? docs/stage-05-implementation-report.md
+?? docs/stage-05-review-checklist.md
+?? docs/stage-05-spec.md
+?? docs/stage-05-test-results.txt
+?? docs/stage-05-test-spec.md
+?? docs/stage-05-visual-review.md
+?? docs/stage-06-next-development.md
+?? docs/stage05-final-logs/
+?? docs/stage05-screenshots/
+?? migrations-v2/0006_manual_moderation.sql
+?? scripts/render-stage05-visuals.py
+?? scripts/smoke-local-stage05.mjs
+?? scripts/test-moderation-v2.mjs
+?? scripts/verify-stage05-boundaries.mjs
+?? src/moderation/
+```

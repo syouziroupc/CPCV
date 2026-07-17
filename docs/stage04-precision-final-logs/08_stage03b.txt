@@ -1,0 +1,144 @@
+[PASS] single-organization login succeeds and ignores supplied organizationId
+[PASS] login response uses no-store security headers
+[PASS] login response does not expose raw session token
+[PASS] login selects the server-side active organization
+[PASS] local login sets HttpOnly SameSite Strict dev cookie
+[PASS] D1 stores only session token hash
+[PASS] D1 stores only CSRF token hash
+[PASS] session lookup succeeds
+[PASS] GET session issues an additional CSRF token
+[PASS] separate tab receives a distinct CSRF token
+[PASS] primary login CSRF hash remains stable
+[PASS] secondary CSRF hashes are stored separately
+[PASS] secondary CSRF storage is capped at eight tokens
+[PASS] oldest secondary CSRF token is evicted after the cap
+[PASS] login CSRF token remains valid
+[PASS] latest tab CSRF token remains valid
+[PASS] authenticated query organization selector is rejected
+[PASS] organization selector separator variants are rejected
+[PASS] logout without CSRF is rejected
+[PASS] logout rejects body organization selector
+[PASS] logout succeeds with Origin and CSRF
+[PASS] logout clears identical cookie name
+[PASS] logged-out token replay is rejected
+[PASS] unknown user and wrong password share generic response
+[PASS] suspended user receives generic 401
+[PASS] suspended membership receives generic 401
+[PASS] multiple active organizations require selection
+[PASS] invalid selected organization remains generic
+[PASS] valid selected organization creates scoped session
+[PASS] login rejects a different Origin
+[PASS] login rejects a missing Origin
+[PASS] authentication JSON body is capped
+[PASS] each login issues a new session token
+[PASS] suspended organization receives generic 401
+[PASS] obsolete reset request endpoint does not exist
+[PASS] deleted user receives generic 401
+[PASS] user without membership receives generic 401
+[PASS] legacy password scheme is rehashed on successful login
+[PASS] legacy rehash preserves actual password change time
+[PASS] failed login 1 returns generic 401
+[PASS] failed login 2 returns generic 401
+[PASS] failed login 3 returns generic 401
+[PASS] failed login 4 returns generic 401
+[PASS] failed login 5 returns generic 401
+[PASS] fifth failure sets a 15-minute account lock
+[PASS] correct password is rejected while locked
+[PASS] login succeeds after lock expiry
+[PASS] successful login clears failure count and lock
+[PASS] IP limiter rejection returns 429 and Retry-After
+[PASS] account limiter rejection returns 429
+[PASS] limiter failure fails open while D1 authentication continues
+[PASS] limiter failure audit contains no raw IP or login ID
+req_3bbd119b3e9142dead81f1f278834057 AuthError: AUTH_RATE_LIMITER_NOT_CONFIGURED
+    at enforceLoginRateLimits (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/src/routes/auth.js:489:11)
+    at handleLogin (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/src/routes/auth.js:60:9)
+    at async Object.fetch (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/src/index.js:161:49)
+    at async testLockAndRateLimit (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/scripts/test-auth-api-v2.mjs:188:14)
+    at async runGroup (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/scripts/test-auth-api-v2.mjs:39:5)
+    at async main (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/scripts/test-auth-api-v2.mjs:25:3)
+    at async file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/scripts/test-auth-api-v2.mjs:770:1 {
+  status: 500,
+  code: 'AUTH_RATE_LIMITER_NOT_CONFIGURED',
+  headers: {}
+}
+[PASS] production refuses login without rate limiter bindings
+req_6537f03f0b344e24908a2a3ccaf4a4c4 AuthError: AUTH_CLIENT_IP_UNAVAILABLE
+    at enforceLoginRateLimits (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/src/routes/auth.js:486:42)
+    at handleLogin (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/src/routes/auth.js:60:9)
+    at async Object.fetch (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/src/index.js:161:49)
+    at async testLockAndRateLimit (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/scripts/test-auth-api-v2.mjs:191:14)
+    at async runGroup (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/scripts/test-auth-api-v2.mjs:39:5)
+    at async main (file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/scripts/test-auth-api-v2.mjs:25:3)
+    at async file:///mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/scripts/test-auth-api-v2.mjs:770:1 {
+  status: 500,
+  code: 'AUTH_CLIENT_IP_UNAVAILABLE',
+  headers: {}
+}
+[PASS] production refuses login without Cloudflare client IP
+[PASS] password change rejects incorrect current password
+[PASS] password change enforces 12-character minimum
+[PASS] password change rejects body organization selector
+[PASS] password change succeeds and issues a fresh session
+[PASS] password change revokes the old session
+[PASS] old password no longer authenticates
+[PASS] new password authenticates
+[PASS] password change audit exists
+[PASS] owner can read current organization
+[PASS] owner can list members with stable pagination
+[PASS] member cursor returns remaining members
+[PASS] owner creates a new teacher
+[PASS] new member requires password change
+[PASS] global duplicate login ID returns 409
+[PASS] owner can add an explicit existing user membership
+[PASS] admin cannot create another admin
+[PASS] admin can create a teacher
+[PASS] admin can suspend a teacher
+[PASS] membership suspension invalidates existing session
+[PASS] admin cannot manage another admin
+[PASS] admin cannot promote a teacher to admin
+[PASS] teacher cannot list organization members
+[PASS] owner may demote a non-final owner
+[PASS] role change revokes the target session
+[PASS] CSRF token from another session is rejected
+[PASS] last active owner cannot be suspended
+[PASS] last active owner cannot be removed
+[PASS] owner can remove a teacher membership
+[PASS] removed membership cannot be silently reactivated by PATCH
+[PASS] reset token issue accepts an omitted JSON body
+[PASS] owner can issue one-time reset token for admin
+[PASS] reset token is stored only as SHA-256 hash
+[PASS] issuing a new reset token revokes the previous token
+[PASS] admin cannot issue reset token for admin
+[PASS] admin can issue reset token for a teacher
+[PASS] owner reset token issuance is forbidden
+[PASS] multi-organization user reset requires system operator
+[PASS] expired reset token is rejected
+[PASS] revoked reset token is rejected
+[PASS] issued reset token changes password
+[PASS] reset success revokes other unused tokens
+[PASS] used reset token cannot be replayed
+[PASS] password reset revokes all existing sessions
+[PASS] reset password authenticates
+[PASS] owner can read organization audit log
+[PASS] admin can read organization audit log
+[PASS] multi-organization session remains fixed to authenticated organization
+[PASS] audit action filter is exact
+[PASS] audit response contains no password or raw reset token
+[PASS] organization header selector is rejected
+[PASS] malformed encoded member path returns a controlled 400
+[PASS] member update reports failure when its audit write fails
+[PASS] failed member update rolls back membership state
+[PASS] failed member update rolls back session revocation
+[PASS] member creation reports failure when its audit write fails
+[PASS] failed member creation rolls back the new user
+[PASS] password change reports failure when its audit write fails
+[PASS] failed password change rolls back session revocation
+[PASS] failed password change preserves the old password
+[PASS] failed password change does not install the new password
+[PASS] password reset reports failure when its audit write fails
+[PASS] failed password reset leaves token unused
+[PASS] failed password reset rolls back session revocation
+[PASS] reset token remains usable after rolled-back failure
+
+Stage 3-B API test summary: 118 passed, 0 failed, 118 total.

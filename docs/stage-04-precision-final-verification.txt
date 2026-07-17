@@ -1,0 +1,58 @@
+Stage 4 precision final verification
+
+Source reconstruction
+- Candidate ZIP CRC: passed
+- Clean extraction: passed
+- npm ci from clean extraction: passed
+- Source dependency audit: 0 vulnerabilities
+
+Functional verification after clean extraction
+- Stage 2: 159 passed, 0 failed
+- Stage 3-A: 120 passed, 0 failed
+- Stage 3-B: 118 passed, 0 failed
+- Stage 3-C: 49 passed, 0 failed
+- Stage 4: 67 passed, 0 failed
+- Functional total: 513 passed, 0 failed
+- Precision boundary: 88 passed, 0 failed
+- Deployment verifier: 11 passed, 0 failed
+
+Build verification after clean extraction
+- npm run check: passed
+- npm run check:project: passed
+- npm run check:pdf-links: passed
+- npm run deploy:dry-run: passed
+- npm ls --all: passed
+- npm audit: 0 vulnerabilities
+- npm audit --omit=dev: 0 vulnerabilities
+
+Database rehearsal after clean extraction
+- Fresh legacy local DB initialization: passed
+- Fresh DB_V2 migrations 0001-0005: passed
+- Second migration run: no migrations to apply
+- Local Owner bootstrap with legacy D1 coexistence: passed
+
+Actual local Worker verification after clean extraction
+- Owner login: passed
+- Session refresh and organization read: passed
+- Class session creation: passed
+- Anonymous participant initialization: passed
+- Persistent comment submission: passed
+- Idempotent replay: passed
+- Authenticated history retrieval: passed
+- CSV export: passed
+- Session end: passed
+- Logout: passed
+- Scheduled handler manual trigger: ok
+
+Visual and PDF verification
+- Desktop 1440x1000: no page-level horizontal overflow
+- Mobile 390x844: no page-level horizontal overflow
+- Admin table scroll is contained inside its wrapper
+- Manual PDF: 12 pages rendered and visually inspected
+- No observed clipping, overlap, or missing glyphs
+
+Remote status
+- GitHub not modified
+- Cloudflare remote D1 not modified
+- Worker not deployed
+- Staging and production verification remain deployment-stage work

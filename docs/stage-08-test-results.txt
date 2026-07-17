@@ -1,0 +1,81 @@
+# Stage 8 試験結果
+
+検証日: 2026-07-16 JST
+バージョン: 0.8.0
+
+## 機能試験
+
+| suite | passed | failed |
+|---|---:|---:|
+| DB_V2 schema | 119 | 0 |
+| Owner bootstrap | 40 | 0 |
+| Auth core | 120 | 0 |
+| Auth API | 118 | 0 |
+| Private API | 50 | 0 |
+| Comments | 67 | 0 |
+| Manual moderation | 75 | 0 |
+| Realtime | 44 | 0 |
+| Email auth | 42 | 0 |
+| Account lifecycle | 35 | 0 |
+| AI | 47 | 0 |
+| Content filter | 30 | 0 |
+| Bilingual filter | 21 | 0 |
+| Dictionary audit | 23 | 0 |
+| Dictionary upgrade | 12 | 0 |
+| Stage 8 PDF analytics | 30 | 0 |
+| 合計 | 873 | 0 |
+
+## 境界とdeployment
+
+| suite | passed | failed |
+|---|---:|---:|
+| Stage 8 boundary | 21 | 0 |
+| Precision boundary | 110 | 0 |
+| Historical stage compatibility command | 7 | 0 |
+| Deployment verifier | 11 | 0 |
+
+Historical stage compatibility内部の下位assertionは既存suiteと重複するため総合計へ加算しない。
+
+## D1
+
+```text
+0001～0015 fresh apply: PASS
+second apply: No migrations to apply
+foreign_key_check: 0 rows
+quick_check: ok
+```
+
+## buildと依存関係
+
+```text
+static predeploy check: PASS
+project check: PASS
+PDF link check: PASS
+Wrangler deploy dry-run: PASS
+assets: 44 files
+Worker upload: 657.35 KiB
+Worker gzip: 111.81 KiB
+npm audit: 0 vulnerabilities
+npm audit --omit=dev: 0 vulnerabilities
+```
+
+## 画面
+
+```text
+screenshots: 4
+page-level horizontal overflow: 0
+outside controls: 0
+```
+
+## 実行方法
+
+全体commandは長時間になる。
+時間制限のある環境では`docs/stage08-logs/`のsuite単位commandを使用する。
+Owner bootstrapは`npm run test:owner-bootstrap`として分離している。
+
+## 未検証
+
+- Remote D1
+- 実Cloudflare Worker
+- production browser network
+- production規模の負荷

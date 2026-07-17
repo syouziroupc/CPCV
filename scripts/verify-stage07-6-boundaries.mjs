@@ -1,0 +1,42 @@
+import { readFileSync, readdirSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const results = [];
+const text = (path) => readFileSync(resolve(ROOT, path), "utf8");
+function check(name, condition, detail = "") {
+  const ok = Boolean(condition); results.push({ name, ok });
+  console.log(`[${ok ? "PASS" : "FAIL"}] ${name}`);
+  if (!ok && detail) console.error(detail);
+}
+const migrations = readdirSync(resolve(ROOT, "migrations-v2")).filter((name) => /^\d+_.*\.sql$/.test(name)).sort();
+check("Stage 7.6 migration 0012 remains present", migrations.includes("0012_multilingual_filter_usability.sql"), migrations);
+const migration = text("migrations-v2/0012_multilingual_filter_usability.sql");
+const dictionaryMigration = text("migrations-v2/0011_dictionary_content_filter.sql");
+check("dictionary migration avoids compound-select backfill", !dictionaryMigration.includes("UNION ALL SELECT"));
+check("dictionary organization trigger avoids multi-row VALUES", !/CREATE TRIGGER trg_content_filter_policy_org_insert[\s\S]*?\) VALUES\s*\n\s*\([^;]+\),/m.test(dictionaryMigration));
+check("language metadata is stored", migration.includes("language_code"));
+check("boundary mode is stored", migration.includes("boundary_mode"));
+const normalization = text("src/content-filter/normalization.js");
+const matcher = text("src/content-filter/matcher.js");
+const validation = text("src/content-filter/validation.js");
+const routes = text("src/routes/content-filter.js");
+const admin = text("public/assets/admin.js");
+const html = text("public/admin/index.html");
+check("combining marks are retained", normalization.includes("LETTER_NUMBER_OR_MARK") && !normalization.includes("FORMAT_OR_MARK"));
+check("mask spans map to original graphemes", normalization.includes("canonicalToOriginal") && normalization.includes("compactToOriginal"));
+check("word-boundary protection exists", matcher.includes("hasWordBoundaries") && matcher.includes("boundaryAllowed"));
+check("multiple deterministic matches are collected", matcher.includes("findNormalizedMatches") && matcher.includes("allCodePointIndexes"));
+check("language codes are validated", validation.includes("requireFilterLanguageCode"));
+check("boundary modes are validated", validation.includes("requireBoundaryMode"));
+check("API supports language and boundary fields", routes.includes("languageCode") && routes.includes("boundaryMode"));
+check("simple organization preset exists", html.includes("organizationFilterPreset") && admin.includes("applyOrganizationFilterPreset"));
+check("simple session mode exists", html.includes("sessionFilterSimpleMode") && admin.includes("saveSessionFilterSimpleSettings"));
+check("advanced settings are separated", html.includes("<details id=\"organizationFilterAdvanced\"") && html.includes("<details id=\"sessionFilterAdvanced\""));
+check("dictionary terms can be edited", admin.includes("beginFilterTermEdit") && admin.includes("editingFilterTermId"));
+check("dictionary can be exported as CSV", admin.includes("exportFilterTermsCsv") && html.includes("exportFilterTermsButton"));
+check("Stage 8 files remain absent", !migrations.some((name) => name.startsWith("0014_")));
+const failed = results.filter((item) => !item.ok);
+console.log(`\nStage 7.6 boundary summary: ${results.length - failed.length} passed, ${failed.length} failed, ${results.length} total.`);
+if (failed.length) process.exitCode = 1;

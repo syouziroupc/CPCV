@@ -1,0 +1,23 @@
+{
+  "viewportWidth": 1440,
+  "viewportHeight": 1000,
+  "documentWidth": 1440,
+  "documentHeight": 1000,
+  "bodyWidth": 1440,
+  "card": {
+    "left": 440,
+    "right": 1000,
+    "top": 32,
+    "bottom": 809.390625,
+    "width": 560,
+    "height": 777.390625
+  },
+  "submit": {
+    "left": 465,
+    "right": 975,
+    "top": 669.390625,
+    "bottom": 712.390625,
+    "width": 510,
+    "height": 43
+  }
+}

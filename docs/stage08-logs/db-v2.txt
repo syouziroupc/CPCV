@@ -1,0 +1,173 @@
+
+=== Stage 2 schema and constraint suite ===
+[PASS] migration applies to an empty local D1
+[PASS] first migration run applies 0001_initial_schema.sql
+[PASS] second migration apply exits successfully
+[PASS] second migration apply is a no-op
+[PASS] migration history contains exactly the Stage 2 and Stage 3-A migrations after the second apply
+[PASS] exactly the seven application tables exist
+[PASS] bootstrap schema fingerprint matches the migrated canonical schema
+[PASS] all table columns, types, nullability, defaults, and primary keys match the design
+[PASS] all foreign keys and ON DELETE rules match the design
+[PASS] all 17 specified indexes exist
+[PASS] PRAGMA foreign_key_check returns zero rows
+[PASS] D1-supported PRAGMA quick_check returns ok
+[PASS] underlying local SQLite PRAGMA integrity_check returns ok
+[PASS] seed organizations
+[PASS] seed users
+[PASS] seed organization memberships
+[PASS] organization rejects a NULL primary key
+[PASS] organization rejects an invalid status
+[PASS] organization rejects an empty name
+[PASS] organization rejects a whitespace-only name
+[PASS] organization names are not globally unique
+[PASS] organization rejects updated_at before created_at
+[PASS] active organization rejects deleted_at
+[PASS] deleted organization requires deleted_at
+[PASS] deleted organization accepts a consistent deleted_at
+[PASS] user rejects a NULL primary key
+[PASS] user rejects an exact duplicate login ID
+[PASS] user rejects a case-only duplicate login ID
+[PASS] user rejects an uppercase unique login ID
+[PASS] user rejects an empty login ID
+[PASS] user rejects forbidden login ID characters
+[PASS] user rejects an invalid status
+[PASS] user rejects a whitespace-only display name
+[PASS] user rejects a short password hash
+[PASS] user rejects password_changed_at before creation
+[PASS] active user rejects deleted_at
+[PASS] deleted user requires deleted_at
+[PASS] deleted user accepts a consistent deleted_at
+[PASS] membership rejects a duplicate organization and user pair
+[PASS] one user can belong to another organization
+[PASS] membership rejects a missing organization
+[PASS] membership rejects a missing user
+[PASS] membership rejects an invalid role
+[PASS] membership rejects an invalid status
+[PASS] active membership rejects removed_at
+[PASS] membership rejects updated_at before created_at
+[PASS] removed membership requires removed_at
+[PASS] removed membership accepts a consistent removed_at
+[PASS] auth session rejects a NULL primary key
+[PASS] valid organization-bound auth session is accepted
+[PASS] auth session rejects a user without membership
+[PASS] auth session rejects a duplicate token hash
+[PASS] auth session rejects a duplicate CSRF hash
+[PASS] auth session rejects a NULL organization
+[PASS] auth session rejects last_seen_at before creation
+[PASS] auth session rejects idle expiry at last_seen_at
+[PASS] auth session rejects idle expiry beyond absolute expiry
+[PASS] auth session rejects revoked_at before creation
+[PASS] password reset token rejects a NULL primary key
+[PASS] valid password reset token is accepted
+[PASS] password reset rejects duplicate token hash
+[PASS] password reset rejects a missing user
+[PASS] password reset rejects a missing creator
+[PASS] password reset rejects used_at and revoked_at together
+[PASS] password reset rejects used_at after expiry
+[PASS] password reset rejects revoked_at before creation
+[PASS] password reset rejects expiry at creation
+[PASS] live session rejects a NULL primary key
+[PASS] valid active live session is accepted
+[PASS] live session rejects a missing organization
+[PASS] live session rejects a NULL organization
+[PASS] live session rejects a whitespace-only title
+[PASS] live session rejects a creator outside the organization
+[PASS] live session rejects a duplicate public code
+[PASS] live session rejects a public code with wrong length
+[PASS] live session rejects forbidden public code characters
+[PASS] live session rejects lowercase public codes
+[PASS] live session rejects an invalid display mode
+[PASS] live session rejects display seconds below range
+[PASS] live session rejects display seconds above range
+[PASS] live session rejects posting boolean outside 0 and 1
+[PASS] live session rejects visibility boolean outside 0 and 1
+[PASS] ended live session rejects posting enabled
+[PASS] ended live session rejects comments visible
+[PASS] active live session rejects ended_at
+[PASS] live session rejects expiry at started_at
+[PASS] ended live session rejects ended_at before started_at
+[PASS] ended live session requires ended_at
+[PASS] deleted live session requires deleted_at
+[PASS] consistent ended live session is accepted
+[PASS] deleted live session rejects deleted_at before ended_at
+[PASS] consistent deleted live session is accepted
+[PASS] audit log rejects a NULL primary key
+[PASS] valid system audit log is accepted
+[PASS] global system audit log with no organization is accepted
+[PASS] valid user audit log is accepted
+[PASS] system audit rejects actor user ID
+[PASS] system audit rejects actor role
+[PASS] user audit requires actor user ID
+[PASS] audit log rejects invalid JSON
+[PASS] audit log rejects a whitespace-only action
+[PASS] audit log rejects a missing organization reference
+[PASS] audit log rejects a missing actor user
+[PASS] audit log rejects an invalid actor role
+[PASS] organization A-only user cannot create organization B auth session
+[PASS] organization A-only user cannot create organization B live session
+[PASS] multi-organization user can create organization A auth session
+[PASS] multi-organization user can create organization B auth session
+[PASS] organization physical deletion is restricted while memberships exist
+[PASS] user physical deletion is restricted while memberships exist
+[PASS] membership list query uses an index
+[PASS] organization owner query uses an index
+[PASS] active live session query uses an index
+[PASS] auth token lookup uses a unique index
+[PASS] expired auth cleanup query uses an index
+[PASS] organization audit query uses an index
+[PASS] foreign keys remain clean after all schema tests
+[PASS] D1 quick_check remains ok after all schema tests
+[PASS] local SQLite integrity_check remains ok after all schema tests
+
+DB_V2 test summary: 119 passed, 0 failed, 119 total.
+(node:26450) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Stage 2 Owner bootstrap suite ===
+[PASS] remote bootstrap verifies the actual D1 UUID and name before reading the password
+[PASS] bootstrap utility binds only to loopback and uses remote=true for remote D1 access
+[PASS] bootstrap verifies migration, table set, foreign keys, and quick_check before writing
+[PASS] remote bootstrap rejects a missing database ID
+[PASS] local bootstrap rejects a remote database ID argument
+[PASS] remote bootstrap rejects --password-stdin
+[PASS] remote bootstrap rejects the legacy DB UUID
+[PASS] remote bootstrap rejects non-TTY password input
+[PASS] bootstrap test database migration succeeds
+[PASS] bootstrap latest-schema extensions are installed
+[PASS] bootstrap accepts the required core schema after later migrations
+[PASS] latest-schema bootstrap creates exactly one organization
+[PASS] latest-schema bootstrap removes its temporary config
+[PASS] latest-schema bootstrap leaves the extended database healthy
+[PASS] coexisting legacy D1 fixture is installed
+[PASS] bootstrap selects DB_V2 when the persist directory also contains the legacy D1
+[PASS] coexisting-D1 bootstrap writes exactly one V2 organization
+[PASS] coexisting-D1 bootstrap does not modify the legacy sibling
+[PASS] coexisting-D1 bootstrap removes its temporary config
+[PASS] bootstrap missing-index fixture is installed
+[PASS] bootstrap rejects a DB whose schema objects differ even when all seven tables remain
+[PASS] missing-index bootstrap leaves the database empty
+[PASS] missing-index bootstrap removes its temporary config
+[PASS] bootstrap missing-index fixture is removed
+[PASS] bootstrap rollback trigger is installed
+[PASS] bootstrap reports failure when the audit insert is forced to fail
+[PASS] bootstrap output does not contain the plaintext password on failure
+[PASS] failed bootstrap removes its temporary config
+[PASS] failed bootstrap rolls back organization, user, membership, and audit together
+[PASS] bootstrap rollback trigger is removed
+[PASS] bootstrap creates the first Owner successfully
+[PASS] bootstrap output does not contain the plaintext password on success
+[PASS] successful bootstrap removes its temporary config
+[PASS] bootstrap creates organization, active Owner membership, and system audit
+[PASS] plaintext bootstrap password is absent from stored user fields
+[PASS] bootstrap output does not contain the stored password hash or salt
+[PASS] bootstrap rejects a second execution by default
+[PASS] second bootstrap output does not contain the plaintext password
+[PASS] rejected second bootstrap removes its temporary config
+[PASS] second bootstrap leaves exactly one organization
+
+DB_V2 bootstrap test summary: 40 passed, 0 failed, 40 total.
+(node:26949) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+DB_V2 complete test summary: 159 passed, 0 failed, 159 total.

@@ -1,0 +1,4 @@
+reportlab==4.4.9
+weasyprint==68.0
+beautifulsoup4==4.14.3
+Pillow==12.2.0

@@ -1,0 +1,31 @@
+CPCV Stage 7.8 final verification
+
+Source baseline
+- CPCV_stage07_7_complete_source.zip
+- SHA-256: 69f02694e667dddf9ecdeb823201081ea325923cc04d57c86d6dd29fb3530649
+
+Stage 7.8
+- package version: 0.7.8
+- latest migration: 0014_filter_pack_expansion.sql
+- Japanese core: 128 terms
+- Japanese context: 101 terms
+- English core: 161 terms
+- English context: 110 terms
+- total: 500 terms
+- political category: 0 built-in terms
+
+Safety properties
+- recommended preset installs core packs only
+- strict preset adds context packs
+- context packs cannot cause automatic rejection under shipped severities
+- manually edited terms are not overwritten by pack update
+- user-deleted pack terms are not resurrected
+- pack reinstall is idempotent
+- normalized duplicates across built-in packs: 0
+- English pack word-boundary coverage: 100 percent
+- original comment and display comment remain separate
+- translation output filter remains enabled by existing Stage 7.7 contract
+- human moderation remains authoritative
+
+Result
+PASS

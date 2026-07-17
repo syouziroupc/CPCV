@@ -1,0 +1,75 @@
+== check ==
+
+> class-pdf-comment-viewer-v01@0.7.6 check
+> node scripts/predeploy-check.mjs
+
+project verification passed
+predeploy check passed (111 JavaScript modules)
+== project ==
+
+> class-pdf-comment-viewer-v01@0.7.6 check:project
+> node scripts/verify-project.mjs
+
+project verification passed
+== pdf links ==
+
+> class-pdf-comment-viewer-v01@0.7.6 check:pdf-links
+> node scripts/verify-pdf-link-logic.mjs
+
+PDF link and reconnect logic verified
+== stage07-6 boundary ==
+[PASS] Stage 7.6 migration is append-only as 0012
+[PASS] language metadata is stored
+[PASS] boundary mode is stored
+[PASS] combining marks are retained
+[PASS] mask spans map to original graphemes
+[PASS] word-boundary protection exists
+[PASS] multiple deterministic matches are collected
+[PASS] language codes are validated
+[PASS] boundary modes are validated
+[PASS] API supports language and boundary fields
+[PASS] simple organization preset exists
+[PASS] simple session mode exists
+[PASS] advanced settings are separated
+[PASS] dictionary terms can be edited
+[PASS] dictionary can be exported as CSV
+[PASS] Stage 8 files remain absent
+
+Stage 7.6 boundary summary: 16 passed, 0 failed, 16 total.
+== deploy dry-run ==
+
+> class-pdf-comment-viewer-v01@0.7.6 deploy:dry-run
+> node scripts/predeploy-check.mjs && wrangler deploy --dry-run
+
+project verification passed
+predeploy check passed (111 JavaScript modules)
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+✨ Read 44 files from the assets directory /mnt/data/stage76_work/CPCV_stage07_5_complete_source/public
+Total Upload: 456.43 KiB / gzip: 91.33 KiB
+Your Worker has access to the following bindings:
+Binding                                                                             Resource                  
+env.COMMENT_ROOM (CommentRoom)                                                      Durable Object            
+env.EMAIL (unrestricted)                                                            Send Email                
+env.AI_JOBS_QUEUE (cpcv-ai-jobs)                                                    Queue                     
+env.DB (class_comment_db)                                                           D1 Database               
+env.DB_V2 (class_comment_db_v2)                                                     D1 Database               
+env.AI                                                                              AI                        
+env.ASSETS                                                                          Assets                    
+env.APP_ENV ("production")                                                          Environment Variable      
+env.AUTH_V2_ENABLED ("1")                                                           Environment Variable      
+env.EMAIL_AUTH_REQUIRED ("0")                                                       Environment Variable      
+env.AI_MODERATION_MODEL ("@cf/zai-org/glm-4.7-flash")                               Environment Variable      
+env.AI_MODERATION_FALLBACK_MODEL ("@cf/qwen/qwen3-30b-a3b-fp8")                     Environment Variable      
+env.AI_TRANSLATION_MODEL ("@cf/zai-org/glm-4.7-flash")                              Environment Variable      
+env.AI_TRANSLATION_FALLBACK_MODEL ("@cf/qwen/qwen3-30b-a3b-fp8")                    Environment Variable      
+env.AI_TIMEOUT_MS ("12000")                                                         Environment Variable      
+env.AUTH_ORIGIN ("https://class-pdf-comment-viewer-v01....")                        Environment Variable      
+env.PUBLIC_ORIGIN ("https://class-pdf-comment-viewer-v01....")                      Environment Variable      
+
+--dry-run: exiting now.
+== audit ==
+found 0 vulnerabilities
+== audit production ==
+found 0 vulnerabilities

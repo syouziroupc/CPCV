@@ -1,0 +1,32 @@
+[PASS] content-filter tables exist
+[PASS] foreign keys clean
+[PASS] quick check ok
+[PASS] all category policies are initialized
+[PASS] session filter defaults disabled and ambiguous routing
+[PASS] dictionary stores language metadata
+[PASS] dictionary stores boundary mode
+[PASS] punctuation insertion is normalized to a deterministic match
+[PASS] punctuation-obfuscated term is masked
+[PASS] deterministic mask does not require AI in ambiguous-only mode
+[PASS] Katakana and Hiragana are folded for matching
+[PASS] level 5 term reaches reject policy
+[PASS] political category is inactive by default
+[PASS] one-edit evasion becomes an ambiguous review
+[PASS] ambiguous match is routed to AI
+[PASS] safe comment skips moderation AI in ambiguous-only mode
+[PASS] ambiguous comment creates only moderation AI job
+[PASS] ambiguous comment remains pending until human or later policy decision
+[PASS] original and masked display text are stored separately
+[PASS] filter match evidence is stored without duplicating the term text
+[PASS] realtime event contains masked text only
+[PASS] teacher view keeps original and display forms
+[PASS] teacher view includes dictionary evidence
+[PASS] same spelling can be registered for different languages
+[PASS] English auto boundary avoids substring false positive
+[PASS] English standalone word still matches
+[PASS] all repeated deterministic matches are masked
+[PASS] strict match maps zero-width obfuscation to the correct original span
+[PASS] Thai combining marks are preserved for matching
+[PASS] Devanagari combining marks are preserved for matching
+
+Stage 7.6 content-filter summary: 30 passed, 0 failed, 30 total.

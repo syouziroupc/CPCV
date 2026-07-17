@@ -1,0 +1,27 @@
+CPCV Stage 8 local final verification
+Date: 2026-07-16 JST
+Version: 0.8.0
+
+Functional assertions: 873 passed, 0 failed
+Stage 8 boundaries: 21 passed, 0 failed
+Precision boundaries: 110 passed, 0 failed
+Stage compatibility command: 7 passed, 0 failed
+Deployment verifiers: 11 passed, 0 failed
+
+D1 migrations 0001-0015 fresh apply: PASS
+D1 second apply: No migrations to apply
+PRAGMA foreign_key_check: 0 rows
+PRAGMA quick_check: ok
+
+Static check: PASS
+Project check: PASS
+PDF link check: PASS
+Visual review: PASS
+Wrangler dry-run: PASS
+npm audit: 0 vulnerabilities
+npm audit --omit=dev: 0 vulnerabilities
+
+Remote D1 migration: NOT RUN
+Staging deploy: NOT RUN
+Production deploy: NOT RUN
+GitHub push: NOT RUN

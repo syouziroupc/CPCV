@@ -1,0 +1,104 @@
+{
+  "viewportWidth": 390,
+  "viewportHeight": 844,
+  "documentWidth": 390,
+  "documentHeight": 844,
+  "bodyWidth": 390,
+  "keyRects": [
+    {
+      "id": "viewerStage",
+      "cls": "viewer-stage",
+      "type": "",
+      "left": 0,
+      "right": 390,
+      "top": 0,
+      "bottom": 844,
+      "width": 390,
+      "height": 844
+    },
+    {
+      "id": "topBar",
+      "cls": "viewer-topbar",
+      "type": "",
+      "left": 12,
+      "right": 378,
+      "top": 793.34375,
+      "bottom": 832,
+      "width": 366,
+      "height": 38.65625
+    },
+    {
+      "id": "commentPanel",
+      "cls": "comment-panel mode-stack3",
+      "type": "",
+      "left": 16,
+      "right": 374,
+      "top": 566.140625,
+      "bottom": 776,
+      "width": 358,
+      "height": 209.859375
+    }
+  ],
+  "outside": [],
+  "shortControls": [
+    {
+      "id": "qrButton",
+      "cls": "viewer-file-button",
+      "type": "button",
+      "left": 111.921875,
+      "right": 161.25,
+      "top": 799.34375,
+      "bottom": 826,
+      "width": 49.328125,
+      "height": 26.65625
+    },
+    {
+      "id": "qrCornerButton",
+      "cls": "viewer-file-button",
+      "type": "button",
+      "left": 167.25,
+      "right": 216.578125,
+      "top": 799.34375,
+      "bottom": 826,
+      "width": 49.328125,
+      "height": 26.65625
+    },
+    {
+      "id": "downloadLogButton",
+      "cls": "viewer-file-button",
+      "type": "button",
+      "left": 222.578125,
+      "right": 265.984375,
+      "top": 799.34375,
+      "bottom": 826,
+      "width": 43.40625,
+      "height": 26.65625
+    },
+    {
+      "id": "clearLogButton",
+      "cls": "viewer-file-button",
+      "type": "button",
+      "left": 271.984375,
+      "right": 341.296875,
+      "top": 799.34375,
+      "bottom": 826,
+      "width": 69.3125,
+      "height": 26.65625
+    },
+    {
+      "id": "viewerLogoutButton",
+      "cls": "viewer-file-button",
+      "type": "button",
+      "left": 399.28125,
+      "right": 441.9375,
+      "top": 799.34375,
+      "bottom": 826,
+      "width": 42.65625,
+      "height": 26.65625
+    }
+  ],
+  "moderationScrollWidth": 0,
+  "moderationClientWidth": 0,
+  "topBarScrollWidth": 496,
+  "topBarClientWidth": 366
+}

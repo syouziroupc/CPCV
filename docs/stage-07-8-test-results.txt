@@ -1,0 +1,51 @@
+CPCV Stage 7.8 test results
+Date: 2026-07-16 JST
+Version: 0.7.8
+
+Stage 7.8 dedicated
+- boundary verification: 12 passed, 0 failed
+- dictionary audit: 23 passed, 0 failed
+- pack upgrade and idempotency: 12 passed, 0 failed
+
+Functional regression
+- DB and bootstrap: 159 passed, 0 failed
+- authentication core: 120 passed, 0 failed
+- authentication API: 118 passed, 0 failed
+- private APIs: 50 passed, 0 failed
+- comment persistence: 67 passed, 0 failed
+- manual moderation: 75 passed, 0 failed
+- realtime: 44 passed, 0 failed
+- AI: 47 passed, 0 failed
+- dictionary filter: 30 passed, 0 failed
+- bilingual pre/post translation filter: 21 passed, 0 failed
+- email authentication: 42 passed, 0 failed
+- account lifecycle: 35 passed, 0 failed
+
+Boundary and deployment regression
+- precision boundaries: 110 passed, 0 failed
+- stage compatibility commands: 7 passed, 0 failed
+- deployment verifiers: 11 passed, 0 failed
+- Stage 7.7 boundary: 21 passed, 0 failed
+
+Recorded assertions: 1004 passed, 0 failed
+
+Additional verification
+- npm run check: PASS
+- npm run check:project: PASS
+- npm run check:pdf-links: PASS
+- Wrangler deploy --dry-run: PASS
+- npm audit: 0 vulnerabilities
+- npm audit --omit=dev: 0 vulnerabilities
+- visual screenshots: 6 generated and inspected
+- page-level horizontal overflow: 0
+
+D1
+- migrations 0001 through 0014 applied successfully
+- second migration run: No migrations to apply
+- d1_migrations count: 14
+- latest migration: 0014_filter_pack_expansion.sql
+- PRAGMA foreign_key_check: 0 rows
+- PRAGMA quick_check: ok
+
+Note
+The first combined migration command reached the execution-time limit after migration 0014 had already completed. The same persisted local D1 was then checked separately. The second run returned No migrations to apply. Foreign keys and quick_check were clean.

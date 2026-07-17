@@ -1,0 +1,48 @@
+### second migration apply
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+Resource location: local 
+
+Use --remote if you want to access the remote instance.
+
+✅ No migrations to apply!
+### foreign keys
+[
+  {
+    "results": [],
+    "success": true,
+    "meta": {
+      "duration": 2
+    }
+  }
+]
+### quick check
+[
+  {
+    "results": [
+      {
+        "quick_check": "ok"
+      }
+    ],
+    "success": true,
+    "meta": {
+      "duration": 6
+    }
+  }
+]
+### migration count
+[
+  {
+    "results": [
+      {
+        "migration_count": 14,
+        "latest": "0014_filter_pack_expansion.sql"
+      }
+    ],
+    "success": true,
+    "meta": {
+      "duration": 2
+    }
+  }
+]

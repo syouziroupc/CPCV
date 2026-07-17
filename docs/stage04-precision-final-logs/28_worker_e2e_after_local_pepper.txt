@@ -1,0 +1,165 @@
+POST /api/auth/login 200 {
+  ok: true,
+  csrfToken: 'S0QoYSEnsOR1MHF1upiCgtID0rWkDj8LzIjinmijmjI',
+  session: {
+    id: 'ses_de53df18ec5144ecb577e9cd7c7a7249',
+    idleExpiresAt: '2026-07-13T04:53:16.125Z',
+    absoluteExpiresAt: '2026-07-13T14:53:16.125Z'
+  },
+  user: {
+    id: 'usr_dd31a57658134befa65ea1ecc481ad30',
+    loginId: 'audit.owner',
+    displayName: 'Audit Owner',
+    requirePasswordChange: false
+  },
+  organization: {
+    id: 'org_65c92fcc6b2d4ab5af841a6c5f81b6b4',
+    name: 'Local Audit Organization',
+    role: 'owner'
+  }
+}
+GET /api/auth/session 200 {
+  ok: true,
+  csrfToken: 'QtVVD4wk1j8KyxwesNA3MduQxgIc21kRpO0S55h1h2Q',
+  session: {
+    id: 'ses_de53df18ec5144ecb577e9cd7c7a7249',
+    idleExpiresAt: '2026-07-13T04:53:16.125Z',
+    absoluteExpiresAt: '2026-07-13T14:53:16.125Z'
+  },
+  user: {
+    id: 'usr_dd31a57658134befa65ea1ecc481ad30',
+    loginId: 'audit.owner',
+    displayName: 'Audit Owner',
+    requirePasswordChange: false
+  },
+  organization: {
+    id: 'org_65c92fcc6b2d4ab5af841a6c5f81b6b4',
+    name: 'Local Audit Organization',
+    role: 'owner'
+  }
+}
+GET /api/org 200 {
+  ok: true,
+  organization: {
+    id: 'org_65c92fcc6b2d4ab5af841a6c5f81b6b4',
+    name: 'Local Audit Organization',
+    status: 'active',
+    createdAt: '2026-07-13T02:48:03.459Z',
+    updatedAt: '2026-07-13T02:48:03.459Z',
+    role: 'owner'
+  }
+}
+POST /api/private/sessions 201 {
+  ok: true,
+  sessionId: 'sess_d163f47a614e4dcbbc85b91e5d991b65',
+  publicCode: 'U6F8J5',
+  title: 'Precision Audit Session',
+  joinUrl: 'http://localhost:8787/j/U6F8J5',
+  session: {
+    id: 'sess_d163f47a614e4dcbbc85b91e5d991b65',
+    publicCode: 'U6F8J5',
+    title: 'Precision Audit Session',
+    createdByUserId: 'usr_dd31a57658134befa65ea1ecc481ad30',
+    postingEnabled: true,
+    commentsVisible: true,
+    commentDisplaySeconds: 60,
+    commentDisplayMode: 'stack3',
+    status: 'active',
+    createdAt: '2026-07-13T02:53:16.173Z',
+    updatedAt: '2026-07-13T02:53:16.173Z',
+    startsAt: '2026-07-13T02:53:16.173Z',
+    endsAt: '2026-07-13T08:53:16.173Z',
+    endedAt: null,
+    joinUrl: 'http://localhost:8787/j/U6F8J5',
+    commentRetentionDays: 30
+  }
+}
+GET /api/private/sessions/sess_d163f47a614e4dcbbc85b91e5d991b65 200 {
+  ok: true,
+  session: {
+    id: 'sess_d163f47a614e4dcbbc85b91e5d991b65',
+    publicCode: 'U6F8J5',
+    title: 'Precision Audit Session',
+    createdByUserId: 'usr_dd31a57658134befa65ea1ecc481ad30',
+    postingEnabled: true,
+    commentsVisible: true,
+    commentDisplaySeconds: 60,
+    commentDisplayMode: 'stack3',
+    status: 'active',
+    createdAt: '2026-07-13T02:53:16.173Z',
+    updatedAt: '2026-07-13T02:53:16.173Z',
+    startsAt: '2026-07-13T02:53:16.173Z',
+    endsAt: '2026-07-13T08:53:16.173Z',
+    endedAt: null,
+    joinUrl: 'http://localhost:8787/j/U6F8J5',
+    commentRetentionDays: 30
+  }
+}
+GET /api/public/sessions/U6F8J5 200 { ok: true, title: 'Precision Audit Session', postingEnabled: true }
+POST /api/public/sessions/U6F8J5/messages 201 {
+  ok: true,
+  commentId: 'cmt_337486aaae144d61b7e8b49602ca7d8f',
+  comment: {
+    id: 'cmt_337486aaae144d61b7e8b49602ca7d8f',
+    nickname: '監査',
+    message: 'Stage 4 end-to-end audit',
+    messageLength: 24,
+    moderationState: 'visible',
+    createdAt: '2026-07-13T02:53:16.214Z',
+    updatedAt: '2026-07-13T02:53:16.214Z',
+    retainedUntil: '2026-08-12T02:53:16.214Z',
+    deletedAt: null
+  },
+  duplicate: false
+}
+POST /api/public/sessions/U6F8J5/messages 200 {
+  ok: true,
+  commentId: 'cmt_337486aaae144d61b7e8b49602ca7d8f',
+  comment: {
+    id: 'cmt_337486aaae144d61b7e8b49602ca7d8f',
+    nickname: '監査',
+    message: 'Stage 4 end-to-end audit',
+    messageLength: 24,
+    moderationState: 'visible',
+    createdAt: '2026-07-13T02:53:16.214Z',
+    updatedAt: '2026-07-13T02:53:16.214Z',
+    retainedUntil: '2026-08-12T02:53:16.214Z',
+    deletedAt: null
+  },
+  duplicate: true
+}
+GET /api/private/sessions/sess_d163f47a614e4dcbbc85b91e5d991b65/comments?limit=20 200 {
+  ok: true,
+  comments: [
+    {
+      id: 'cmt_337486aaae144d61b7e8b49602ca7d8f',
+      nickname: '監査',
+      message: 'Stage 4 end-to-end audit',
+      messageLength: 24,
+      moderationState: 'visible',
+      createdAt: '2026-07-13T02:53:16.214Z',
+      updatedAt: '2026-07-13T02:53:16.214Z',
+      retainedUntil: '2026-08-12T02:53:16.214Z',
+      deletedAt: null
+    }
+  ],
+  nextCursor: null
+}
+GET /api/private/sessions/sess_d163f47a614e4dcbbc85b91e5d991b65/comments/export 200 "投稿日時","コメントID","名前","コメント","状態","授業名","授業ID"
+"2026-07-13T02:53:16.214Z","cmt_337486aaae144d61b7e8b49602ca7d8f","監査","Stage 4 end-to-end audit","visible","Precision Audit Session","sess_d163f47a614e4dcbbc85b91e5d991b65"
+POST /api/private/sessions/sess_d163f47a614e4dcbbc85b91e5d991b65/settings 200 {
+  ok: true,
+  postingEnabled: false,
+  commentsVisible: false,
+  commentDisplaySeconds: 60,
+  commentDisplayMode: 'stack3',
+  status: 'ended'
+}
+POST /api/auth/logout 200 { ok: true }
+{
+  "ok": true,
+  "sessionId": "sess_d163f47a614e4dcbbc85b91e5d991b65",
+  "publicCode": "U6F8J5",
+  "commentId": "cmt_337486aaae144d61b7e8b49602ca7d8f",
+  "idempotent": true
+}

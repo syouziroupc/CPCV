@@ -1,0 +1,44 @@
+[PASS] email normalization lowercases and trims
+[PASS] email rejects Unicode addresses in Stage 6.5-A
+[PASS] email rejects consecutive dots
+[PASS] email rejects a domain without a dot
+[PASS] email rejects CRLF
+[PASS] registration request is accepted
+[PASS] registration sends one verification email
+[PASS] verification email uses a path token
+[PASS] pending registration stores normalized email
+[PASS] raw verification token is not stored
+[PASS] plaintext password is absent from pending registration
+[PASS] verification creates an authenticated Owner
+[PASS] verification sets an HttpOnly session cookie
+[PASS] verification creates one user
+[PASS] verification creates one organization
+[PASS] verification creates one Owner membership
+[PASS] verification creates organization origin
+[PASS] verification creates organization quota
+[PASS] verified email timestamp is stored
+[PASS] verification token cannot be replayed
+[PASS] verified email login succeeds
+[PASS] legacy login ID is rejected when email auth is required
+[PASS] unknown reset address receives the generic response
+[PASS] unknown reset address sends no email
+[PASS] password reset request is accepted
+[PASS] password reset email contains a path token
+[PASS] raw reset token is not stored
+[PASS] password reset snapshots the verified email
+[PASS] emailed reset token changes the password
+[PASS] password reset revokes every existing session
+[PASS] password reset token cannot be replayed
+[PASS] old password is rejected after reset
+[PASS] new password authenticates after reset
+[PASS] public email issuance requires Turnstile
+[PASS] verification email race returns completed conflict
+[PASS] verification email race leaves pending token unconsumed
+[PASS] verification email race rolls back organization side effects
+[PASS] daily recipient limit is aggregate across email purposes
+[PASS] sixth public email request is rate limited
+[PASS] registration remains accepted when email delivery fails
+[PASS] email delivery failure is recorded without message content
+[PASS] delivery log masks the recipient
+
+Stage 6.5-A email authentication summary: 42 passed, 0 failed, 42 total.

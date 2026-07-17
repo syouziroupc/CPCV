@@ -1,0 +1,48 @@
+[PASS] migrations/0001_init.sql retains the immutable legacy migration
+[PASS] migrations/0002_drop_documents.sql retains the immutable legacy migration
+[PASS] migrations/0003_add_comment_display_seconds.sql retains the immutable legacy migration
+[PASS] migrations/0004_master_auth.sql retains the immutable legacy migration
+[PASS] migrations/0005_comment_display_mode.sql retains the immutable legacy migration
+[PASS] legacy DB binding remains present
+[PASS] DB_V2 binding remains separate
+[PASS] local development commands do not use remote D1
+[PASS] migrations-v2/0001_initial_schema.sql exists
+[PASS] scripts/bootstrap-owner.mjs exists
+[PASS] scripts/test-db-v2.mjs exists
+[PASS] migrations-v2/0002_auth_security.sql exists
+[PASS] src/auth/cookies.js exists
+[PASS] src/auth/csrf.js exists
+[PASS] src/auth/middleware.js exists
+[PASS] src/auth/passwords.js exists
+[PASS] src/auth/permissions.js exists
+[PASS] src/auth/sessions.js exists
+[PASS] current password scheme uses PBKDF2-SHA-256 with 600000 iterations
+[PASS] unsafe authenticated requests require origin, JSON, and CSRF checks
+[PASS] src/routes/auth.js exists
+[PASS] src/routes/organization.js exists
+[PASS] authentication and organization routes remain connected
+[PASS] Stage 3-B authentication endpoints remain implemented
+[PASS] organization management retains last-Owner and session-revocation protections
+[PASS] src/routes/private-v2.js exists
+[PASS] src/db/live-session-projection.js exists
+[PASS] public/assets/admin.js exists
+[PASS] public/assets/master.js exists
+[PASS] public/assets/viewer.js exists
+[PASS] AUTH_V2 is required in production
+[PASS] public/assets/admin.js has no legacy Bearer browser authentication
+[PASS] public/assets/admin.js restores a Cookie session
+[PASS] public/assets/master.js has no legacy Bearer browser authentication
+[PASS] public/assets/master.js restores a Cookie session
+[PASS] public/assets/viewer.js has no legacy Bearer browser authentication
+[PASS] public/assets/viewer.js restores a Cookie session
+[PASS] Viewer WebSocket uses the Cookie-authenticated bridge
+[PASS] migrations-v2/0003_comments.sql exists
+[PASS] src/comments/repository.js exists
+[PASS] src/routes/public-v2.js exists
+[PASS] scripts/test-comments-v2.mjs exists
+[PASS] comment persistence tables remain present
+[PASS] comment schema does not store IP, user-agent, or device fingerprint
+[PASS] student client sends idempotency keys without persistent browser identity
+[PASS] admin comment cache does not expose obsolete IP fields
+
+stage04 compatibility summary: 46 passed, 0 failed, 46 total.

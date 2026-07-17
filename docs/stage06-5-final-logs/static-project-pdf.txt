@@ -1,0 +1,19 @@
+=== npm run check ===
+
+> class-pdf-comment-viewer-v01@0.6.5 check
+> node scripts/predeploy-check.mjs
+
+project verification passed
+predeploy check passed (94 JavaScript modules)
+=== npm run check:project ===
+
+> class-pdf-comment-viewer-v01@0.6.5 check:project
+> node scripts/verify-project.mjs
+
+project verification passed
+=== npm run check:pdf-links ===
+
+> class-pdf-comment-viewer-v01@0.6.5 check:pdf-links
+> node scripts/verify-pdf-link-logic.mjs
+
+PDF link and reconnect logic verified

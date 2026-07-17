@@ -1,0 +1,5 @@
+
+> class-pdf-comment-viewer-v01@0.6.5 verify:email-auth-ready
+> node scripts/verify-email-auth-readiness.mjs
+
+EMAIL_AUTH_REQUIRED=0。メール必須化は要求されていないためOwner移行検査を省略します。

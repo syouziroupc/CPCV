@@ -1,0 +1,23 @@
+[PASS] comments store detected language
+[PASS] translations store filtered display text
+[PASS] Japanese and English core and context packs are available but not silently installed
+[PASS] both core packs install as editable organization terms
+[PASS] pack installation is idempotent
+[PASS] pack contains no political category terms
+[PASS] Japanese pack masks punctuation evasion before translation
+[PASS] English pack masks a whole English word before translation
+[PASS] English word boundaries avoid matching inside assignment or class
+[PASS] non-Japanese and non-English text is held for review
+[PASS] unsupported language requests AI reference review
+[PASS] shared short Latin words do not misclassify unsupported text as English
+[PASS] clear English sentence remains supported
+[PASS] unsupported language comment is persisted pending
+[PASS] unsupported language creates a moderation AI job even when ordinary AI moderation is off
+[PASS] pending unsupported comment is not translated before human approval
+[PASS] translated English text is checked by the English pack
+[PASS] raw translation and filtered display translation are stored separately
+[PASS] translation realtime never leaks the unfiltered translation
+[PASS] high-severity translated text is rejected from display
+[PASS] rejected translation is held and no realtime event is created
+
+Stage 7.7 bilingual filter summary: 21 passed, 0 failed, 21 total.

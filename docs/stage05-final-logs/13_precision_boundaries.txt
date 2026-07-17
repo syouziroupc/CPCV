@@ -1,0 +1,91 @@
+[PASS] precision migrations are append-only
+[PASS] secondary CSRF table has session cascade
+[PASS] secondary CSRF expiry index exists
+[PASS] database enforces public comment character limits
+[PASS] JSON readers enforce actual streamed byte limits
+[PASS] public message body uses 4KiB limit
+[PASS] CSRF accepts primary and scoped secondary tokens
+[PASS] secondary CSRF tokens expire and are capped
+[PASS] participant cleanup is bounded
+[PASS] scheduled maintenance drains all bounded queues
+[PASS] scheduled maintenance reports a remaining bounded backlog
+[PASS] WebSocket input closes oversized client frames
+[PASS] HTML security policy is applied
+[PASS] security header configured: content-security-policy
+[PASS] security header configured: x-frame-options
+[PASS] security header configured: permissions-policy
+[PASS] security header configured: strict-transport-security
+[PASS] HSTS does not force unrelated subdomains
+[PASS] CSP blocks framing and objects
+[PASS] production login refuses absent limiter bindings
+[PASS] production login requires Cloudflare client IP
+[PASS] V2 WebSocket bridge strips obsolete bearer subprotocol
+[PASS] expired authentication records are pruned with a retention delay and batch limit
+[PASS] participant token cookie accepts only the issued token length
+[PASS] viewer local logs have retention and hard cap
+[PASS] viewer pruning avoids quadratic object lookups
+[PASS] viewer cache version was advanced
+[PASS] page grid cannot expand beyond the mobile viewport
+[PASS] cards and nested layout containers may shrink below min-content width
+[PASS] local log table scrolls inside its bounded container
+[PASS] static mirror matches served page: public/admin/index.html
+[PASS] static mirror matches served page: public/j/index.html
+[PASS] static mirror matches served page: public/viewer/index.html
+[PASS] visual viewport has no page-level horizontal overflow: join-desktop
+[PASS] visual viewport has no page-level horizontal overflow: join-mobile
+[PASS] visual viewport has no page-level horizontal overflow: admin-desktop
+[PASS] visual viewport has no page-level horizontal overflow: admin-mobile
+[PASS] visual viewport has no page-level horizontal overflow: master-desktop
+[PASS] visual viewport has no page-level horizontal overflow: master-mobile
+[PASS] visual viewport has no page-level horizontal overflow: viewer-desktop
+[PASS] visual viewport has no page-level horizontal overflow: viewer-mobile
+[PASS] retention Cron is configured
+[PASS] no invented Rate Limiting namespace is committed
+[PASS] CI runs all implemented-stage tests
+[PASS] CI has no Cloudflare credentials or deploy command
+[PASS] production deployment is manual
+[PASS] production deployment requires an immutable full commit SHA
+[PASS] production deployment applies both migration sets
+[PASS] production deployment verifies D1 integrity and active Owner
+[PASS] production deployment requires pepper secret
+[PASS] production deployment runs post-deploy smoke tests
+[PASS] legacy MASTER_TOKEN deployment was removed
+[PASS] local Owner bootstrap uses direct SQLite transaction instead of a local dev Worker
+[PASS] bootstrap validates required core schema while allowing later migrations
+[PASS] remote bootstrap terminates detached Wrangler descendants
+[PASS] bootstrap tests cover latest schema rollback and repeat rejection
+[PASS] local bootstrap selects DB_V2 when legacy D1 coexists
+[PASS] organization 204 responses retain the full auth security header set
+[PASS] QR SVG responses use restrictive security headers
+[PASS] precision test script covers deployment verifiers and every implemented stage
+[PASS] remote DB_V2 migration script uses database name
+[PASS] deployment config verifier exists
+[PASS] local dev supplies a non-production rate-limit pepper
+[PASS] reusable local Stage 4 smoke test is available
+[PASS] reusable local Stage 5 smoke test is available
+[PASS] syntax: src/auth/request.js
+[PASS] syntax: src/auth/csrf.js
+[PASS] syntax: src/auth/csrf-tokens.js
+[PASS] syntax: src/auth/maintenance.js
+[PASS] syntax: src/routes/auth.js
+[PASS] syntax: src/routes/public-v2.js
+[PASS] syntax: src/routes/private-v2.js
+[PASS] syntax: src/comments/repository.js
+[PASS] syntax: src/security-headers.js
+[PASS] syntax: src/index.js
+[PASS] syntax: public/assets/viewer.js
+[PASS] syntax: scripts/predeploy-check.mjs
+[PASS] syntax: scripts/verify-deployment-config.mjs
+[PASS] syntax: scripts/verify-d1-query-result.mjs
+[PASS] syntax: scripts/print-production-origin.mjs
+[PASS] syntax: scripts/verify-remote-d1.mjs
+[PASS] syntax: scripts/configure-rate-limit-secret.mjs
+[PASS] syntax: scripts/smoke-production.mjs
+[PASS] syntax: scripts/test-deployment-verifiers.mjs
+[PASS] syntax: scripts/bootstrap-owner.mjs
+[PASS] syntax: scripts/bootstrap-owner-worker.mjs
+[PASS] syntax: scripts/test-bootstrap-owner-v2.mjs
+[PASS] syntax: scripts/test-db-v2.mjs
+[PASS] syntax: scripts/test-db-v2-schema.mjs
+
+Precision boundary summary: 89 passed, 0 failed, 89 total.

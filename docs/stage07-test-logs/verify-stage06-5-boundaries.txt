@@ -1,0 +1,27 @@
+[PASS] Stage 6.5 migrations remain present and ordered
+[PASS] Stage 6.5 table exists: email_enrollment_requests
+[PASS] Stage 6.5 table exists: organization_email_events
+[PASS] email delivery attempts are organization attributable
+[PASS] active membership quota is enforced in D1
+[PASS] pending invitation quota is enforced in D1
+[PASS] daily invitation email quota is enforced in D1
+[PASS] organization invitation endpoints are connected
+[PASS] invitation tokens are stored as hashes
+[PASS] email enrollment and change both exist
+[PASS] email confirmation revokes all user sessions
+[PASS] manager password reset sends email
+[PASS] manager password reset response does not expose resetToken
+[PASS] temporary-password creation is disabled in email-required mode
+[PASS] organization reset delegates to email delivery
+[PASS] account lifecycle UI exists: public/account/index.html
+[PASS] account lifecycle UI exists: public/assets/account.js
+[PASS] account lifecycle UI exists: public/accept-invitation/index.html
+[PASS] account lifecycle UI exists: public/assets/accept-invitation.js
+[PASS] account lifecycle UI exists: public/confirm-email-change/index.html
+[PASS] account lifecycle UI exists: public/assets/confirm-email-change.js
+[PASS] master UI creates email invitations
+[PASS] master UI no longer displays raw reset token
+[PASS] account lifecycle test command exists
+[PASS] package version is Stage 6.5 or later
+
+Stage 6.5 boundary summary: 25 passed, 0 failed, 25 total.

@@ -1,0 +1,73 @@
+
+> class-pdf-comment-viewer-v01@0.5.0 db:v2:test:stage04
+> node --no-warnings scripts/test-comments-v2.mjs
+
+[PASS] Stage 4 creates three comment tables
+[PASS] comment indexes exist
+[PASS] live session organization composite unique index exists
+[PASS] foreign key check is clean after migration
+[PASS] quick check is ok
+[PASS] database comment content guards exist
+[PASS] database rejects an overlong comment
+[PASS] database rejects a mismatched message length
+[PASS] database rejects an overlong nickname
+[PASS] public session GET succeeds
+[PASS] participant cookie is HttpOnly and session-scoped
+[PASS] GET does not create participant row
+[PASS] public comment JSON body is capped
+[PASS] new public comment returns 201
+[PASS] participant is persisted once
+[PASS] comment is persisted once
+[PASS] created event is persisted atomically
+[PASS] stored comment uses normalized content
+[PASS] stored comment belongs to session organization
+[PASS] comment response uses persistent id
+[PASS] new comment is broadcast with persistent id
+[PASS] same idempotency key returns existing comment
+[PASS] duplicate does not add database rows
+[PASS] duplicate is not broadcast again
+[PASS] different immediate post is rate limited
+[PASS] rate-limited post is not persisted
+[PASS] legacy client without idempotency key remains accepted after rate window is reset
+[PASS] legacy missing key receives compatibility key
+[PASS] NFKC and control normalization is applied
+[PASS] URL is rejected
+[PASS] invalid idempotency key is rejected
+[PASS] overlong message is rejected
+[PASS] direct unverified Durable Object post is rejected
+[PASS] privacy test comment is stored
+[PASS] schema has no IP or user-agent columns
+[PASS] broadcast payload contains no IP or participant token
+[PASS] session owner teacher reads comment history
+[PASS] comment history cursor paginates without duplicate
+[PASS] same organization Admin reads history
+[PASS] another Teacher cannot read history
+[PASS] other organization cannot read history
+[PASS] CSV export succeeds with attachment headers
+[PASS] CSV formula injection is neutralized
+[PASS] CSV does not contain IP address column
+[PASS] csvCell neutralizes leading whitespace formula
+[PASS] buildCommentsCsv quotes embedded double quote
+[PASS] retention fixtures inserted
+[PASS] retention physically deletes only expired comments
+[PASS] comment events cascade with deleted comment
+[PASS] orphan participant is deleted
+[PASS] Admin cannot manually run retention
+[PASS] Owner can run retention maintenance
+[PASS] participant retention obeys the batch limit
+[PASS] scheduled maintenance drains participant backlog
+[PASS] scheduled maintenance prunes expired secondary CSRF tokens
+[PASS] scheduled maintenance removes old expired auth sessions
+[PASS] auth session deletion cascades secondary CSRF rows
+[PASS] scheduled maintenance removes only old reset tokens
+[PASS] event insert fault rejects comment operation
+[PASS] event fault rolls back participant and comment
+[PASS] scheduled handler runs retention without remote services
+[PASS] join client no longer stores persistent client id in localStorage
+[PASS] join client sends idempotency key
+[PASS] join client counts Unicode code points
+[PASS] join form avoids UTF-16 maxlength for Unicode limits
+[PASS] viewer CSV uses authenticated server export
+[PASS] viewer local cache no longer records IP
+
+Stage 4 comment persistence test summary: 67 passed, 0 failed, 67 total.

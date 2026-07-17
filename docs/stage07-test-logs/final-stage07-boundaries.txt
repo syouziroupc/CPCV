@@ -1,0 +1,54 @@
+[PASS] Stage 7 migration is append-only as 0010
+[PASS] Stage 7 table exists: organization_ai_settings
+[PASS] Stage 7 table exists: session_ai_settings
+[PASS] Stage 7 table exists: ai_jobs
+[PASS] Stage 7 table exists: ai_results
+[PASS] Stage 7 table exists: translations
+[PASS] Stage 7 table exists: ai_usage_events
+[PASS] AI defaults are disabled
+[PASS] AI jobs are unique per comment type and target
+[PASS] daily quotas are enforced in D1
+[PASS] every external model call has a usage record
+[PASS] posting schedules AI after comment persistence
+[PASS] queue dispatch failures do not throw into posting
+[PASS] Queue consumer is connected
+[PASS] scheduled recovery requeues stale AI jobs
+[PASS] human moderation state is not updated by AI repository
+[PASS] original comment text remains the source
+[PASS] translation is stored separately
+[PASS] translation and Stage 6 sequence are persisted atomically
+[PASS] restored comments resend existing translation
+[PASS] privacy guard blocks sensitive translation
+[PASS] prompt injection is treated as a signal
+[PASS] Workers AI uses direct JSON Schema
+[PASS] AI Gateway caching is disabled
+[PASS] provider timeout is bounded
+[PASS] invalid structured output can use fallback model
+[PASS] quota is reserved before every provider call
+[PASS] organization Owner controls AI quota
+[PASS] session managers control AI features
+[PASS] AI verdict is marked as reference
+[PASS] viewer labels AI translations
+[PASS] viewer retains original before translation
+[PASS] admin and viewer SPA mirrors match
+[PASS] Workers AI binding exists
+[PASS] AI Queue producer exists
+[PASS] AI Queue consumer is bounded
+[PASS] current non-deprecated model is configured
+[PASS] package version identifies Stage 7
+[PASS] Stage 7 test command exists
+[PASS] CI runs Stage 7
+[PASS] safe deployment runs Stage 7
+[PASS] production deployment stays manual
+[PASS] Stage 7 test file exists
+[PASS] prior migration unchanged: 0001_initial_schema.sql
+[PASS] prior migration unchanged: 0002_auth_security.sql
+[PASS] prior migration unchanged: 0003_comments.sql
+[PASS] prior migration unchanged: 0004_precision_hardening.sql
+[PASS] prior migration unchanged: 0005_comment_content_guards.sql
+[PASS] prior migration unchanged: 0006_manual_moderation.sql
+[PASS] prior migration unchanged: 0007_realtime.sql
+[PASS] prior migration unchanged: 0008_email_auth.sql
+[PASS] prior migration unchanged: 0009_account_lifecycle.sql
+
+Stage 7 boundary summary: 52 passed, 0 failed, 52 total.

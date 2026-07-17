@@ -1,0 +1,155 @@
+name: Deploy production
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact 40-character commit SHA to deploy
+        required: true
+        type: string
+      confirmation:
+        description: Type DEPLOY_PRODUCTION to continue
+        required: true
+        type: string
+      apply_legacy_db_migrations:
+        description: Apply pending legacy DB migrations
+        required: true
+        default: true
+        type: boolean
+      apply_v2_db_migrations:
+        description: Apply pending DB_V2 migrations
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Validate migrate and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: production
+    steps:
+      - name: Verify explicit immutable target
+        shell: bash
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          test "$CONFIRMATION" = "DEPLOY_PRODUCTION"
+          [[ "$COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]
+
+      - name: Checkout selected commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Verify and record selected revision
+        id: revision
+        shell: bash
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "${ACTUAL_SHA,,}" = "${COMMIT_SHA,,}"
+          echo "sha=$ACTUAL_SHA" >> "$GITHUB_OUTPUT"
+          git log -1 --oneline
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify production configuration
+        run: npm run verify:deployment
+
+      - name: Require deployment secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AUTH_RATE_LIMIT_PEPPER: ${{ secrets.AUTH_RATE_LIMIT_PEPPER }}
+          PUBLIC_RATE_LIMIT_PEPPER: ${{ secrets.PUBLIC_RATE_LIMIT_PEPPER }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$AUTH_RATE_LIMIT_PEPPER"
+          test -n "$PUBLIC_RATE_LIMIT_PEPPER"
+          test -n "$TURNSTILE_SECRET_KEY"
+
+      - name: Run full local validation
+        run: |
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run check:stage07-7
+          npm run deploy:dry-run
+          npm audit
+
+      - name: Apply legacy D1 migrations
+        if: ${{ inputs.apply_legacy_db_migrations }}
+        run: npx wrangler d1 migrations apply class_comment_db --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Apply DB_V2 migrations
+        if: ${{ inputs.apply_v2_db_migrations }}
+        run: npx wrangler d1 migrations apply class_comment_db_v2 --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify DB_V2 integrity and active Owner
+        run: node scripts/verify-remote-d1.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify email-authentication cutover readiness
+        run: npm run verify:email-auth-ready
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Configure authentication secrets
+        run: node scripts/configure-rate-limit-secret.mjs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AUTH_RATE_LIMIT_PEPPER: ${{ secrets.AUTH_RATE_LIMIT_PEPPER }}
+          PUBLIC_RATE_LIMIT_PEPPER: ${{ secrets.PUBLIC_RATE_LIMIT_PEPPER }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+
+      - name: Deploy selected revision
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Run production smoke checks
+        run: node scripts/smoke-production.mjs
+
+      - name: Write deployment summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "## Production deployment"
+            echo ""
+            echo "- Requested commit: \`${{ inputs.commit_sha }}\`"
+            echo "- Checked-out commit: \`${{ steps.revision.outputs.sha }}\`"
+            echo "- Legacy migrations: \`${{ inputs.apply_legacy_db_migrations }}\`"
+            echo "- DB_V2 migrations: \`${{ inputs.apply_v2_db_migrations }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

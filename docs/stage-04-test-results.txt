@@ -1,0 +1,933 @@
+# CPCV Stage 4 Final Test Results
+
+Execution date: 2026-07-13
+
+Functional total: 487 passed, 0 failed.
+Boundary total: 36 passed, 0 failed.
+
+===== stage2.log =====
+
+> class-pdf-comment-viewer-v01@0.1.0 db:v2:test
+> node scripts/test-db-v2.mjs
+
+[PASS] migration applies to an empty local D1
+[PASS] first migration run applies 0001_initial_schema.sql
+[PASS] second migration apply exits successfully
+[PASS] second migration apply is a no-op
+[PASS] migration history contains exactly the Stage 2 and Stage 3-A migrations after the second apply
+[PASS] exactly the seven application tables exist
+[PASS] bootstrap schema fingerprint matches the migrated canonical schema
+[PASS] all table columns, types, nullability, defaults, and primary keys match the design
+[PASS] all foreign keys and ON DELETE rules match the design
+[PASS] all 17 specified indexes exist
+[PASS] PRAGMA foreign_key_check returns zero rows
+[PASS] D1-supported PRAGMA quick_check returns ok
+[PASS] underlying local SQLite PRAGMA integrity_check returns ok
+[PASS] seed organizations
+[PASS] seed users
+[PASS] seed organization memberships
+[PASS] organization rejects a NULL primary key
+[PASS] organization rejects an invalid status
+[PASS] organization rejects an empty name
+[PASS] organization rejects a whitespace-only name
+[PASS] organization names are not globally unique
+[PASS] organization rejects updated_at before created_at
+[PASS] active organization rejects deleted_at
+[PASS] deleted organization requires deleted_at
+[PASS] deleted organization accepts a consistent deleted_at
+[PASS] user rejects a NULL primary key
+[PASS] user rejects an exact duplicate login ID
+[PASS] user rejects a case-only duplicate login ID
+[PASS] user rejects an uppercase unique login ID
+[PASS] user rejects an empty login ID
+[PASS] user rejects forbidden login ID characters
+[PASS] user rejects an invalid status
+[PASS] user rejects a whitespace-only display name
+[PASS] user rejects a short password hash
+[PASS] user rejects password_changed_at before creation
+[PASS] active user rejects deleted_at
+[PASS] deleted user requires deleted_at
+[PASS] deleted user accepts a consistent deleted_at
+[PASS] membership rejects a duplicate organization and user pair
+[PASS] one user can belong to another organization
+[PASS] membership rejects a missing organization
+[PASS] membership rejects a missing user
+[PASS] membership rejects an invalid role
+[PASS] membership rejects an invalid status
+[PASS] active membership rejects removed_at
+[PASS] membership rejects updated_at before created_at
+[PASS] removed membership requires removed_at
+[PASS] removed membership accepts a consistent removed_at
+[PASS] auth session rejects a NULL primary key
+[PASS] valid organization-bound auth session is accepted
+[PASS] auth session rejects a user without membership
+[PASS] auth session rejects a duplicate token hash
+[PASS] auth session rejects a duplicate CSRF hash
+[PASS] auth session rejects a NULL organization
+[PASS] auth session rejects last_seen_at before creation
+[PASS] auth session rejects idle expiry at last_seen_at
+[PASS] auth session rejects idle expiry beyond absolute expiry
+[PASS] auth session rejects revoked_at before creation
+[PASS] password reset token rejects a NULL primary key
+[PASS] valid password reset token is accepted
+[PASS] password reset rejects duplicate token hash
+[PASS] password reset rejects a missing user
+[PASS] password reset rejects a missing creator
+[PASS] password reset rejects used_at and revoked_at together
+[PASS] password reset rejects used_at after expiry
+[PASS] password reset rejects revoked_at before creation
+[PASS] password reset rejects expiry at creation
+[PASS] live session rejects a NULL primary key
+[PASS] valid active live session is accepted
+[PASS] live session rejects a missing organization
+[PASS] live session rejects a NULL organization
+[PASS] live session rejects a whitespace-only title
+[PASS] live session rejects a creator outside the organization
+[PASS] live session rejects a duplicate public code
+[PASS] live session rejects a public code with wrong length
+[PASS] live session rejects forbidden public code characters
+[PASS] live session rejects lowercase public codes
+[PASS] live session rejects an invalid display mode
+[PASS] live session rejects display seconds below range
+[PASS] live session rejects display seconds above range
+[PASS] live session rejects posting boolean outside 0 and 1
+[PASS] live session rejects visibility boolean outside 0 and 1
+[PASS] ended live session rejects posting enabled
+[PASS] ended live session rejects comments visible
+[PASS] active live session rejects ended_at
+[PASS] live session rejects expiry at started_at
+[PASS] ended live session rejects ended_at before started_at
+[PASS] ended live session requires ended_at
+[PASS] deleted live session requires deleted_at
+[PASS] consistent ended live session is accepted
+[PASS] deleted live session rejects deleted_at before ended_at
+[PASS] consistent deleted live session is accepted
+[PASS] audit log rejects a NULL primary key
+[PASS] valid system audit log is accepted
+[PASS] global system audit log with no organization is accepted
+[PASS] valid user audit log is accepted
+[PASS] system audit rejects actor user ID
+[PASS] system audit rejects actor role
+[PASS] user audit requires actor user ID
+[PASS] audit log rejects invalid JSON
+[PASS] audit log rejects a whitespace-only action
+[PASS] audit log rejects a missing organization reference
+[PASS] audit log rejects a missing actor user
+[PASS] audit log rejects an invalid actor role
+[PASS] organization A-only user cannot create organization B auth session
+[PASS] organization A-only user cannot create organization B live session
+[PASS] multi-organization user can create organization A auth session
+[PASS] multi-organization user can create organization B auth session
+[PASS] organization physical deletion is restricted while memberships exist
+[PASS] user physical deletion is restricted while memberships exist
+[PASS] membership list query uses an index
+[PASS] organization owner query uses an index
+[PASS] active live session query uses an index
+[PASS] auth token lookup uses a unique index
+[PASS] expired auth cleanup query uses an index
+[PASS] organization audit query uses an index
+[PASS] remote bootstrap verifies the actual D1 UUID and name before reading the password
+[PASS] bootstrap utility binds only to loopback and uses remote=true for remote D1 access
+[PASS] bootstrap verifies migration, table set, foreign keys, and quick_check before writing
+[PASS] remote bootstrap rejects a missing database ID
+[PASS] local bootstrap rejects a remote database ID argument
+[PASS] remote bootstrap rejects --password-stdin
+[PASS] remote bootstrap rejects the legacy DB UUID
+[PASS] remote bootstrap rejects non-TTY password input
+[PASS] bootstrap test database migration succeeds
+[PASS] bootstrap schema mismatch fixture is installed
+[PASS] bootstrap rejects a DB whose application table set differs from the Stage 2 schema
+[PASS] schema mismatch bootstrap leaves the database empty
+[PASS] schema mismatch bootstrap removes its temporary config
+[PASS] bootstrap schema mismatch fixture is removed
+[PASS] bootstrap missing-index fixture is installed
+[PASS] bootstrap rejects a DB whose schema objects differ even when all seven tables remain
+[PASS] missing-index bootstrap leaves the database empty
+[PASS] missing-index bootstrap removes its temporary config
+[PASS] bootstrap missing-index fixture is removed
+[PASS] bootstrap rollback trigger is installed
+[PASS] bootstrap reports failure when the audit insert is forced to fail
+[PASS] bootstrap output does not contain the plaintext password on failure
+[PASS] failed bootstrap removes its temporary config
+[PASS] failed bootstrap rolls back organization, user, membership, and audit together
+[PASS] bootstrap rollback trigger is removed
+[PASS] bootstrap creates the first Owner successfully
+[PASS] bootstrap output does not contain the plaintext password on success
+[PASS] successful bootstrap removes its temporary config
+[PASS] bootstrap creates organization, active Owner membership, and system audit
+[PASS] bootstrap rejects a second execution by default
+[PASS] second bootstrap output does not contain the plaintext password
+[PASS] rejected second bootstrap removes its temporary config
+[PASS] second bootstrap leaves exactly one organization
+[PASS] plaintext bootstrap password is absent from stored user fields
+[PASS] bootstrap output does not contain the stored password hash or salt
+[PASS] foreign keys remain clean after all schema tests
+[PASS] D1 quick_check remains ok after all schema tests
+[PASS] local SQLite integrity_check remains ok after all schema tests
+
+DB_V2 test summary: 154 passed, 0 failed, 154 total.
+
+===== stage3a.log =====
+
+> class-pdf-comment-viewer-v01@0.1.0 db:v2:test:stage03a
+> node scripts/test-auth-v2.mjs
+
+[PASS] 0001 and 0002 migrations apply to an empty local D1
+[PASS] migration output includes 0002_auth_security.sql
+[PASS] second Stage 3-A migration apply succeeds
+[PASS] second Stage 3-A migration apply is a no-op
+[PASS] users has all three Stage 3-A security columns
+[PASS] failed_login_count default is zero and NOT NULL
+[PASS] require_password_change default is zero and NOT NULL
+[PASS] idx_users_lock_state exists
+[PASS] failed_login_count CHECK rejects negative values
+[PASS] require_password_change CHECK rejects values outside 0 and 1
+[PASS] password salt contains at least 16 random bytes
+[PASS] session token contains at least 32 random bytes
+[PASS] two generated tokens differ
+[PASS] 11-character password is rejected
+[PASS] 12-character password is accepted
+[PASS] 128-character password is accepted
+[PASS] 129-character password is rejected
+[PASS] Unicode password is accepted
+[PASS] password identical to login ID is rejected
+[PASS] password whitespace is not trimmed
+[PASS] PBKDF2 v2 password verifies
+[PASS] wrong PBKDF2 v2 password does not verify
+[PASS] legacy PBKDF2 v1 password verifies during migration
+[PASS] legacy scheme requires rehash
+[PASS] current scheme does not require rehash
+[PASS] constant-time equality accepts equal strings
+[PASS] constant-time equality rejects different strings
+[PASS] token hash is deterministic
+[PASS] token hash does not equal raw token
+[PASS] empty token hash input is rejected
+[PASS] production cookie uses __Host prefix
+[PASS] production cookie has Secure
+[PASS] production cookie has HttpOnly
+[PASS] production cookie has SameSite Strict
+[PASS] production cookie has Path root
+[PASS] production cookie has no Domain attribute
+[PASS] production cookie has 12-hour Max-Age
+[PASS] logout cookie uses same production name
+[PASS] logout cookie has Max-Age zero
+[PASS] logout cookie preserves Secure and HttpOnly
+[PASS] local cookie uses development name
+[PASS] local cookie token is parsed
+[PASS] local cookie omits Secure
+[PASS] APP_ENV local is rejected on a remote hostname
+[PASS] cookie parser keeps first duplicate value
+[PASS] cookie parser decodes values
+[PASS] GET is not unsafe
+[PASS] POST is unsafe
+[PASS] exact Origin succeeds
+[PASS] Origin rejects different scheme
+[PASS] Origin rejects different host
+[PASS] Origin rejects different port
+[PASS] Origin rejects suffix attack
+[PASS] Origin rejects multiple values
+[PASS] Origin rejects missing value
+[PASS] misconfigured AUTH_ORIGIN is rejected
+[PASS] JSON content type is accepted
+[PASS] non-JSON content type is rejected
+[PASS] correct CSRF token succeeds
+[PASS] missing CSRF token is rejected
+[PASS] modified CSRF token is rejected
+[PASS] CSRF token from another session is rejected
+[PASS] GET does not require CSRF
+[PASS] owner permission owner:manage matches matrix
+[PASS] owner permission audit:read matches matrix
+[PASS] admin permission teacher:manage matches matrix
+[PASS] admin permission admin:manage matches matrix
+[PASS] admin permission owner:manage matches matrix
+[PASS] teacher permission session:manage_own matches matrix
+[PASS] teacher permission members:list matches matrix
+[PASS] teacher permission audit:read matches matrix
+[PASS] Owner can manage Admin
+[PASS] Owner cannot issue reset token to Owner
+[PASS] Admin can manage Teacher
+[PASS] Admin cannot manage Admin
+[PASS] Admin cannot manage Owner
+[PASS] Teacher cannot manage members
+[PASS] unknown member action is rejected
+[PASS] requirePermission returns authorized context
+[PASS] requirePermission rejects unauthorized role
+[PASS] requireRole returns allowed role
+[PASS] requireRole rejects disallowed role
+[PASS] rate-limit key is deterministic
+[PASS] rate-limit key does not contain raw identifier
+[PASS] rate limiter receives Cloudflare object argument
+[PASS] successful rate limiter allows request
+[PASS] failed rate limiter produces 429
+[PASS] limiter failure fails open
+[PASS] limiter failure callback runs
+[PASS] limiter and failure callback outage still fails open
+[PASS] missing local limiter fails open
+[PASS] session material has independent raw tokens
+[PASS] session token hash does not expose raw token
+[PASS] CSRF token hash does not expose raw token
+[PASS] session idle expiry is two hours
+[PASS] session absolute expiry is twelve hours
+[PASS] session does not refresh before five minutes
+[PASS] session refreshes at five minutes
+[PASS] idle refresh never exceeds absolute expiry
+[PASS] session internal data is accessible to middleware utilities
+[PASS] session internal data is not enumerable
+[PASS] middleware returns exact public AuthContext fields
+[PASS] middleware AuthContext uses session organization
+[PASS] middleware performs one JOIN lookup
+[PASS] middleware does not refresh last_seen before five minutes
+[PASS] lookup SQL uses a bound token hash
+[PASS] middleware refreshes last_seen after five minutes
+[PASS] middleware refresh is conditional on old last_seen value
+[PASS] refreshed idle expiry does not exceed absolute expiry
+[PASS] missing session cookie is rejected
+[PASS] unknown session token is rejected
+[PASS] revoked session is rejected
+[PASS] idle-expired session is rejected
+[PASS] absolute-expired session is rejected
+[PASS] invalid last_seen_at is rejected
+[PASS] suspended user is rejected
+[PASS] suspended organization is rejected
+[PASS] suspended membership is rejected
+[PASS] removed membership is rejected
+[PASS] invalid database role is rejected
+
+Stage 3-A test summary: 120 passed, 0 failed, 120 total.
+
+===== stage3b.log =====
+
+> class-pdf-comment-viewer-v01@0.1.0 db:v2:test:stage03b
+> node --no-warnings scripts/test-auth-api-v2.mjs
+
+[PASS] single-organization login succeeds and ignores supplied organizationId
+[PASS] login response uses no-store security headers
+[PASS] login response does not expose raw session token
+[PASS] login selects the server-side active organization
+[PASS] local login sets HttpOnly SameSite Strict dev cookie
+[PASS] D1 stores only session token hash
+[PASS] D1 stores only CSRF token hash
+[PASS] session lookup succeeds
+[PASS] GET session rotates CSRF token
+[PASS] rotated CSRF token hash replaces prior hash
+[PASS] authenticated query organization selector is rejected
+[PASS] organization selector separator variants are rejected
+[PASS] logout without CSRF is rejected
+[PASS] logout rejects body organization selector
+[PASS] logout succeeds with Origin and CSRF
+[PASS] logout clears identical cookie name
+[PASS] logged-out token replay is rejected
+[PASS] unknown user and wrong password share generic response
+[PASS] suspended user receives generic 401
+[PASS] suspended membership receives generic 401
+[PASS] multiple active organizations require selection
+[PASS] invalid selected organization remains generic
+[PASS] valid selected organization creates scoped session
+[PASS] login rejects a different Origin
+[PASS] login rejects a missing Origin
+[PASS] each login issues a new session token
+[PASS] suspended organization receives generic 401
+[PASS] obsolete reset request endpoint does not exist
+[PASS] deleted user receives generic 401
+[PASS] user without membership receives generic 401
+[PASS] legacy password scheme is rehashed on successful login
+[PASS] legacy rehash preserves actual password change time
+[PASS] failed login 1 returns generic 401
+[PASS] failed login 2 returns generic 401
+[PASS] failed login 3 returns generic 401
+[PASS] failed login 4 returns generic 401
+[PASS] failed login 5 returns generic 401
+[PASS] fifth failure sets a 15-minute account lock
+[PASS] correct password is rejected while locked
+[PASS] login succeeds after lock expiry
+[PASS] successful login clears failure count and lock
+[PASS] IP limiter rejection returns 429 and Retry-After
+[PASS] account limiter rejection returns 429
+[PASS] limiter failure fails open while D1 authentication continues
+[PASS] limiter failure audit contains no raw IP or login ID
+[PASS] password change rejects incorrect current password
+[PASS] password change enforces 12-character minimum
+[PASS] password change rejects body organization selector
+[PASS] password change succeeds and issues a fresh session
+[PASS] password change revokes the old session
+[PASS] old password no longer authenticates
+[PASS] new password authenticates
+[PASS] password change audit exists
+[PASS] owner can read current organization
+[PASS] owner can list members with stable pagination
+[PASS] member cursor returns remaining members
+[PASS] owner creates a new teacher
+[PASS] new member requires password change
+[PASS] global duplicate login ID returns 409
+[PASS] owner can add an explicit existing user membership
+[PASS] admin cannot create another admin
+[PASS] admin can create a teacher
+[PASS] admin can suspend a teacher
+[PASS] membership suspension invalidates existing session
+[PASS] admin cannot manage another admin
+[PASS] admin cannot promote a teacher to admin
+[PASS] teacher cannot list organization members
+[PASS] owner may demote a non-final owner
+[PASS] role change revokes the target session
+[PASS] CSRF token from another session is rejected
+[PASS] last active owner cannot be suspended
+[PASS] last active owner cannot be removed
+[PASS] owner can remove a teacher membership
+[PASS] removed membership cannot be silently reactivated by PATCH
+[PASS] reset token issue accepts an omitted JSON body
+[PASS] owner can issue one-time reset token for admin
+[PASS] reset token is stored only as SHA-256 hash
+[PASS] issuing a new reset token revokes the previous token
+[PASS] admin cannot issue reset token for admin
+[PASS] admin can issue reset token for a teacher
+[PASS] owner reset token issuance is forbidden
+[PASS] multi-organization user reset requires system operator
+[PASS] expired reset token is rejected
+[PASS] revoked reset token is rejected
+[PASS] issued reset token changes password
+[PASS] reset success revokes other unused tokens
+[PASS] used reset token cannot be replayed
+[PASS] password reset revokes all existing sessions
+[PASS] reset password authenticates
+[PASS] owner can read organization audit log
+[PASS] admin can read organization audit log
+[PASS] multi-organization session remains fixed to authenticated organization
+[PASS] audit action filter is exact
+[PASS] audit response contains no password or raw reset token
+[PASS] organization header selector is rejected
+[PASS] malformed encoded member path returns a controlled 400
+[PASS] member update reports failure when its audit write fails
+[PASS] failed member update rolls back membership state
+[PASS] failed member update rolls back session revocation
+[PASS] member creation reports failure when its audit write fails
+[PASS] failed member creation rolls back the new user
+[PASS] password change reports failure when its audit write fails
+[PASS] failed password change rolls back session revocation
+[PASS] failed password change preserves the old password
+[PASS] failed password change does not install the new password
+[PASS] password reset reports failure when its audit write fails
+[PASS] failed password reset leaves token unused
+[PASS] failed password reset rolls back session revocation
+[PASS] reset token remains usable after rolled-back failure
+
+Stage 3-B API test summary: 109 passed, 0 failed, 109 total.
+
+===== stage3c.log =====
+
+> class-pdf-comment-viewer-v01@0.1.0 db:v2:test:stage03c
+> node --no-warnings scripts/test-private-v2.mjs
+
+[PASS] V2 flag disables legacy teacher login with 410
+[PASS] V2 flag disables all legacy master APIs with 410
+[PASS] Bearer token cannot authenticate V2 private API
+[PASS] HttpOnly-cookie session authenticates private API
+[PASS] private API rejects organization selector query
+[PASS] production refuses AUTH_V2_ENABLED=0
+[PASS] teacher creates a session
+[PASS] DB_V2 and legacy DB use identical session identity
+[PASS] legacy teacher projection uses V2 user id
+[PASS] session creation audit is recorded
+[PASS] student public session API reads the V2 source of truth
+[PASS] legacy student message shape remains accepted
+[PASS] public message reaches the verified comment room path
+[PASS] teacher sees the created own session
+[PASS] Admin sees all organization sessions
+[PASS] Teacher cannot read another teacher session
+[PASS] other organization cannot read session by id
+[PASS] Teacher cannot update another teacher session
+[PASS] Admin updates a session in the same organization
+[PASS] settings update remains identical in both databases
+[PASS] settings update reaches comment room state
+[PASS] settings body cannot select another organization
+[PASS] legacy projection failure never returns success
+[PASS] failed create is compensated to deleted in DB_V2
+[PASS] failed create records projection audit
+[PASS] failed create leaves no legacy session
+[PASS] compensation audit failure never returns success
+[PASS] audit failure fallback still deletes the orphan V2 session
+[PASS] audit failure fallback leaves no legacy session
+[PASS] audit failure fallback records projection inconsistency
+[PASS] V2 settings failure returns an error
+[PASS] legacy settings are rolled back after V2 failure
+[PASS] V2 settings remain unchanged after atomic batch failure
+[PASS] rollback failure returns generic 500
+[PASS] failed rollback is left visible as safe-side legacy state
+[PASS] rollback failure records projection inconsistency
+[PASS] V2 end failure returns error
+[PASS] end failure keeps legacy projection safely stopped
+[PASS] end failure does not falsely end DB_V2
+[PASS] end failure records projection inconsistency
+[PASS] V2 delete failure returns error
+[PASS] delete failure keeps legacy projection safely deleted
+[PASS] delete failure records projection inconsistency
+[PASS] authenticated clear operation succeeds
+[PASS] clear reaches unchanged comment room endpoint
+[PASS] clear operation is audited
+[PASS] cookie-authenticated WebSocket bridge reaches comment room
+[PASS] cross-origin WebSocket request is rejected
+
+Stage 3-C integration test summary: 48 passed, 0 failed, 48 total.
+
+===== stage4.log =====
+
+> class-pdf-comment-viewer-v01@0.1.0 db:v2:test:stage04
+> node --no-warnings scripts/test-comments-v2.mjs
+
+[PASS] Stage 4 creates three comment tables
+[PASS] comment indexes exist
+[PASS] live session organization composite unique index exists
+[PASS] foreign key check is clean after migration
+[PASS] quick check is ok
+[PASS] public session GET succeeds
+[PASS] participant cookie is HttpOnly and session-scoped
+[PASS] GET does not create participant row
+[PASS] new public comment returns 201
+[PASS] participant is persisted once
+[PASS] comment is persisted once
+[PASS] created event is persisted atomically
+[PASS] stored comment uses normalized content
+[PASS] stored comment belongs to session organization
+[PASS] comment response uses persistent id
+[PASS] new comment is broadcast with persistent id
+[PASS] same idempotency key returns existing comment
+[PASS] duplicate does not add database rows
+[PASS] duplicate is not broadcast again
+[PASS] different immediate post is rate limited
+[PASS] rate-limited post is not persisted
+[PASS] legacy client without idempotency key remains accepted after rate window is reset
+[PASS] legacy missing key receives compatibility key
+[PASS] NFKC and control normalization is applied
+[PASS] URL is rejected
+[PASS] invalid idempotency key is rejected
+[PASS] overlong message is rejected
+[PASS] direct unverified Durable Object post is rejected
+[PASS] privacy test comment is stored
+[PASS] schema has no IP or user-agent columns
+[PASS] broadcast payload contains no IP or participant token
+[PASS] session owner teacher reads comment history
+[PASS] comment history cursor paginates without duplicate
+[PASS] same organization Admin reads history
+[PASS] another Teacher cannot read history
+[PASS] other organization cannot read history
+[PASS] CSV export succeeds with attachment headers
+[PASS] CSV formula injection is neutralized
+[PASS] CSV does not contain IP address column
+[PASS] csvCell neutralizes leading whitespace formula
+[PASS] buildCommentsCsv quotes embedded double quote
+[PASS] retention fixtures inserted
+[PASS] retention physically deletes only expired comments
+[PASS] comment events cascade with deleted comment
+[PASS] orphan participant is deleted
+[PASS] Admin cannot manually run retention
+[PASS] Owner can run retention maintenance
+[PASS] event insert fault rejects comment operation
+[PASS] event fault rolls back participant and comment
+[PASS] scheduled handler runs retention without remote services
+[PASS] join client no longer stores persistent client id in localStorage
+[PASS] join client sends idempotency key
+[PASS] join client counts Unicode code points
+[PASS] join form avoids UTF-16 maxlength for Unicode limits
+[PASS] viewer CSV uses authenticated server export
+[PASS] viewer local cache no longer records IP
+
+Stage 4 comment persistence test summary: 56 passed, 0 failed, 56 total.
+
+===== stage4-boundaries.log =====
+[PASS] migrations-v2/0001_initial_schema.sql remains unchanged
+[PASS] migrations-v2/0002_auth_security.sql remains unchanged
+[PASS] migrations/0001_init.sql remains unchanged
+[PASS] migrations/0002_drop_documents.sql remains unchanged
+[PASS] migrations/0003_add_comment_display_seconds.sql remains unchanged
+[PASS] migrations/0004_master_auth.sql remains unchanged
+[PASS] migrations/0005_comment_display_mode.sql remains unchanged
+[PASS] src/auth/account-lock.js remains unchanged
+[PASS] src/auth/audit.js remains unchanged
+[PASS] src/auth/cookies.js remains unchanged
+[PASS] src/auth/csrf.js remains unchanged
+[PASS] src/auth/errors.js remains unchanged
+[PASS] src/auth/http.js remains unchanged
+[PASS] src/auth/middleware.js remains unchanged
+[PASS] src/auth/passwords.js remains unchanged
+[PASS] src/auth/permissions.js remains unchanged
+[PASS] src/auth/rate-limit.js remains unchanged
+[PASS] src/auth/request.js remains unchanged
+[PASS] src/auth/sessions.js remains unchanged
+[PASS] .github/workflows/ci.yml remains unchanged
+[PASS] .github/workflows/deploy-production.yml remains unchanged
+[PASS] wrangler.toml remains unchanged
+[PASS] Stage 4 migration creates participants, comments, and comment_events
+[PASS] Stage 4 migration stores no IP or user-agent fields
+[PASS] Stage 4 migration defines idempotency uniqueness
+[PASS] Stage 4 migration defines retention index
+[PASS] public V2 route is active
+[PASS] legacy public comment handler is removed
+[PASS] Worker entrypoint no longer extracts comment IP or legacy client id
+[PASS] Durable Object requires verified public post
+[PASS] Durable Object broadcasts persisted comment data
+[PASS] student client removed persistent localStorage identity
+[PASS] student client sends idempotency key
+[PASS] student client counts Unicode code points
+[PASS] viewer export is server-backed
+[PASS] viewer no longer writes IP to local cache
+
+Stage 4 boundary summary: 36 passed, 0 failed, 36 total.
+
+===== npm-ci.log =====
+
+added 71 packages, and audited 72 packages in 5s
+
+14 packages are looking for funding
+  run `npm fund` for details
+
+found 0 vulnerabilities
+
+===== migration-first.log =====
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+Resource location: local
+
+Use --remote if you want to access the remote instance.
+
+Migrations to be applied:
+┌─────────────────────────┐
+│ name                    │
+├─────────────────────────┤
+│ 0001_initial_schema.sql │
+├─────────────────────────┤
+│ 0002_auth_security.sql  │
+├─────────────────────────┤
+│ 0003_comments.sql       │
+└─────────────────────────┘
+? About to apply 3 migration(s)
+Your database may not be available to serve requests during the migration, continue?
+🤖 Using fallback value in non-interactive context: yes
+🌀 Executing on local database DB_V2 (DB_V2) from ../../../tmp/cpcv-stage4-recheck-migrate/v3/d1:
+🌀 To execute on your remote database, add a --remote flag to your wrangler command.
+🚣 25 commands executed successfully.
+┌─────────────────────────┬────────┐
+│ name                    │ status │
+├─────────────────────────┼────────┤
+│ 0001_initial_schema.sql │ ✅     │
+├─────────────────────────┼────────┤
+│ 0002_auth_security.sql  │ 🕒️    │
+├─────────────────────────┼────────┤
+│ 0003_comments.sql       │ 🕒️    │
+└─────────────────────────┴────────┘
+🌀 Executing on local database DB_V2 (DB_V2) from ../../../tmp/cpcv-stage4-recheck-migrate/v3/d1:
+🌀 To execute on your remote database, add a --remote flag to your wrangler command.
+🚣 6 commands executed successfully.
+┌─────────────────────────┬────────┐
+│ name                    │ status │
+├─────────────────────────┼────────┤
+│ 0001_initial_schema.sql │ ✅     │
+├─────────────────────────┼────────┤
+│ 0002_auth_security.sql  │ ✅     │
+├─────────────────────────┼────────┤
+│ 0003_comments.sql       │ 🕒️    │
+└─────────────────────────┴────────┘
+🌀 Executing on local database DB_V2 (DB_V2) from ../../../tmp/cpcv-stage4-recheck-migrate/v3/d1:
+🌀 To execute on your remote database, add a --remote flag to your wrangler command.
+🚣 14 commands executed successfully.
+┌─────────────────────────┬────────┐
+│ name                    │ status │
+├─────────────────────────┼────────┤
+│ 0001_initial_schema.sql │ ✅     │
+├─────────────────────────┼────────┤
+│ 0002_auth_security.sql  │ ✅     │
+├─────────────────────────┼────────┤
+│ 0003_comments.sql       │ ✅     │
+└─────────────────────────┴────────┘
+
+===== migration-second.log =====
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+Resource location: local
+
+Use --remote if you want to access the remote instance.
+
+✅ No migrations to apply!
+
+===== schema-check.log =====
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+Resource location: local
+
+Use --remote if you want to access the remote instance.
+
+🌀 Executing on local database DB_V2 (DB_V2) from ../../../tmp/cpcv-stage4-recheck-migrate/v3/d1:
+🌀 To execute on your remote database, add a --remote flag to your wrangler command.
+🚣 3 commands executed successfully.
+[
+  {
+    "results": [
+      {
+        "comment_tables": 3
+      }
+    ],
+    "success": true,
+    "meta": {
+      "duration": 1
+    }
+  },
+  {
+    "results": [],
+    "success": true,
+    "meta": {
+      "duration": 0
+    }
+  },
+  {
+    "results": [
+      {
+        "quick_check": "ok"
+      }
+    ],
+    "success": true,
+    "meta": {
+      "duration": 2
+    }
+  }
+]
+
+===== static-and-audit.log =====
+$ npm run check
+
+> class-pdf-comment-viewer-v01@0.1.0 check
+> node scripts/predeploy-check.mjs
+
+project verification passed
+predeploy check passed
+$ npm run check:project
+
+> class-pdf-comment-viewer-v01@0.1.0 check:project
+> node scripts/verify-project.mjs
+
+project verification passed
+$ npm run check:pdf-links
+
+> class-pdf-comment-viewer-v01@0.1.0 check:pdf-links
+> node scripts/verify-pdf-link-logic.mjs
+
+PDF link and reconnect logic verified
+$ npm run deploy:dry-run
+
+> class-pdf-comment-viewer-v01@0.1.0 deploy:dry-run
+> node scripts/predeploy-check.mjs && wrangler deploy --dry-run
+
+project verification passed
+predeploy check passed
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+✨ Read 22 files from the assets directory /mnt/data/CPCV_stage04_implemented_source/public
+Total Upload: 226.57 KiB / gzip: 45.55 KiB
+Your Worker has access to the following bindings:
+Binding                                                               Resource
+env.COMMENT_ROOM (CommentRoom)                                        Durable Object
+env.DB (class_comment_db)                                             D1 Database
+env.DB_V2 (class_comment_db_v2)                                       D1 Database
+env.ASSETS                                                            Assets
+env.APP_ENV ("production")                                            Environment Variable
+env.AUTH_V2_ENABLED ("1")                                             Environment Variable
+env.AUTH_ORIGIN ("https://class-pdf-comment-viewer-v01....")          Environment Variable
+env.PUBLIC_ORIGIN ("https://class-pdf-comment-viewer-v01....")        Environment Variable
+env.TEACHER_ORIGIN ("https://class-pdf-comment-viewer-v01....")       Environment Variable
+
+--dry-run: exiting now.
+$ npm ls --all
+class-pdf-comment-viewer-v01@0.1.0 /mnt/data/CPCV_stage04_implemented_source
++-- pdfjs-dist@5.4.624
+| +-- @napi-rs/canvas@0.1.100
+| | +-- UNMET OPTIONAL DEPENDENCY @napi-rs/canvas-android-arm64@0.1.100
+| | +-- UNMET OPTIONAL DEPENDENCY @napi-rs/canvas-darwin-arm64@0.1.100
+| | +-- UNMET OPTIONAL DEPENDENCY @napi-rs/canvas-darwin-x64@0.1.100
+| | +-- UNMET OPTIONAL DEPENDENCY @napi-rs/canvas-linux-arm-gnueabihf@0.1.100
+| | +-- UNMET OPTIONAL DEPENDENCY @napi-rs/canvas-linux-arm64-gnu@0.1.100
+| | +-- UNMET OPTIONAL DEPENDENCY @napi-rs/canvas-linux-arm64-musl@0.1.100
+| | +-- UNMET OPTIONAL DEPENDENCY @napi-rs/canvas-linux-riscv64-gnu@0.1.100
+| | +-- @napi-rs/canvas-linux-x64-gnu@0.1.100
+| | +-- @napi-rs/canvas-linux-x64-musl@0.1.100
+| | +-- UNMET OPTIONAL DEPENDENCY @napi-rs/canvas-win32-arm64-msvc@0.1.100
+| | `-- UNMET OPTIONAL DEPENDENCY @napi-rs/canvas-win32-x64-msvc@0.1.100
+| `-- node-readable-to-web-readable-stream@0.4.2
++-- qrcode@1.5.4
+| +-- dijkstrajs@1.0.3
+| +-- pngjs@5.0.0
+| `-- yargs@15.4.1
+|   +-- cliui@6.0.0
+|   | +-- string-width@4.2.3 deduped
+|   | +-- strip-ansi@6.0.1
+|   | | `-- ansi-regex@5.0.1
+|   | `-- wrap-ansi@6.2.0
+|   |   +-- ansi-styles@4.3.0
+|   |   | `-- color-convert@2.0.1
+|   |   |   `-- color-name@1.1.4
+|   |   +-- string-width@4.2.3 deduped
+|   |   `-- strip-ansi@6.0.1 deduped
+|   +-- decamelize@1.2.0
+|   +-- find-up@4.1.0
+|   | +-- locate-path@5.0.0
+|   | | `-- p-locate@4.1.0
+|   | |   `-- p-limit@2.3.0
+|   | |     `-- p-try@2.2.0
+|   | `-- path-exists@4.0.0
+|   +-- get-caller-file@2.0.5
+|   +-- require-directory@2.1.1
+|   +-- require-main-filename@2.0.0
+|   +-- set-blocking@2.0.0
+|   +-- string-width@4.2.3
+|   | +-- emoji-regex@8.0.0
+|   | +-- is-fullwidth-code-point@3.0.0
+|   | `-- strip-ansi@6.0.1 deduped
+|   +-- which-module@2.0.1
+|   +-- y18n@4.0.3
+|   `-- yargs-parser@18.1.3
+|     +-- camelcase@5.3.1
+|     `-- decamelize@1.2.0 deduped
+`-- wrangler@4.110.0
+  +-- @cloudflare/kv-asset-handler@0.5.0
+  +-- @cloudflare/unenv-preset@2.16.1
+  | +-- unenv@2.0.0-rc.24 deduped
+  | `-- workerd@1.20260708.1 deduped
+  +-- UNMET OPTIONAL DEPENDENCY @cloudflare/workers-types@^5.20260708.1
+  +-- blake3-wasm@2.1.5
+  +-- esbuild@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/aix-ppc64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/android-arm@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/android-arm64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/android-x64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/darwin-arm64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/darwin-x64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/freebsd-arm64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/freebsd-x64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/linux-arm@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/linux-arm64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/linux-ia32@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/linux-loong64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/linux-mips64el@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/linux-ppc64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/linux-riscv64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/linux-s390x@0.28.1
+  | +-- @esbuild/linux-x64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/netbsd-arm64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/netbsd-x64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/openbsd-arm64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/openbsd-x64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/openharmony-arm64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/sunos-x64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/win32-arm64@0.28.1
+  | +-- UNMET OPTIONAL DEPENDENCY @esbuild/win32-ia32@0.28.1
+  | `-- UNMET OPTIONAL DEPENDENCY @esbuild/win32-x64@0.28.1
+  +-- UNMET OPTIONAL DEPENDENCY fsevents@2.3.3
+  +-- miniflare@4.20260708.1
+  | +-- @cspotcode/source-map-support@0.8.1
+  | | `-- @jridgewell/trace-mapping@0.3.9
+  | |   +-- @jridgewell/resolve-uri@3.1.2
+  | |   `-- @jridgewell/sourcemap-codec@1.5.5
+  | +-- sharp@0.34.5
+  | | +-- @img/colour@1.1.0
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-darwin-arm64@0.34.5
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-darwin-x64@0.34.5
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-libvips-darwin-arm64@1.2.4
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-libvips-darwin-x64@1.2.4
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-libvips-linux-arm@1.2.4
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-libvips-linux-arm64@1.2.4
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-libvips-linux-ppc64@1.2.4
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-libvips-linux-riscv64@1.2.4
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-libvips-linux-s390x@1.2.4
+  | | +-- @img/sharp-libvips-linux-x64@1.2.4
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-libvips-linuxmusl-arm64@1.2.4
+  | | +-- @img/sharp-libvips-linuxmusl-x64@1.2.4
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-linux-arm@0.34.5
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-linux-arm64@0.34.5
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-linux-ppc64@0.34.5
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-linux-riscv64@0.34.5
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-linux-s390x@0.34.5
+  | | +-- @img/sharp-linux-x64@0.34.5
+  | | | `-- @img/sharp-libvips-linux-x64@1.2.4 deduped
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-linuxmusl-arm64@0.34.5
+  | | +-- @img/sharp-linuxmusl-x64@0.34.5
+  | | | `-- @img/sharp-libvips-linuxmusl-x64@1.2.4 deduped
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-wasm32@0.34.5
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-win32-arm64@0.34.5
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-win32-ia32@0.34.5
+  | | +-- UNMET OPTIONAL DEPENDENCY @img/sharp-win32-x64@0.34.5
+  | | +-- detect-libc@2.1.2
+  | | `-- semver@7.8.5
+  | +-- undici@7.28.0
+  | +-- workerd@1.20260708.1 deduped
+  | +-- ws@8.21.0
+  | | +-- UNMET OPTIONAL DEPENDENCY bufferutil@^4.0.1
+  | | `-- UNMET OPTIONAL DEPENDENCY utf-8-validate@>=5.0.2
+  | `-- youch@4.1.0-beta.10
+  |   +-- @poppinss/colors@4.1.6
+  |   | `-- kleur@4.1.5
+  |   +-- @poppinss/dumper@0.6.5
+  |   | +-- @poppinss/colors@4.1.6 deduped
+  |   | +-- @sindresorhus/is@7.2.0
+  |   | `-- supports-color@10.2.2
+  |   +-- @speed-highlight/core@1.2.17
+  |   +-- cookie@1.1.1
+  |   `-- youch-core@0.3.3
+  |     +-- @poppinss/exception@1.2.3
+  |     `-- error-stack-parser-es@1.0.5
+  +-- path-to-regexp@6.3.0
+  +-- unenv@2.0.0-rc.24
+  | `-- pathe@2.0.3
+  `-- workerd@1.20260708.1
+    +-- UNMET OPTIONAL DEPENDENCY @cloudflare/workerd-darwin-64@1.20260708.1
+    +-- UNMET OPTIONAL DEPENDENCY @cloudflare/workerd-darwin-arm64@1.20260708.1
+    +-- @cloudflare/workerd-linux-64@1.20260708.1
+    +-- UNMET OPTIONAL DEPENDENCY @cloudflare/workerd-linux-arm64@1.20260708.1
+    `-- UNMET OPTIONAL DEPENDENCY @cloudflare/workerd-windows-64@1.20260708.1
+
+$ npm audit
+found 0 vulnerabilities
+$ npm audit --omit=dev
+found 0 vulnerabilities
+
+===== final-check.log =====
+
+> class-pdf-comment-viewer-v01@0.1.0 check
+> node scripts/predeploy-check.mjs
+
+project verification passed
+predeploy check passed
+
+> class-pdf-comment-viewer-v01@0.1.0 check:project
+> node scripts/verify-project.mjs
+
+project verification passed
+
+> class-pdf-comment-viewer-v01@0.1.0 check:pdf-links
+> node scripts/verify-pdf-link-logic.mjs
+
+PDF link and reconnect logic verified
+
+> class-pdf-comment-viewer-v01@0.1.0 deploy:dry-run
+> node scripts/predeploy-check.mjs && wrangler deploy --dry-run
+
+project verification passed
+predeploy check passed
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+✨ Read 22 files from the assets directory /mnt/data/CPCV_stage04_implemented_source/public
+Total Upload: 226.57 KiB / gzip: 45.55 KiB
+Your Worker has access to the following bindings:
+Binding                                                               Resource
+env.COMMENT_ROOM (CommentRoom)                                        Durable Object
+env.DB (class_comment_db)                                             D1 Database
+env.DB_V2 (class_comment_db_v2)                                       D1 Database
+env.ASSETS                                                            Assets
+env.APP_ENV ("production")                                            Environment Variable
+env.AUTH_V2_ENABLED ("1")                                             Environment Variable
+env.AUTH_ORIGIN ("https://class-pdf-comment-viewer-v01....")          Environment Variable
+env.PUBLIC_ORIGIN ("https://class-pdf-comment-viewer-v01....")        Environment Variable
+env.TEACHER_ORIGIN ("https://class-pdf-comment-viewer-v01....")       Environment Variable
+
+--dry-run: exiting now.
+found 0 vulnerabilities

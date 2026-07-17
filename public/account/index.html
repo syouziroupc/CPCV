@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>アカウント設定</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.6.5">
+</head>
+<body class="page">
+  <main class="card narrow">
+    <div class="row between wrap">
+      <div>
+        <p class="eyebrow">CPCV</p>
+        <h1>アカウント設定</h1>
+      </div>
+      <a class="button" href="/admin">授業管理へ</a>
+    </div>
+    <section id="loadingSection" class="section"><p class="status">読み込んでいます。</p></section>
+    <section id="accountSection" class="hidden">
+      <div class="info-box">
+        <p><strong id="displayName"></strong></p>
+        <p id="emailState" class="break"></p>
+        <p id="organizationState" class="muted break pre-line"></p>
+      </div>
+      <section class="section">
+        <h2 id="emailHeading">メールアドレスを変更</h2>
+        <p id="emailExplanation" class="muted">新しいメールアドレスへ確認リンクを送ります。確認後は全端末からログアウトします。</p>
+        <form id="emailForm">
+          <label class="label" for="newEmail">新しいメールアドレス</label>
+          <input id="newEmail" class="input" type="email" autocomplete="email" maxlength="254" required>
+          <label class="label" for="currentPassword">現在のパスワード</label>
+          <input id="currentPassword" class="input" type="password" autocomplete="current-password" maxlength="128" required>
+          <button id="emailButton" class="button primary auth-submit" type="submit">確認メールを送る</button>
+        </form>
+        <p id="pendingEmail" class="muted break"></p>
+        <p id="status" class="status" aria-live="polite"></p>
+      </section>
+      <section class="section">
+        <button id="logoutButton" class="button danger" type="button">ログアウト</button>
+      </section>
+    </section>
+    <section id="loginRequired" class="hidden section">
+      <p>ログインが必要です。</p>
+      <a class="button primary" href="/admin">ログイン画面へ</a>
+    </section>
+  </main>
+  <script type="module" src="/assets/account.js?v=0.6.5"></script>
+</body>
+</html>

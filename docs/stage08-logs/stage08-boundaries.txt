@@ -1,0 +1,23 @@
+[PASS] Stage 8 migration exists
+[PASS] PDF metadata stores SHA-256 and page count
+[PASS] PDF metadata has no filename, page text, blob, or remote URL
+[PASS] browser computes PDF SHA-256 locally
+[PASS] PDF bind request sends metadata only
+[PASS] comments link to server current PDF page
+[PASS] pre-Stage-8 comment compatibility is guarded
+[PASS] public understanding endpoint exists
+[PASS] understanding uses three bounded signals
+[PASS] small-group suppression threshold is three
+[PASS] analytics endpoints are session scoped
+[PASS] admin has aggregate analytics UI
+[PASS] admin shows PDF page on comments
+[PASS] student UI exposes anonymous understanding controls
+[PASS] analytics CSV does not export comment text or participant IDs
+[PASS] no individual ranking or participant analytics API
+[PASS] scheduled cleanup is migration-safe
+[PASS] package version is Stage 8
+[PASS] Stage 8 test command exists
+[PASS] remote verifier requires Stage 8 migration
+[PASS] remote verifier requires PDF analytics tables
+
+Stage 8 boundary summary: 21 passed, 0 failed, 21 total.

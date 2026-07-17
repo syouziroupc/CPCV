@@ -1,0 +1,5 @@
+
+> class-pdf-comment-viewer-v01@0.5.0 check:project
+> node scripts/verify-project.mjs
+
+project verification passed

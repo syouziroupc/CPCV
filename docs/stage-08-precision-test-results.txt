@@ -1,0 +1,62 @@
+CPCV Stage 8.1 precision test results
+Date: 2026-07-16 JST
+Version: 0.8.1
+
+PRIMARY FUNCTIONAL TESTS
+Test | Passed | Failed
+---- | ------ | ------
+| `audit-filter-packs` | 23 | 0 |
+| `test-account-lifecycle-v2` | 35 | 0 |
+| `test-ai-v2` | 47 | 0 |
+| `test-auth-api-v2` | 118 | 0 |
+| `test-auth-v2` | 120 | 0 |
+| `test-bilingual-filter-v2` | 21 | 0 |
+| `test-comments-v2` | 67 | 0 |
+| `test-content-filter-v2` | 30 | 0 |
+| `test-db-v2` | 159 | 0 |
+| `test-email-auth-v2` | 42 | 0 |
+| `test-filter-pack-upgrade-v2` | 12 | 0 |
+| `test-moderation-v2` | 75 | 0 |
+| `test-pdf-analysis-v2` | 47 | 0 |
+| `test-private-v2` | 50 | 0 |
+| `test-realtime-v2` | 44 | 0 |
+
+Unique functional assertions: 890 passed, 0 failed.
+Owner bootstrap standalone rerun: 40 passed, 0 failed, 40 total.
+The standalone Owner bootstrap assertions are already included inside the 159 DB complete assertions and are not added to 890.
+
+BOUNDARY AND DEPLOYMENT
+Stage 8 boundaries: 29 passed, 0 failed.
+Precision boundaries: 111 passed, 0 failed.
+Deployment verifier: 11 passed, 0 failed.
+Stage compatibility commands: 7 passed, 0 failed.
+
+STATIC AND SECURITY
+JavaScript modules checked: 125.
+Project verification: PASS.
+PDF link/reconnect verification: PASS.
+Wrangler deploy dry-run: PASS.
+npm audit: 0 vulnerabilities.
+npm audit --omit=dev: 0 vulnerabilities.
+Secret assignment scan: 0 matches.
+Authored TODO/FIXME/HACK scan: 0 matches.
+git diff --check: PASS.
+
+D1
+Migrations 0001 through 0016 recorded.
+Second application: No migrations to apply.
+PRAGMA foreign_key_check: 0 rows.
+PRAGMA quick_check: ok.
+Installed trigger count: 32.
+
+VISUAL
+4 screenshots generated.
+Desktop and 390px mobile checked.
+Page-level horizontal overflow: 0.
+Controls outside viewport: 0.
+Mobile analytics table uses internal horizontal scrolling only.
+
+AGGREGATE COMMAND NOTE
+The complete aggregate runner exceeded this execution environment's single-call time ceiling.
+Every child test was rerun separately and completed successfully.
+The aggregate runner itself was changed to exit explicitly after its final success line.

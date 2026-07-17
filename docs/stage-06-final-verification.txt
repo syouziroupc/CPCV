@@ -1,0 +1,49 @@
+Stage 6 final verification
+==========================
+
+Status: COMPLETE
+Remote Cloudflare and GitHub operations: NOT EXECUTED
+
+Functional tests
+----------------
+- Stage 2: 159 passed, 0 failed
+- Stage 3-A: 120 passed, 0 failed
+- Stage 3-B: 118 passed, 0 failed
+- Stage 3-C: 50 passed, 0 failed
+- Stage 4: 67 passed, 0 failed
+- Stage 5: 75 passed, 0 failed
+- Stage 6: 44 passed, 0 failed
+- Total: 633 passed, 0 failed
+
+Additional verification
+-----------------------
+- Stage 6 boundary checks: 48 passed, 0 failed
+- Precision boundary checks: 97 passed, 0 failed
+- Stage compatibility commands: 7 passed, 0 failed
+- Deployment verifier tests: 11 passed, 0 failed
+- npm audit: 0 vulnerabilities
+- npm audit --omit=dev: 0 vulnerabilities
+- Wrangler deploy dry-run: passed
+- Source manifest: passed after empty-directory extraction
+- Visual review: desktop and mobile passed with no page-level horizontal overflow or element overlap
+- Manual PDF: 13 pages rendered and visually inspected
+
+Fresh local environment verification
+------------------------------------
+1. Extracted the distributable source ZIP into an empty directory.
+2. Verified every source-manifest entry.
+3. Rebuilt dependencies with npm ci.
+4. Applied migrations 0001 through 0007 to a fresh local DB_V2.
+5. Reapplied migrations and confirmed no migrations to apply.
+6. Bootstrapped a new local Owner on the latest schema.
+7. Started the actual local Worker with both D1 bindings and the Durable Object.
+8. Verified login, session creation, one-time ticket issue and consumption, WebSocket sync, persisted sequence, ticket reuse rejection, disconnect, disconnected event, reconnect catch-up, clear watermark, room closure, logout, and scheduled maintenance.
+
+Known external work
+-------------------
+- Remote DB_V2 creation and UUID assignment
+- Remote migrations
+- Cloudflare Rate Limiting namespace creation
+- Secret registration
+- Staging deployment and fault injection
+- Production deployment

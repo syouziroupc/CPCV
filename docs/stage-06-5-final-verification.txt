@@ -1,0 +1,44 @@
+CPCV Stage 6.5 final verification
+Date: 2026-07-14 JST
+Version: 0.6.5
+
+PASS source baseline
+PASS append-only migration 0008_email_auth.sql
+PASS append-only migration 0009_account_lifecycle.sql
+PASS email registration and verification
+PASS verified email login
+PASS password reset by email
+PASS organization invitation creation
+PASS new-user invitation acceptance
+PASS existing-user invitation acceptance
+PASS multi-organization membership
+PASS invitation replay rejection
+PASS invitation resend token rotation
+PASS invitation resend concurrency protection
+PASS active-member quota
+PASS pending-invitation quota
+PASS daily invitation-email quota
+PASS first email enrollment for legacy accounts
+PASS email address change
+PASS all-session revocation after email change
+PASS old-address change notice
+PASS manager reset email contains no raw response token
+PASS multi-organization manager reset safe-side rejection
+PASS temporary-password creation disabled in email-required mode
+PASS account enumeration protection
+PASS Turnstile server validation boundary
+PASS Email Service delivery-attempt recording
+PASS bounded authentication cleanup
+PASS Stage 1-6 regression components
+PASS Wrangler dry-run
+PASS dependency audit
+PASS desktop and mobile visual inspection
+PASS production deployment gate remains closed without real Cloudflare values
+
+Remote actions not performed
+- GitHub push
+- remote D1 migration
+- live Email Service delivery
+- live Turnstile validation
+- staging deployment
+- production deployment

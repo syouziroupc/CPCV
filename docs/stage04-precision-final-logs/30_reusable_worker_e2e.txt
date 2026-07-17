@@ -1,0 +1,16 @@
+
+> class-pdf-comment-viewer-v01@0.4.2 smoke:local:stage04
+> node scripts/smoke-local-stage04.mjs
+
+{
+  "ok": true,
+  "baseUrl": "http://localhost:8787",
+  "sessionId": "sess_535157b874ab47aa93ebacb6c87d7846",
+  "publicCode": "4YG2JU",
+  "commentId": "cmt_6202a10aadb04d21b3114335e910e89c",
+  "idempotentReplayVerified": true,
+  "historyVerified": true,
+  "csvVerified": true,
+  "sessionEndVerified": true,
+  "logoutVerified": true
+}

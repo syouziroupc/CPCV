@@ -1,0 +1,22 @@
+
+> class-pdf-comment-viewer-v01@0.5.0 smoke:local:stage05
+> node scripts/smoke-local-stage05.mjs
+
+{
+  "ok": true,
+  "baseUrl": "http://localhost:8796",
+  "sessionId": "sess_34e44807b4674f699c5f603e97c05035",
+  "publicCode": "RMHL5H",
+  "commentId": "cmt_67ed2fd28bba4f809b8a9ecd27a5fea6",
+  "premoderationVerified": true,
+  "idempotentReplayVerified": true,
+  "approveVerified": true,
+  "hideVerified": true,
+  "visibleRestoreVerified": true,
+  "deleteVerified": true,
+  "safeSideRestoreVerified": true,
+  "moderationHistoryVerified": true,
+  "csvVerified": true,
+  "sessionEndVerified": true,
+  "logoutVerified": true
+}

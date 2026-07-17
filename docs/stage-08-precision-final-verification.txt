@@ -1,0 +1,23 @@
+CPCV Stage 8.1 final verification
+Date: 2026-07-16 JST
+Version: 0.8.1
+
+Source integrity before packaging: PASS
+Functional assertions: 890 passed, 0 failed
+Owner bootstrap standalone rerun: 40 passed, 0 failed
+Stage 8 boundaries: 29 passed, 0 failed
+Precision boundaries: 111 passed, 0 failed
+Deployment verifier: 11 passed, 0 failed
+Stage compatibility commands: 7 passed, 0 failed
+D1 migrations 0001-0016: PASS
+D1 reapply: No migrations to apply
+D1 foreign_key_check: 0 rows
+D1 quick_check: ok
+Visual screenshots: 4 reviewed
+npm audit: 0 vulnerabilities
+Wrangler dry-run: PASS
+Remote Cloudflare changes: NONE
+GitHub changes: NONE
+
+No known failing test remains.
+The audit cannot prove that undiscovered defects do not exist.

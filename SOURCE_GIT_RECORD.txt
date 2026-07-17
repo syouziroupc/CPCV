@@ -1,0 +1,7 @@
+CPCV Stage 8.1 source record
+Base Stage 8 local commit: 111b6024fbe546043b09bb2042313a5457a19c0b
+Stage 8 original upstream record: 74fc8daed92c4469a6aa1c96092522a4ee8d0730
+Stage 8.1 final commit: 7d740e699ec4661cf3ec35f5bd4a86a2887422c9
+Version: 0.8.1
+Remote deploy: not performed
+GitHub push: not performed

@@ -1,0 +1,5 @@
+
+> class-pdf-comment-viewer-v01@0.8.0 visual:stage08
+> python scripts/render-stage08-visuals.py
+
+{"ok": true, "screenshots": 4, "outputDir": "/mnt/data/stage8_work/docs/stage08-screenshots"}

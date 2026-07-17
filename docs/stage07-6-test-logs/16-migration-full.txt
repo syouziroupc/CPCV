@@ -1,0 +1,17 @@
+CPCV Stage 7.6 full Wrangler D1 migration verification
+
+Initial finding:
+- The original Stage 7.5 form of 0011 failed during a clean 0001-0012 Wrangler local apply.
+- Error: too many terms in compound SELECT
+
+Fix:
+- Replaced UNION ALL policy backfill with one simple INSERT ... SELECT per category.
+- Replaced the organization trigger multi-row VALUES statement with one INSERT per category.
+
+Final verification:
+- Empty local D1: 0001 through 0012 applied successfully.
+- Applied migration count: 12.
+- Second apply: No migrations to apply.
+- PRAGMA foreign_key_check: 0 rows.
+- PRAGMA quick_check: ok.
+- content_filter_terms columns include language_code and boundary_mode.

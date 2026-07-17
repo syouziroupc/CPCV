@@ -1,0 +1,8 @@
+
+> class-pdf-comment-viewer-v01@0.6.0 visual:stage06
+> python scripts/render-stage06-visuals.py
+
+{
+  "ok": true,
+  "outputDir": "/mnt/data/CPCV_stage06_working/docs/stage06-screenshots"
+}

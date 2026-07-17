@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>組織を登録</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.6.5a">
+</head>
+<body class="page">
+  <main class="card narrow">
+    <p class="eyebrow">CPCV</p>
+    <h1>組織を登録</h1>
+    <p class="muted">確認メールを受け取れるメールアドレスを使用してください。</p>
+    <form id="signupForm">
+      <label class="label" for="email">メールアドレス</label>
+      <input id="email" class="input" type="email" autocomplete="email" maxlength="254" required>
+      <label class="label" for="displayName">表示名</label>
+      <input id="displayName" class="input" autocomplete="name" maxlength="80" required>
+      <label class="label" for="organizationName">組織名</label>
+      <input id="organizationName" class="input" maxlength="120" required>
+      <label class="label" for="password">パスワード</label>
+      <input id="password" class="input" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+      <p class="muted">12文字以上。128文字以下。</p>
+      <div id="turnstile" class="auth-challenge"></div>
+      <button id="submitButton" class="button primary auth-submit" type="submit">確認メールを送る</button>
+    </form>
+    <p id="status" class="status" aria-live="polite"></p>
+    <p><a href="/admin">ログインへ戻る</a></p>
+  </main>
+  <script type="module" src="/assets/signup.js?v=0.6.5a"></script>
+</body>
+</html>

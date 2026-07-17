@@ -1,0 +1,41 @@
+ M .github/workflows/ci.yml
+ M .github/workflows/deploy-production.yml
+ M README.md
+ M docs/INDEX.md
+ M docs/current-system.md
+ M migrations-v2/0011_dictionary_content_filter.sql
+ M package-lock.json
+ M package.json
+ M public/_admin_spa.html
+ M public/admin/index.html
+ M public/assets/admin.js
+ M public/assets/app.css
+ M scripts/safe-deploy.ps1
+ M scripts/test-ai-v2.mjs
+ M scripts/test-comments-v2.mjs
+ M scripts/test-content-filter-v2.mjs
+ M scripts/test-moderation-v2.mjs
+ M scripts/test-private-v2.mjs
+ M scripts/test-realtime-v2.mjs
+ M scripts/verify-precision-boundaries.mjs
+ M scripts/verify-stage07-5-boundaries.mjs
+ M src/content-filter/matcher.js
+ M src/content-filter/normalization.js
+ M src/content-filter/repository.js
+ M src/content-filter/validation.js
+ M src/routes/content-filter.js
+?? docs/stage-07-6-debug-report.md
+?? docs/stage-07-6-dictionary-format.md
+?? docs/stage-07-6-foreign-language-policy.md
+?? docs/stage-07-6-git-status-before-commit.txt
+?? docs/stage-07-6-handoff.md
+?? docs/stage-07-6-implementation-report.md
+?? docs/stage-07-6-references.md
+?? docs/stage-07-6-spec.md
+?? docs/stage-07-6-test-results.txt
+?? docs/stage-07-6-visual-review.md
+?? docs/stage07-6-screenshots/
+?? docs/stage07-6-test-logs/
+?? migrations-v2/0012_multilingual_filter_usability.sql
+?? scripts/render-stage07-6-visuals.py
+?? scripts/verify-stage07-6-boundaries.mjs

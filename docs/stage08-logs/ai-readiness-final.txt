@@ -1,0 +1,5 @@
+
+> class-pdf-comment-viewer-v01@0.8.0 verify:ai-ready
+> node scripts/verify-ai-readiness.mjs
+
+AI configuration is structurally ready. Before production create or verify queue cpcv-ai-jobs and apply DB_V2 migration 0010.

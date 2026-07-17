@@ -1,0 +1,101 @@
+# Stage 7 変更ファイル
+
+```text
+ M .github/workflows/ci.yml
+ M .github/workflows/deploy-production.yml
+ M README.md
+ M docs/INDEX.md
+ M docs/current-system.md
+ M package-lock.json
+ M package.json
+ M public/_admin_spa.html
+ M public/_viewer_spa.html
+ M public/admin/index.html
+ M public/assets/admin.js
+ M public/assets/app.css
+ M public/assets/viewer.js
+ M public/viewer/index.html
+ M scripts/predeploy-check.mjs
+ M scripts/safe-deploy.ps1
+ M scripts/test-comments-v2.mjs
+ M scripts/test-moderation-v2.mjs
+ M scripts/test-private-v2.mjs
+ M scripts/test-realtime-v2.mjs
+ M scripts/verify-precision-boundaries.mjs
+ M scripts/verify-stage06-5-boundaries.mjs
+ M scripts/verify-stage06-boundaries.mjs
+ M src/comments/repository.js
+ M src/index.js
+ M src/realtime/comment-room.js
+ M src/realtime/repository.js
+ M src/routes/organization.js
+ M src/routes/private-v2.js
+ M wrangler.toml
+?? docs/stage-07-api-contract.md
+?? docs/stage-07-changed-files.md
+?? docs/stage-07-cloudflare-setup.md
+?? docs/stage-07-db-spec.md
+?? docs/stage-07-debug-report.md
+?? docs/stage-07-final-verification.txt
+?? docs/stage-07-handoff.md
+?? docs/stage-07-implementation-report.md
+?? docs/stage-07-references.md
+?? docs/stage-07-spec.md
+?? docs/stage-07-test-results.txt
+?? docs/stage-07-visual-review.md
+?? docs/stage07-screenshots/admin-desktop.json
+?? docs/stage07-screenshots/admin-desktop.png
+?? docs/stage07-screenshots/admin-mobile-ai-columns.json
+?? docs/stage07-screenshots/admin-mobile-ai-columns.png
+?? docs/stage07-screenshots/admin-mobile.json
+?? docs/stage07-screenshots/admin-mobile.png
+?? docs/stage07-screenshots/viewer-desktop.json
+?? docs/stage07-screenshots/viewer-desktop.png
+?? docs/stage07-screenshots/viewer-mobile.json
+?? docs/stage07-screenshots/viewer-mobile.png
+?? docs/stage07-test-logs/check-pdf-links.txt
+?? docs/stage07-test-logs/check-project.txt
+?? docs/stage07-test-logs/check.txt
+?? docs/stage07-test-logs/deploy-dry-run.txt
+?? docs/stage07-test-logs/final-ai.txt
+?? docs/stage07-test-logs/final-check-pdf-links.txt
+?? docs/stage07-test-logs/final-check-project.txt
+?? docs/stage07-test-logs/final-check.txt
+?? docs/stage07-test-logs/final-comments.txt
+?? docs/stage07-test-logs/final-deploy-dry-run.txt
+?? docs/stage07-test-logs/final-moderation.txt
+?? docs/stage07-test-logs/final-npm-audit-production.json
+?? docs/stage07-test-logs/final-npm-audit.json
+?? docs/stage07-test-logs/final-realtime.txt
+?? docs/stage07-test-logs/final-stage07-boundaries.txt
+?? docs/stage07-test-logs/final-visual.txt
+?? docs/stage07-test-logs/npm-audit-production.json
+?? docs/stage07-test-logs/npm-audit.json
+?? docs/stage07-test-logs/test-account-lifecycle-v2.txt
+?? docs/stage07-test-logs/test-ai-v2.txt
+?? docs/stage07-test-logs/test-auth-api-v2.txt
+?? docs/stage07-test-logs/test-auth-v2.txt
+?? docs/stage07-test-logs/test-comments-v2.txt
+?? docs/stage07-test-logs/test-db-v2.txt
+?? docs/stage07-test-logs/test-deployment-verifiers.txt
+?? docs/stage07-test-logs/test-email-auth-v2.txt
+?? docs/stage07-test-logs/test-moderation-v2.txt
+?? docs/stage07-test-logs/test-private-v2.txt
+?? docs/stage07-test-logs/test-realtime-v2.txt
+?? docs/stage07-test-logs/test-stage-compatibility.txt
+?? docs/stage07-test-logs/verify-ai-readiness.txt
+?? docs/stage07-test-logs/verify-precision-boundaries.txt
+?? docs/stage07-test-logs/verify-stage06-5-boundaries.txt
+?? docs/stage07-test-logs/verify-stage07-boundaries.txt
+?? migrations-v2/0010_ai_moderation_translation.sql
+?? scripts/render-stage07-visuals.py
+?? scripts/test-ai-v2.mjs
+?? scripts/verify-ai-readiness.mjs
+?? scripts/verify-stage07-boundaries.mjs
+?? src/ai/privacy.js
+?? src/ai/processor.js
+?? src/ai/provider.js
+?? src/ai/repository.js
+?? src/ai/validation.js
+?? src/routes/ai-settings.js
+```

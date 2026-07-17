@@ -1,0 +1,77 @@
+### npm run check
+
+> class-pdf-comment-viewer-v01@0.7.8 check
+> node scripts/predeploy-check.mjs
+
+project verification passed
+predeploy check passed (118 JavaScript modules)
+### npm run check:project
+
+> class-pdf-comment-viewer-v01@0.7.8 check:project
+> node scripts/verify-project.mjs
+
+project verification passed
+### npm run check:pdf-links
+
+> class-pdf-comment-viewer-v01@0.7.8 check:pdf-links
+> node scripts/verify-pdf-link-logic.mjs
+
+PDF link and reconnect logic verified
+### stage07-8 boundary
+[PASS] Stage 7.8 migration is the latest migration
+[PASS] pack source keys have a deterministic partial unique index
+[PASS] four Japanese and English pack CSVs are present
+[PASS] core packs are version 2 and context packs are separate
+[PASS] built-in packs contain no political category
+[PASS] pack upgrades update untouched source-managed rows
+[PASS] pack upgrades do not resurrect user-deleted rows
+[PASS] simple recommended mode installs core packs
+[PASS] strict mode installs context packs
+[PASS] individual pack controls are hidden in advanced details
+[PASS] package version is Stage 7.8
+[PASS] Stage 7.8 commands are registered
+
+Stage 7.8 boundary summary: 12 passed, 0 failed, 12 total.
+### dictionary audit
+[PASS] four curated Japanese and English packs exist
+[PASS] core pack versions are upgraded to version 2
+[PASS] Japanese core has at least 120 terms
+[PASS] Japanese total has at least 220 terms
+[PASS] English core has at least 150 terms
+[PASS] English total has at least 260 terms
+[PASS] built-in packs contain no political category
+[PASS] all English terms use whole-word boundaries
+[PASS] context packs never contain severity 5
+[PASS] context sexual, profanity, and discrimination terms remain review-level
+[PASS] context harassment and violence terms remain below automatic rejection
+[PASS] normalized terms do not overlap across built-in packs
+[PASS] legacy Japanese keys 001 through 039 are retained
+[PASS] legacy English keys 001 through 050 are retained
+[PASS] recommended core permits tested educational and substring-safe examples
+[PASS] Japanese punctuation evasion is masked
+[PASS] explicit Japanese threat is rejected
+[PASS] explicit English abuse is masked
+[PASS] explicit English threat is rejected
+[PASS] English spacing evasion is deterministically masked
+[PASS] strict context pack reviews but does not mask or reject Japanese educational wording
+[PASS] strict context pack reviews but does not mask or reject English educational wording
+[PASS] strict context pack keeps common substring-safe words allowed
+
+Pack summary: [{"id":"ja-core-v1","version":2,"terms":128},{"id":"ja-context-v1","version":1,"terms":101},{"id":"en-core-v1","version":2,"terms":161},{"id":"en-context-v1","version":1,"terms":110}]
+
+Stage 7.8 dictionary audit summary: 23 passed, 0 failed, 23 total.
+### pack upgrade
+[PASS] legacy version 1 install is detected
+[PASS] pack installation upgrades version 1 to version 2
+[PASS] untouched pack-managed term is updated in place
+[PASS] deleted pack term remains deleted after upgrade
+[PASS] deleted pack term is not resurrected as a second row
+[PASS] manually created or detached terms are preserved
+[PASS] upgrade installs every non-deleted pack term
+[PASS] reinstalling version 2 is idempotent
+[PASS] context pack installs separately
+[PASS] source pack keys remain unique
+[PASS] pack upgrades preserve foreign-key integrity
+[PASS] database quick_check remains ok
+
+Stage 7.8 pack upgrade summary: 12 passed, 0 failed, 12 total.

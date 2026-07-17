@@ -1,0 +1,20 @@
+[PASS] Stage 7.6 migration is append-only as 0012
+[PASS] dictionary migration avoids compound-select backfill
+[PASS] dictionary organization trigger avoids multi-row VALUES
+[PASS] language metadata is stored
+[PASS] boundary mode is stored
+[PASS] combining marks are retained
+[PASS] mask spans map to original graphemes
+[PASS] word-boundary protection exists
+[PASS] multiple deterministic matches are collected
+[PASS] language codes are validated
+[PASS] boundary modes are validated
+[PASS] API supports language and boundary fields
+[PASS] simple organization preset exists
+[PASS] simple session mode exists
+[PASS] advanced settings are separated
+[PASS] dictionary terms can be edited
+[PASS] dictionary can be exported as CSV
+[PASS] Stage 8 files remain absent
+
+Stage 7.6 boundary summary: 18 passed, 0 failed, 18 total.

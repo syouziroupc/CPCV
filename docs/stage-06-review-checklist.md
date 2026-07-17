@@ -1,0 +1,22 @@
+# Stage 6 Review checklist
+
+- [x] 旧migrationを変更していない。
+- [x] Raw auth tokenをWebSocket subprotocolへ入れていない。
+- [x] Ticketはhash保存、60秒、一回限り。
+- [x] Ticket消費時にauth・membership・授業を再検証する。
+- [x] 接続中socketもevent配信時に再認可する。
+- [x] D1 event保存がRealtime配信より先。
+- [x] Sequenceは授業単位でunique。
+- [x] Catch-upは500件上限。
+- [x] Snapshotはclear watermarkを尊重する。
+- [x] ViewerはticketやtokenをLocalStorageへ保存しない。
+- [x] Reconnectは指数backoff、上限30秒。
+- [x] Room終了とauth失効で再接続を停止する。
+- [x] Durable ObjectはHibernation APIとattachmentを使用する。
+- [x] Client frame上限がある。
+- [x] 生IPをDBへ保存しない。
+- [x] Productionの公開投稿limiter不足を拒否する。
+- [x] Stage 1〜5 regressionが0 failure。
+- [x] 実Worker smokeが成功する。
+- [x] Desktop・Mobileにpage overflowと重なりがない。
+- [x] 完成ZIP再展開後に同じ結果を再現する。

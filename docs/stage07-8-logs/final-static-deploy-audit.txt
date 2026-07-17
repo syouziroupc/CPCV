@@ -1,0 +1,99 @@
+### check stage07-8
+
+> class-pdf-comment-viewer-v01@0.7.8 check:stage07-8
+> node scripts/verify-stage07-8-boundaries.mjs && node scripts/audit-filter-packs.mjs && node --no-warnings scripts/test-filter-pack-upgrade-v2.mjs
+
+[PASS] Stage 7.8 migration is the latest migration
+[PASS] pack source keys have a deterministic partial unique index
+[PASS] four Japanese and English pack CSVs are present
+[PASS] core packs are version 2 and context packs are separate
+[PASS] built-in packs contain no political category
+[PASS] pack upgrades update untouched source-managed rows
+[PASS] pack upgrades do not resurrect user-deleted rows
+[PASS] simple recommended mode installs core packs
+[PASS] strict mode installs context packs
+[PASS] individual pack controls are hidden in advanced details
+[PASS] package version is Stage 7.8
+[PASS] Stage 7.8 commands are registered
+
+Stage 7.8 boundary summary: 12 passed, 0 failed, 12 total.
+[PASS] four curated Japanese and English packs exist
+[PASS] core pack versions are upgraded to version 2
+[PASS] Japanese core has at least 120 terms
+[PASS] Japanese total has at least 220 terms
+[PASS] English core has at least 150 terms
+[PASS] English total has at least 260 terms
+[PASS] built-in packs contain no political category
+[PASS] all English terms use whole-word boundaries
+[PASS] context packs never contain severity 5
+[PASS] context sexual, profanity, and discrimination terms remain review-level
+[PASS] context harassment and violence terms remain below automatic rejection
+[PASS] normalized terms do not overlap across built-in packs
+[PASS] legacy Japanese keys 001 through 039 are retained
+[PASS] legacy English keys 001 through 050 are retained
+[PASS] recommended core permits tested educational and substring-safe examples
+[PASS] Japanese punctuation evasion is masked
+[PASS] explicit Japanese threat is rejected
+[PASS] explicit English abuse is masked
+[PASS] explicit English threat is rejected
+[PASS] English spacing evasion is deterministically masked
+[PASS] strict context pack reviews but does not mask or reject Japanese educational wording
+[PASS] strict context pack reviews but does not mask or reject English educational wording
+[PASS] strict context pack keeps common substring-safe words allowed
+
+Pack summary: [{"id":"ja-core-v1","version":2,"terms":128},{"id":"ja-context-v1","version":1,"terms":101},{"id":"en-core-v1","version":2,"terms":161},{"id":"en-context-v1","version":1,"terms":110}]
+
+Stage 7.8 dictionary audit summary: 23 passed, 0 failed, 23 total.
+[PASS] legacy version 1 install is detected
+[PASS] pack installation upgrades version 1 to version 2
+[PASS] untouched pack-managed term is updated in place
+[PASS] deleted pack term remains deleted after upgrade
+[PASS] deleted pack term is not resurrected as a second row
+[PASS] manually created or detached terms are preserved
+[PASS] upgrade installs every non-deleted pack term
+[PASS] reinstalling version 2 is idempotent
+[PASS] context pack installs separately
+[PASS] source pack keys remain unique
+[PASS] pack upgrades preserve foreign-key integrity
+[PASS] database quick_check remains ok
+
+Stage 7.8 pack upgrade summary: 12 passed, 0 failed, 12 total.
+### deploy dry run
+
+> class-pdf-comment-viewer-v01@0.7.8 deploy:dry-run
+> node scripts/predeploy-check.mjs && wrangler deploy --dry-run
+
+project verification passed
+predeploy check passed (118 JavaScript modules)
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+
+Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
+✨ Read 44 files from the assets directory /mnt/data/stage78_work/CPCV_stage07_7_complete_source/public
+Total Upload: 614.41 KiB / gzip: 103.48 KiB
+Your Worker has access to the following bindings:
+Binding                                                                             Resource                  
+env.COMMENT_ROOM (CommentRoom)                                                      Durable Object            
+env.EMAIL (unrestricted)                                                            Send Email                
+env.AI_JOBS_QUEUE (cpcv-ai-jobs)                                                    Queue                     
+env.DB (class_comment_db)                                                           D1 Database               
+env.DB_V2 (class_comment_db_v2)                                                     D1 Database               
+env.AI                                                                              AI                        
+env.ASSETS                                                                          Assets                    
+env.APP_ENV ("production")                                                          Environment Variable      
+env.AUTH_V2_ENABLED ("1")                                                           Environment Variable      
+env.EMAIL_AUTH_REQUIRED ("0")                                                       Environment Variable      
+env.AI_MODERATION_MODEL ("@cf/zai-org/glm-4.7-flash")                               Environment Variable      
+env.AI_MODERATION_FALLBACK_MODEL ("@cf/qwen/qwen3-30b-a3b-fp8")                     Environment Variable      
+env.AI_TRANSLATION_MODEL ("@cf/zai-org/glm-4.7-flash")                              Environment Variable      
+env.AI_TRANSLATION_FALLBACK_MODEL ("@cf/qwen/qwen3-30b-a3b-fp8")                    Environment Variable      
+env.AI_TIMEOUT_MS ("12000")                                                         Environment Variable      
+env.AUTH_ORIGIN ("https://class-pdf-comment-viewer-v01....")                        Environment Variable      
+env.PUBLIC_ORIGIN ("https://class-pdf-comment-viewer-v01....")                      Environment Variable      
+
+--dry-run: exiting now.
+### npm audit
+found 0 vulnerabilities
+### npm audit production
+found 0 vulnerabilities

@@ -1,0 +1,17 @@
+{
+  "viewport": {
+    "w": 1000,
+    "h": 800
+  },
+  "documentWidth": 1000,
+  "bodyWidth": 1000,
+  "box": {
+    "left": 245,
+    "right": 755,
+    "width": 510,
+    "height": 150.15625
+  },
+  "outside": [],
+  "short": [],
+  "table": []
+}

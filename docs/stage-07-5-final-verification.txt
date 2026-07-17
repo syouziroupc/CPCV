@@ -1,0 +1,24 @@
+CPCV Stage 7.5 Final Verification
+Date: 2026-07-16 JST
+Version: 0.7.5
+Baseline: Stage 7 commit 97ab773fda5b0bc189cc8785e676d10ae38a0710
+
+Functional tests: 778 passed, 0 failed
+Boundary and verifier tests: 206 passed, 0 failed
+Stage 7.5 dedicated test: 21 passed, 0 failed
+Stage 7.5 boundary test: 26 passed, 0 failed
+Visual screenshots: 5 inspected
+Wrangler deploy dry-run: PASS
+npm audit: 0 vulnerabilities
+npm audit --omit=dev: 0 vulnerabilities
+Remote D1 migration: NOT RUN
+Staging deploy: NOT RUN
+Production deploy: NOT RUN
+
+Required next action:
+1. Verify complete handoff ZIP SHA-256.
+2. Extract into an empty directory.
+3. Run npm ci.
+4. Run npm run check:stage07-5.
+5. Run npm run visual:stage07-5.
+6. Apply migration 0011 to staging DB_V2 only after backup and review.

@@ -1,0 +1,77 @@
+[PASS] Stage 5 creates moderation tables
+[PASS] moderation transition and timestamp triggers exist
+[PASS] Stage 5 foreign keys are clean
+[PASS] Stage 5 quick check is ok
+[PASS] database rejects visible to pending
+[PASS] database requires moderation timestamp advance
+[PASS] database rejects invalid moderation mode
+[PASS] database blocks direct deleted to visible restore
+[PASS] public session advertises approval requirement
+[PASS] premoderated comment returns 202
+[PASS] premoderated comment is stored pending
+[PASS] pending comment is not broadcast
+[PASS] pending state filter returns pending comment
+[PASS] visible filter excludes pending comment
+[PASS] invalid state filter is rejected
+[PASS] visible comment can be hidden
+[PASS] hide broadcasts removal
+[PASS] hidden comment can be restored visible
+[PASS] restore broadcasts full comment
+[PASS] visible comment can be logically deleted
+[PASS] deleted restore returns to hidden safe-side state
+[PASS] second restore makes hidden comment visible
+[PASS] all moderation actions are preserved with normalized reason
+[PASS] generic audit logs are written without comment content
+[PASS] invalid visible approve is rejected
+[PASS] stale optimistic version is rejected
+[PASS] malformed expected timestamp is rejected
+[PASS] overlong moderation reason is rejected
+[PASS] validation failures do not change comment state
+[PASS] concurrent same-version moderation has one winner
+[PASS] concurrent loser receives version conflict
+[PASS] concurrent conflict writes one action and one audit
+[PASS] teacher cannot moderate another teacher session
+[PASS] other organization cannot moderate comment
+[PASS] same organization admin can moderate
+[PASS] direct unverified moderation broadcast is rejected
+[PASS] bulk fixtures are pending
+[PASS] bulk operation returns per-item partial results
+[PASS] bulk successful actions persist independently
+[PASS] bulk failed item remains unchanged
+[PASS] bulk unexpected item failure remains a per-item result
+[PASS] bulk continues after an unexpected item failure
+[PASS] bulk operation is capped at 25
+[PASS] bulk operation rejects duplicate comment ids
+[PASS] moderation fault is surfaced
+[PASS] moderation action failure rolls back comment state
+[PASS] moderation action failure rolls back audit
+[PASS] display clear succeeds
+[PASS] display clear does not change moderation state
+[PASS] retention physically deletes expired comment
+[PASS] retention cascades moderation actions
+[PASS] teacher can enable premoderation on own session
+[PASS] session moderation mode is stored separately
+[PASS] session response includes moderation mode
+[PASS] new session can start in premoderation mode
+[PASS] new session setting is inserted atomically
+[PASS] URL-like content is detected: ftp://example.com
+[PASS] URL-like comment is rejected: ftp://example.com
+[PASS] URL-like content is detected: example.com
+[PASS] URL-like comment is rejected: example.com
+[PASS] URL-like content is detected: www.example.com
+[PASS] URL-like comment is rejected: www.example.com
+[PASS] URL-like content is detected: 192.168.1.1
+[PASS] URL-like comment is rejected: 192.168.1.1
+[PASS] URL-like content is detected: javascript:alert(1)
+[PASS] URL-like comment is rejected: javascript:alert(1)
+[PASS] URL-like content is detected: mailto:test@example.com
+[PASS] URL-like comment is rejected: mailto:test@example.com
+[PASS] decimal number is not treated as URL
+[PASS] viewer handles moderation removal
+[PASS] viewer handles approved and restored comments
+[PASS] admin includes moderation API operations
+[PASS] admin stops moderation polling when leaving a session
+[PASS] admin moderation UI exists
+[PASS] student UI explains pending submission
+
+Stage 5 manual moderation test summary: 75 passed, 0 failed, 75 total.

@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>組織管理</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.6.5">
+</head>
+<body class="page">
+  <main class="card wide">
+    <div class="row between wrap">
+      <div>
+        <p class="eyebrow">Owner・Admin用</p>
+        <h1>組織管理</h1>
+      </div>
+      <div class="row wrap">
+        <a class="button" href="/account">アカウント</a>
+        <a class="button" href="/admin">授業管理</a>
+        <button id="masterLogoutButton" class="button hidden">ログアウト</button>
+      </div>
+    </div>
+
+    <section id="masterLoginSection" class="section">
+      <h2>ログイン</h2>
+      <p class="muted">組織のOwnerまたはAdminアカウントを使用してください。</p>
+      <label class="label" for="masterLoginId">メールアドレス</label>
+      <input id="masterLoginId" class="input" type="email" autocomplete="username">
+      <label class="label" for="masterPassword">パスワード</label>
+      <input id="masterPassword" class="input" type="password" autocomplete="current-password">
+      <div id="masterOrganizationGroup" class="hidden">
+        <label class="label" for="masterOrganization">組織</label>
+        <select id="masterOrganization" class="select"></select>
+      </div>
+      <button id="masterLoginButton" class="button primary">ログイン</button>
+      <p id="masterLoginStatus" class="status"></p>
+      <div class="auth-links"><a href="/forgot-password">パスワードを忘れた</a><a href="/signup">組織を登録</a></div>
+    </section>
+
+    <section id="masterPanel" class="section hidden">
+      <div class="grid two">
+        <section class="info-box">
+          <h2 id="organizationName">組織</h2>
+          <p id="organizationRole" class="status"></p>
+          <p id="masterTimeLeft" class="muted"></p>
+        </section>
+        <section class="info-box">
+          <h2>運用上の注意</h2>
+          <p class="muted">メンバーはメール招待で追加します。仮パスワードは使用しません。</p>
+          <p class="muted">Ownerを一人も残さない変更は拒否されます。</p>
+        </section>
+      </div>
+
+      <section class="info-box">
+        <h2>メンバーを招待</h2>
+        <div class="grid two">
+          <div>
+            <label class="label" for="memberEmail">メールアドレス</label>
+            <input id="memberEmail" class="input" type="email" autocomplete="off" placeholder="teacher@example.com">
+          </div>
+          <div>
+            <label class="label" for="memberRole">権限</label>
+            <select id="memberRole" class="select">
+              <option value="teacher">Teacher</option>
+              <option value="admin">Admin</option>
+              <option value="owner">Owner</option>
+            </select>
+          </div>
+        </div>
+        <button id="inviteMemberButton" class="button primary">招待メールを送る</button>
+        <p id="quotaStatus" class="muted"></p>
+      </section>
+
+      <section class="section">
+        <div class="row between wrap">
+          <h2>未承認の招待</h2>
+          <button id="refreshInvitationsButton" class="button">再読み込み</button>
+        </div>
+        <div id="invitationList" class="teacher-list"></div>
+      </section>
+
+      <section class="section">
+        <div class="row between wrap">
+          <h2>メンバー一覧</h2>
+          <button id="refreshMembersButton" class="button">再読み込み</button>
+        </div>
+        <div id="memberList" class="teacher-list"></div>
+      </section>
+
+      <section class="section">
+        <div class="row between wrap">
+          <div>
+            <h2>進行中の授業</h2>
+            <p class="muted">OwnerとAdminは組織内の全授業を操作できます。</p>
+          </div>
+          <button id="refreshSessionsButton" class="button">再読み込み</button>
+        </div>
+        <div id="masterSessionList" class="teacher-list"></div>
+      </section>
+
+      <section class="section">
+        <div class="row between wrap">
+          <div>
+            <h2>監査ログ</h2>
+            <p class="muted">直近50件を表示します。</p>
+          </div>
+          <button id="refreshAuditButton" class="button">再読み込み</button>
+        </div>
+        <div id="auditList" class="teacher-list"></div>
+      </section>
+    </section>
+
+    <p id="masterStatus" class="status"></p>
+  </main>
+  <script src="/assets/master.js?v=0.6.5" type="module"></script>
+</body>
+</html>

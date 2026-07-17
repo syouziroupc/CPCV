@@ -1,0 +1,50 @@
+[PASS] Stage 7 creates all AI tables
+[PASS] Stage 7 foreign keys are clean
+[PASS] Stage 7 quick check is ok
+[PASS] organization AI defaults disabled
+[PASS] session AI defaults disabled
+[PASS] new organizations receive disabled AI settings
+[PASS] session AI can enable moderation and translation
+[PASS] safe comment creates two jobs
+[PASS] queue receives job IDs only
+[PASS] moderation job succeeds
+[PASS] translation job succeeds
+[PASS] AI moderation does not change human moderation state
+[PASS] AI translation does not change original text
+[PASS] structured moderation result is persisted
+[PASS] translation is persisted separately
+[PASS] translation receives a Stage 6 sequence event
+[PASS] translation realtime dispatch was attempted
+[PASS] teacher comment list includes AI advice
+[PASS] teacher comment list includes AI translation
+[PASS] reset snapshot includes latest translation
+[PASS] Workers AI receives direct JSON Schema
+[PASS] AI Gateway disables cache when configured
+[PASS] PII is detected locally
+[PASS] PII moderation is local review advice
+[PASS] PII translation is not sent externally
+[PASS] prompt injection signal is retained as a category
+[PASS] prompt injection text remains data not instruction
+[PASS] invalid primary response falls back to the secondary model
+[PASS] primary and fallback model calls are both counted
+[PASS] translation and realtime event fail as one atomic operation
+[PASS] translation retry persists translation and realtime event together
+[PASS] daily quota stops provider execution
+[PASS] retryable provider failure enters retry
+[PASS] provider failure stops after three attempts
+[PASS] each primary and fallback call consumes one quota event
+[PASS] terminal job message is idempotently ignored
+[PASS] terminal failed job is not redispatched
+[PASS] disabled organization creates no jobs
+AI queue dispatch failed Error
+[PASS] queue dispatch failure does not throw into posting flow
+[PASS] missing or disabled comment scheduling stays non-fatal
+[PASS] invalid queue messages are acknowledged
+[PASS] moderation output validator accepts bounded schema
+[PASS] translation output validator trims valid output
+[PASS] unsupported target languages are rejected
+[PASS] admin labels AI verdict as reference only
+[PASS] viewer labels translated content
+[PASS] viewer never replaces original message with translation
+
+Stage 7 AI test summary: 47 passed, 0 failed, 47 total.

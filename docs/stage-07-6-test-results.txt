@@ -1,0 +1,36 @@
+CPCV Stage 7.6 test results
+
+Stage 7.6 boundary: 18 passed, 0 failed
+Precision boundary: 110 passed, 0 failed
+Stage compatibility: 7 passed, 0 failed
+Deployment verifier: 11 passed, 0 failed
+DB_V2: 159 passed, 0 failed
+Auth core: 120 passed, 0 failed
+Auth API: 118 passed, 0 failed
+Private integration: 50 passed, 0 failed
+Comments: 67 passed, 0 failed
+Manual moderation: 75 passed, 0 failed
+Realtime: 44 passed, 0 failed
+Email authentication: 42 passed, 0 failed
+Account lifecycle: 35 passed, 0 failed
+AI: 47 passed, 0 failed
+Stage 7.6 content filter: 30 passed, 0 failed
+
+Functional tests: 787 passed, 0 failed
+Boundary and deployment checks: 146 passed, 0 failed
+Recorded total: 933 passed, 0 failed
+
+The Stage compatibility command internally runs historical boundary suites. Its nested historical counts are not added again to the recorded total.
+
+Full Wrangler D1 migration:
+- 0001 through 0012 applied successfully to an empty local D1
+- second apply: no migrations to apply
+- foreign_key_check: 0 rows
+- quick_check: ok
+
+Static and deployment:
+- project verification: PASS
+- PDF link verification: PASS
+- Wrangler deploy dry-run: PASS
+- npm audit: 0 vulnerabilities
+- npm audit --omit=dev: 0 vulnerabilities

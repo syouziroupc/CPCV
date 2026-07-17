@@ -1,0 +1,71 @@
+{
+  "viewportWidth": 390,
+  "viewportHeight": 844,
+  "documentWidth": 390,
+  "documentHeight": 2939,
+  "bodyWidth": 390,
+  "keyRects": [
+    {
+      "id": "organizationAiSection",
+      "cls": "section",
+      "type": "",
+      "left": 35,
+      "right": 355,
+      "top": -1816.609375,
+      "bottom": -1437.8125,
+      "width": 320,
+      "height": 378.796875
+    },
+    {
+      "id": "sessionAiSection",
+      "cls": "ai-settings-panel",
+      "type": "",
+      "left": 35,
+      "right": 355,
+      "top": -282.75,
+      "bottom": 62.703125,
+      "width": 320,
+      "height": 345.453125
+    },
+    {
+      "id": "moderationSection",
+      "cls": "moderation-section",
+      "type": "",
+      "left": 35,
+      "right": 355,
+      "top": 86.703125,
+      "bottom": 758.21875,
+      "width": 320,
+      "height": 671.515625
+    }
+  ],
+  "outside": [
+    {
+      "id": "organizationAiSection",
+      "cls": "section",
+      "type": "",
+      "left": 35,
+      "right": 355,
+      "top": -1816.609375,
+      "bottom": -1437.8125,
+      "width": 320,
+      "height": 378.796875
+    },
+    {
+      "id": "sessionAiSection",
+      "cls": "ai-settings-panel",
+      "type": "",
+      "left": 35,
+      "right": 355,
+      "top": -282.75,
+      "bottom": 62.703125,
+      "width": 320,
+      "height": 345.453125
+    }
+  ],
+  "shortControls": [],
+  "moderationScrollWidth": 963,
+  "moderationClientWidth": 318,
+  "topBarScrollWidth": 0,
+  "topBarClientWidth": 0
+}

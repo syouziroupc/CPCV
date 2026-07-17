@@ -1,0 +1,5 @@
+
+> class-pdf-comment-viewer-v01@0.6.5 visual:stage06-5
+> python scripts/render-stage06-5-visuals.py
+
+{"ok": true, "outputDir": "/mnt/data/cpcv65_full_work/docs/stage06-5-screenshots", "screenshots": 10}

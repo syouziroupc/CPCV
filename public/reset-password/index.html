@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>新しいパスワード</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.6.5a">
+</head>
+<body class="page">
+  <main class="card narrow">
+    <p class="eyebrow">CPCV</p>
+    <h1>新しいパスワード</h1>
+    <form id="resetForm">
+      <label class="label" for="password">新しいパスワード</label>
+      <input id="password" class="input" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+      <label class="label" for="confirmation">新しいパスワードを再入力</label>
+      <input id="confirmation" class="input" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
+      <button id="submitButton" class="button primary auth-submit" type="submit">パスワードを変更</button>
+    </form>
+    <p id="status" class="status" aria-live="polite"></p>
+    <a id="loginLink" class="button hidden" href="/admin">ログインへ戻る</a>
+  </main>
+  <script type="module" src="/assets/reset-password.js?v=0.6.5a"></script>
+</body>
+</html>

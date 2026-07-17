@@ -1,0 +1,28 @@
+[PASS] Stage 7.5 migration is append-only as 0011
+[PASS] dictionary table exists: content_filter_terms
+[PASS] dictionary table exists: organization_content_filter_policies
+[PASS] dictionary table exists: session_content_filter_settings
+[PASS] dictionary table exists: comment_filter_matches
+[PASS] original and display text are separate
+[PASS] filter defaults are disabled
+[PASS] political policy starts disabled without mask/reject
+[PASS] realtime uses display text
+[PASS] NFKC normalization is applied
+[PASS] Katakana is folded to Hiragana
+[PASS] punctuation insertion is compacted
+[PASS] confusable matching is limited
+[PASS] fuzzy matching is bounded
+[PASS] ambiguous matches cannot directly reject
+[PASS] exact filtering runs before persistence
+[PASS] rejected comments are not persisted
+[PASS] original message is retained
+[PASS] match evidence is persisted atomically
+[PASS] AI routing reads dictionary decision
+[PASS] organization dictionary API exists
+[PASS] session filter API exists
+[PASS] term changes are audited without storing term text
+[PASS] admin UI manages terms and policy thresholds
+[PASS] student receives neutral rejection message
+[PASS] Stage 8 files remain absent
+
+Stage 7.5 boundary summary: 26 passed, 0 failed, 26 total.

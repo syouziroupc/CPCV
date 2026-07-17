@@ -1,0 +1,67 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "class-pdf-comment-viewer-v01"
+main = "src/index.js"
+compatibility_date = "2026-06-17"
+
+assets = { directory = "./public", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
+
+[[d1_databases]]
+binding = "DB"
+database_name = "class_comment_db"
+database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"
+
+# Stage 2 database. The remote database_id is intentionally omitted until the
+# separate class_comment_db_v2 resource is created and its real UUID is known.
+# Local migrations and schema tests use this binding now. Do not run an actual
+# deploy until a separate remote D1 exists and its real UUID is configured. The
+# current Worker must continue to read and write env.DB only during Stage 2.
+[[d1_databases]]
+binding = "DB_V2"
+database_name = "class_comment_db_v2"
+migrations_dir = "migrations-v2"
+
+
+[[send_email]]
+name = "EMAIL"
+
+[ai]
+binding = "AI"
+
+[[queues.producers]]
+binding = "AI_JOBS_QUEUE"
+queue = "cpcv-ai-jobs"
+
+[[queues.consumers]]
+queue = "cpcv-ai-jobs"
+max_batch_size = 5
+max_batch_timeout = 5
+max_retries = 3
+
+[[durable_objects.bindings]]
+name = "COMMENT_ROOM"
+class_name = "CommentRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["CommentRoom"]
+
+[vars]
+APP_ENV = "production"
+AUTH_V2_ENABLED = "1"
+EMAIL_AUTH_REQUIRED = "0"
+AI_MODERATION_MODEL = "@cf/zai-org/glm-4.7-flash"
+AI_MODERATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+AI_TRANSLATION_MODEL = "@cf/zai-org/glm-4.7-flash"
+AI_TRANSLATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+AI_TIMEOUT_MS = "12000"
+AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
+# Public origin used in admin to show the student URL.
+PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
+
+# Daily retention and expired security-token cleanup. Cron uses UTC.
+[triggers]
+crons = [ "17 3 * * *" ]
+
+# Production deployment also requires two account-unique Rate Limiting bindings.
+# Do not invent namespace IDs. Add the real values immediately before deployment.
+# See docs/cloudflare-deployment-prerequisites.md.

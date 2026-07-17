@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>授業コメント投稿</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="page student-page">
+  <main class="card narrow">
+    <p class="eyebrow">授業コメント</p>
+    <h1 id="classTitle">読み込み中</h1>
+    <p id="postingState" class="muted">投稿状態を確認しています。</p>
+    <div class="log-notice" role="note">
+      投稿内容と投稿日時は、授業運営と不適切な投稿への対応のため一定期間保存されます。IPアドレスは保存しません。
+      迷惑行為や不適切な書き込みはしないでください。
+    </div>
+
+    <label class="label" for="nickname">名前 任意</label>
+    <input id="nickname" class="input" placeholder="匿名でも可">
+
+    <label class="label" for="message">コメント 140字以内</label>
+    <textarea id="message" class="textarea" rows="5" placeholder="質問、反応、分からない点など"></textarea>
+    <div class="row between">
+      <span id="counter" class="muted">0 / 140</span>
+      <button id="sendButton" class="button primary" disabled>送信</button>
+    </div>
+    <p id="status" class="status"></p>
+
+    <section id="understandingSection" class="understanding-panel hidden" aria-labelledby="understandingTitle">
+      <h2 id="understandingTitle">このページの理解度</h2>
+      <p class="muted small-text">回答はページ単位で匿名集計されます。個人別の成績には使いません。</p>
+      <div class="understanding-actions" role="group" aria-label="理解度を回答">
+        <button class="button understanding-button" type="button" data-signal="understood">理解できた</button>
+        <button class="button understanding-button" type="button" data-signal="unsure">少し不明</button>
+        <button class="button understanding-button" type="button" data-signal="confused">わからない</button>
+      </div>
+      <p id="understandingStatus" class="status"></p>
+    </section>
+  </main>
+  <script src="/assets/join.js?v=0.8.1" type="module"></script>
+</body>
+</html>

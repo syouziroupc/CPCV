@@ -1,0 +1,303 @@
+### comments
+[PASS] Stage 4 creates three comment tables
+[PASS] comment indexes exist
+[PASS] live session organization composite unique index exists
+[PASS] foreign key check is clean after migration
+[PASS] quick check is ok
+[PASS] database comment content guards exist
+[PASS] database rejects an overlong comment
+[PASS] database rejects a mismatched message length
+[PASS] database rejects an overlong nickname
+[PASS] public session GET succeeds
+[PASS] participant cookie is HttpOnly and session-scoped
+[PASS] GET does not create participant row
+[PASS] public comment JSON body is capped
+[PASS] new public comment returns 201
+[PASS] participant is persisted once
+[PASS] comment is persisted once
+[PASS] created event is persisted atomically
+[PASS] stored comment uses normalized content
+[PASS] stored comment belongs to session organization
+[PASS] comment response uses persistent id
+[PASS] new comment is broadcast with persistent id
+[PASS] same idempotency key returns existing comment
+[PASS] duplicate does not add database rows
+[PASS] duplicate is not broadcast again
+[PASS] different immediate post is rate limited
+[PASS] rate-limited post is not persisted
+[PASS] legacy client without idempotency key remains accepted after rate window is reset
+[PASS] legacy missing key receives compatibility key
+[PASS] NFKC and control normalization is applied
+[PASS] URL is rejected
+[PASS] invalid idempotency key is rejected
+[PASS] overlong message is rejected
+[PASS] direct unverified Durable Object post is rejected
+[PASS] privacy test comment is stored
+[PASS] schema has no IP or user-agent columns
+[PASS] broadcast payload contains no IP or participant token
+[PASS] session owner teacher reads comment history
+[PASS] comment history cursor paginates without duplicate
+[PASS] same organization Admin reads history
+[PASS] another Teacher cannot read history
+[PASS] other organization cannot read history
+[PASS] CSV export succeeds with attachment headers
+[PASS] CSV formula injection is neutralized
+[PASS] CSV does not contain IP address column
+[PASS] csvCell neutralizes leading whitespace formula
+[PASS] buildCommentsCsv quotes embedded double quote
+[PASS] retention fixtures inserted
+[PASS] retention physically deletes only expired comments
+[PASS] comment events cascade with deleted comment
+[PASS] orphan participant is deleted
+[PASS] Admin cannot manually run retention
+[PASS] Owner can run retention maintenance
+[PASS] participant retention obeys the batch limit
+[PASS] scheduled maintenance drains participant backlog
+[PASS] scheduled maintenance prunes expired secondary CSRF tokens
+[PASS] scheduled maintenance removes old expired auth sessions
+[PASS] auth session deletion cascades secondary CSRF rows
+[PASS] scheduled maintenance removes only old reset tokens
+[PASS] event insert fault rejects comment operation
+[PASS] event fault rolls back participant and comment
+[PASS] scheduled handler runs retention without remote services
+[PASS] join client no longer stores persistent client id in localStorage
+[PASS] join client sends idempotency key
+[PASS] join client counts Unicode code points
+[PASS] join form avoids UTF-16 maxlength for Unicode limits
+[PASS] viewer CSV uses authenticated server export
+[PASS] viewer local cache no longer records IP
+
+Stage 4 comment persistence test summary: 67 passed, 0 failed, 67 total.
+### moderation
+[PASS] Stage 5 creates moderation tables
+[PASS] moderation transition and timestamp triggers exist
+[PASS] Stage 5 foreign keys are clean
+[PASS] Stage 5 quick check is ok
+[PASS] database rejects visible to pending
+[PASS] database requires moderation timestamp advance
+[PASS] database rejects invalid moderation mode
+[PASS] database blocks direct deleted to visible restore
+[PASS] public session advertises approval requirement
+[PASS] premoderated comment returns 202
+[PASS] premoderated comment is stored pending
+[PASS] pending comment is not broadcast
+[PASS] pending state filter returns pending comment
+[PASS] visible filter excludes pending comment
+[PASS] invalid state filter is rejected
+[PASS] visible comment can be hidden
+[PASS] hide broadcasts removal
+[PASS] hidden comment can be restored visible
+[PASS] restore broadcasts full comment
+[PASS] visible comment can be logically deleted
+[PASS] deleted restore returns to hidden safe-side state
+[PASS] second restore makes hidden comment visible
+[PASS] all moderation actions are preserved with normalized reason
+[PASS] generic audit logs are written without comment content
+[PASS] invalid visible approve is rejected
+[PASS] stale optimistic version is rejected
+[PASS] malformed expected timestamp is rejected
+[PASS] overlong moderation reason is rejected
+[PASS] validation failures do not change comment state
+[PASS] concurrent same-version moderation has one winner
+[PASS] concurrent loser receives version conflict
+[PASS] concurrent conflict writes one action and one audit
+[PASS] teacher cannot moderate another teacher session
+[PASS] other organization cannot moderate comment
+[PASS] same organization admin can moderate
+[PASS] direct unverified moderation broadcast is rejected
+[PASS] bulk fixtures are pending
+[PASS] bulk operation returns per-item partial results
+[PASS] bulk successful actions persist independently
+[PASS] bulk failed item remains unchanged
+[PASS] bulk unexpected item failure remains a per-item result
+[PASS] bulk continues after an unexpected item failure
+[PASS] bulk operation is capped at 25
+[PASS] bulk operation rejects duplicate comment ids
+[PASS] moderation fault is surfaced
+[PASS] moderation action failure rolls back comment state
+[PASS] moderation action failure rolls back audit
+[PASS] display clear succeeds
+[PASS] display clear does not change moderation state
+[PASS] retention physically deletes expired comment
+[PASS] retention cascades moderation actions
+[PASS] teacher can enable premoderation on own session
+[PASS] session moderation mode is stored separately
+[PASS] session response includes moderation mode
+[PASS] new session can start in premoderation mode
+[PASS] new session setting is inserted atomically
+[PASS] URL-like content is detected: ftp://example.com
+[PASS] URL-like comment is rejected: ftp://example.com
+[PASS] URL-like content is detected: example.com
+[PASS] URL-like comment is rejected: example.com
+[PASS] URL-like content is detected: www.example.com
+[PASS] URL-like comment is rejected: www.example.com
+[PASS] URL-like content is detected: 192.168.1.1
+[PASS] URL-like comment is rejected: 192.168.1.1
+[PASS] URL-like content is detected: javascript:alert(1)
+[PASS] URL-like comment is rejected: javascript:alert(1)
+[PASS] URL-like content is detected: mailto:test@example.com
+[PASS] URL-like comment is rejected: mailto:test@example.com
+[PASS] decimal number is not treated as URL
+[PASS] viewer handles moderation removal
+[PASS] viewer handles approved and restored comments
+[PASS] admin includes moderation API operations
+[PASS] admin stops moderation polling when leaving a session
+[PASS] admin moderation UI exists
+[PASS] student UI explains pending submission
+
+Stage 5 manual moderation test summary: 75 passed, 0 failed, 75 total.
+### realtime
+[PASS] Stage 6 creates realtime tables
+[PASS] comment realtime triggers exist
+[PASS] realtime foreign keys are clean
+[PASS] realtime quick check is ok
+[PASS] live ticket expires after sixty seconds
+[PASS] live ticket preserves reconnect sequence
+[PASS] live ticket is one-time
+[PASS] ticket cannot cross users
+[PASS] expired ticket is rejected
+[PASS] ticket consumption revalidates the auth session
+[PASS] ticket consumption revalidates active membership
+[PASS] ticket consumption revalidates the live session
+[PASS] visible comment receives sequence one
+[PASS] manual realtime event increments sequence
+[PASS] sequences are gapless
+[PASS] catch-up returns missing events in order
+[PASS] up-to-date reconnect has no duplicate events
+[PASS] clear sequence is persisted for snapshot reconstruction
+[PASS] pending comment creates no viewer event
+[PASS] approval creates restoration event
+[PASS] hide creates removal event
+[PASS] pruned history requests a snapshot reset
+[PASS] snapshot contains only currently visible comments
+[PASS] snapshot does not resurrect comments from before the last clear
+[PASS] future client sequence forces reset
+[PASS] scheduled maintenance prunes realtime events
+[PASS] scheduled maintenance prunes tickets
+[PASS] edge limiter receives a pseudonymous key
+[PASS] production requires public limiter binding
+[PASS] edge limiter rejection returns rate limit
+[PASS] auth-session revalidation is safely chunked for many sockets
+[PASS] ack updates serialized hibernation attachment
+[PASS] ack beyond sent sequence is ignored
+[PASS] oversized client frame closes socket
+[PASS] hibernation broadcast sends sequence envelope
+[PASS] same sequence is not sent twice
+[PASS] revoked auth session closes an existing socket before delivery
+[PASS] room closure closes hibernated sockets
+[PASS] viewer requests one-time live tickets
+[PASS] viewer uses bounded exponential reconnect
+[PASS] viewer discards duplicate sequence
+[PASS] viewer detects sequence gaps
+[PASS] viewer persists only non-secret sequence state
+[PASS] viewer stops reconnecting when room closes
+
+Stage 6 realtime test summary: 44 passed, 0 failed, 44 total.
+### AI
+[PASS] Stage 7 creates all AI tables
+[PASS] Stage 7 foreign keys are clean
+[PASS] Stage 7 quick check is ok
+[PASS] organization AI defaults disabled
+[PASS] session AI defaults disabled
+[PASS] new organizations receive disabled AI settings
+[PASS] session AI can enable moderation and translation
+[PASS] safe comment creates two jobs
+[PASS] queue receives job IDs only
+[PASS] moderation job succeeds
+[PASS] translation job succeeds
+[PASS] AI moderation does not change human moderation state
+[PASS] AI translation does not change original text
+[PASS] structured moderation result is persisted
+[PASS] translation is persisted separately
+[PASS] translation receives a Stage 6 sequence event
+[PASS] translation realtime dispatch was attempted
+[PASS] teacher comment list includes AI advice
+[PASS] teacher comment list includes AI translation
+[PASS] reset snapshot includes latest translation
+[PASS] Workers AI receives direct JSON Schema
+[PASS] AI Gateway disables cache when configured
+[PASS] PII is detected locally
+[PASS] PII moderation is local review advice
+[PASS] PII translation is not sent externally
+[PASS] prompt injection signal is retained as a category
+[PASS] prompt injection text remains data not instruction
+[PASS] invalid primary response falls back to the secondary model
+[PASS] primary and fallback model calls are both counted
+[PASS] translation and realtime event fail as one atomic operation
+[PASS] translation retry persists translation and realtime event together
+[PASS] daily quota stops provider execution
+[PASS] retryable provider failure enters retry
+[PASS] provider failure stops after three attempts
+[PASS] each primary and fallback call consumes one quota event
+[PASS] terminal job message is idempotently ignored
+[PASS] terminal failed job is not redispatched
+[PASS] disabled organization creates no jobs
+AI queue dispatch failed Error
+[PASS] queue dispatch failure does not throw into posting flow
+[PASS] missing or disabled comment scheduling stays non-fatal
+[PASS] invalid queue messages are acknowledged
+[PASS] moderation output validator accepts bounded schema
+[PASS] translation output validator trims valid output
+[PASS] unsupported target languages are rejected
+[PASS] admin labels AI verdict as reference only
+[PASS] viewer labels translated content
+[PASS] viewer never replaces original message with translation
+
+Stage 7 AI test summary: 47 passed, 0 failed, 47 total.
+### content filter
+[PASS] content-filter tables exist
+[PASS] foreign keys clean
+[PASS] quick check ok
+[PASS] all category policies are initialized
+[PASS] session filter defaults disabled and ambiguous routing
+[PASS] dictionary stores language metadata
+[PASS] dictionary stores boundary mode
+[PASS] punctuation insertion is normalized to a deterministic match
+[PASS] punctuation-obfuscated term is masked
+[PASS] deterministic mask does not require AI in ambiguous-only mode
+[PASS] Katakana and Hiragana are folded for matching
+[PASS] level 5 term reaches reject policy
+[PASS] political category is inactive by default
+[PASS] one-edit evasion becomes an ambiguous review
+[PASS] ambiguous match is routed to AI
+[PASS] safe comment skips moderation AI in ambiguous-only mode
+[PASS] ambiguous comment creates only moderation AI job
+[PASS] ambiguous comment remains pending until human or later policy decision
+[PASS] original and masked display text are stored separately
+[PASS] filter match evidence is stored without duplicating the term text
+[PASS] realtime event contains masked text only
+[PASS] teacher view keeps original and display forms
+[PASS] teacher view includes dictionary evidence
+[PASS] same spelling can be registered for different languages
+[PASS] English auto boundary avoids substring false positive
+[PASS] English standalone word still matches
+[PASS] all repeated deterministic matches are masked
+[PASS] strict match maps zero-width obfuscation to the correct original span
+[PASS] Thai combining marks are preserved for matching
+[PASS] Devanagari combining marks are preserved for matching
+
+Stage 7.6 content-filter summary: 30 passed, 0 failed, 30 total.
+### bilingual
+[PASS] comments store detected language
+[PASS] translations store filtered display text
+[PASS] Japanese and English core and context packs are available but not silently installed
+[PASS] both core packs install as editable organization terms
+[PASS] pack installation is idempotent
+[PASS] pack contains no political category terms
+[PASS] Japanese pack masks punctuation evasion before translation
+[PASS] English pack masks a whole English word before translation
+[PASS] English word boundaries avoid matching inside assignment or class
+[PASS] non-Japanese and non-English text is held for review
+[PASS] unsupported language requests AI reference review
+[PASS] shared short Latin words do not misclassify unsupported text as English
+[PASS] clear English sentence remains supported
+[PASS] unsupported language comment is persisted pending
+[PASS] unsupported language creates a moderation AI job even when ordinary AI moderation is off
+[PASS] pending unsupported comment is not translated before human approval
+[PASS] translated English text is checked by the English pack
+[PASS] raw translation and filtered display translation are stored separately
+[PASS] translation realtime never leaks the unfiltered translation
+[PASS] high-severity translated text is rejected from display
+[PASS] rejected translation is held and no realtime event is created
+
+Stage 7.7 bilingual filter summary: 21 passed, 0 failed, 21 total.

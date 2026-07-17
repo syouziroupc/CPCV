@@ -1,0 +1,14 @@
+[PASS] legacy version 1 install is detected
+[PASS] pack installation upgrades version 1 to version 2
+[PASS] untouched pack-managed term is updated in place
+[PASS] deleted pack term remains deleted after upgrade
+[PASS] deleted pack term is not resurrected as a second row
+[PASS] manually created or detached terms are preserved
+[PASS] upgrade installs every non-deleted pack term
+[PASS] reinstalling version 2 is idempotent
+[PASS] context pack installs separately
+[PASS] source pack keys remain unique
+[PASS] pack upgrades preserve foreign-key integrity
+[PASS] database quick_check remains ok
+
+Stage 7.8 pack upgrade summary: 12 passed, 0 failed, 12 total.

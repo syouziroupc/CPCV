@@ -1,0 +1,19 @@
+{
+  "viewport": {
+    "w": 1440,
+    "h": 1000
+  },
+  "documentWidth": 1440,
+  "bodyWidth": 1440,
+  "section": {
+    "left": 255,
+    "right": 1185,
+    "top": 272.703125,
+    "bottom": 728.15625,
+    "width": 930,
+    "height": 455.453125
+  },
+  "outside": [],
+  "short": [],
+  "tableWraps": []
+}

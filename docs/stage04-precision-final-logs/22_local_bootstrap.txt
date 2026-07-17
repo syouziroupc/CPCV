@@ -1,0 +1,9 @@
+
+> class-pdf-comment-viewer-v01@0.4.2 db:v2:bootstrap
+> node scripts/bootstrap-owner.mjs --persist-to .dev-d1 --organization-name Local Audit Organization --login-id audit.owner --display-name Audit Owner --password-stdin
+
+(node:38380) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Bootstrap completed.
+Organization ID: org_65c92fcc6b2d4ab5af841a6c5f81b6b4
+Owner user ID: usr_dd31a57658134befa65ea1ecc481ad30

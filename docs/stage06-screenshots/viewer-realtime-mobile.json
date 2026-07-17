@@ -1,0 +1,33 @@
+{
+  "viewportWidth": 390,
+  "viewportHeight": 844,
+  "documentWidth": 390,
+  "documentHeight": 844,
+  "bodyWidth": 390,
+  "topbarClientWidth": 366,
+  "topbarScrollWidth": 576,
+  "topbar": {
+    "left": 12,
+    "top": 791,
+    "right": 378,
+    "bottom": 832,
+    "width": 366,
+    "height": 41
+  },
+  "commentPanel": {
+    "left": 8,
+    "top": 584.8125,
+    "right": 382,
+    "bottom": 780,
+    "width": 374,
+    "height": 195.1875
+  },
+  "qrCorner": {
+    "left": 250,
+    "top": 72,
+    "right": 378,
+    "bottom": 200,
+    "width": 128,
+    "height": 128
+  }
+}

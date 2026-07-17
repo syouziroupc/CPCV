@@ -1,0 +1,38 @@
+CPCV Stage 7.5 Test Results
+Date: 2026-07-16 JST
+Version: 0.7.5
+
+Functional tests
+- DB_V2 complete: 159 passed
+- Stage 3-A authentication core: 120 passed
+- Stage 3-B authentication API: 118 passed
+- Stage 3-C private integration: 50 passed
+- Stage 4 comment persistence: 67 passed
+- Stage 5 manual moderation: 75 passed
+- Stage 6 realtime: 44 passed
+- Stage 6.5-A email authentication: 42 passed
+- Stage 6.5 account lifecycle: 35 passed
+- Stage 7 AI: 47 passed
+- Stage 7.5 dictionary content filter: 21 passed
+
+Functional total: 778 passed, 0 failed
+
+Boundary and verifier tests
+- Precision boundaries: 110 passed
+- Stage compatibility commands: 7 passed
+- Deployment verifiers: 11 passed
+- Stage 7 boundaries: 52 passed
+- Stage 7.5 boundaries: 26 passed
+
+Boundary total: 206 passed, 0 failed
+
+Additional verification
+- npm run check: PASS
+- npm run check:project: PASS
+- npm run check:pdf-links: PASS
+- Wrangler deploy --dry-run: PASS
+- npm audit: 0 vulnerabilities
+- npm audit --omit=dev: 0 vulnerabilities
+- Visual screenshots: 5 generated and inspected
+- Page-level horizontal overflow: 0
+- External deployment: NOT RUN

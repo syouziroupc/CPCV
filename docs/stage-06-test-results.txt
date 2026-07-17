@@ -1,0 +1,48 @@
+Stage 6 final local test results
+================================
+
+Functional tests
+----------------
+Stage 2:   159 passed, 0 failed
+Stage 3-A: 120 passed, 0 failed
+Stage 3-B: 118 passed, 0 failed
+Stage 3-C:  50 passed, 0 failed
+Stage 4:    67 passed, 0 failed
+Stage 5:    75 passed, 0 failed
+Stage 6:    44 passed, 0 failed
+Total:     633 passed, 0 failed
+
+Additional verification
+-----------------------
+Stage 6 boundaries: 48 passed, 0 failed
+Precision boundaries: 97 passed, 0 failed
+Stage compatibility commands: 7 passed, 0 failed
+Deployment verifier tests: 11 passed, 0 failed
+
+Build and dependency checks
+---------------------------
+npm run check: PASS
+npm run check:project: PASS
+npm run check:pdf-links: PASS
+npm run check:precision: PASS
+npm run deploy:dry-run: PASS
+npm ls --all: PASS
+npm audit: 0 vulnerabilities
+npm audit --omit=dev: 0 vulnerabilities
+
+Migration and actual Worker
+---------------------------
+Legacy local schema: PASS
+DB_V2 migrations 0001-0007: PASS
+Second migration application: no-op
+Owner Bootstrap on latest schema: PASS
+Stage 6 actual Worker smoke: PASS
+Scheduled handler: PASS
+
+Visual and PDF
+--------------
+Chromium Desktop 1440x1000: PASS
+Chromium Mobile 390x844: PASS
+Page-level horizontal overflow: none
+Mobile toolbar/comment/QR overlap: none
+Manual PDF: 13 pages rendered and visually reviewed

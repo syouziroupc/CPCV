@@ -1,0 +1,23 @@
+
+> class-pdf-comment-viewer-v01@0.6.0 deploy:dry-run
+> node scripts/predeploy-check.mjs && wrangler deploy --dry-run
+
+project verification passed
+predeploy check passed (75 JavaScript modules)
+
+ ⛅️ wrangler 4.110.0
+────────────────────
+✨ Read 22 files from the assets directory /mnt/data/CPCV_stage06_working/public
+Total Upload: 281.48 KiB / gzip: 56.96 KiB
+Your Worker has access to the following bindings:
+Binding                                                               Resource
+env.COMMENT_ROOM (CommentRoom)                                        Durable Object
+env.DB (class_comment_db)                                             D1 Database
+env.DB_V2 (class_comment_db_v2)                                       D1 Database
+env.ASSETS                                                            Assets
+env.APP_ENV ("production")                                            Environment Variable
+env.AUTH_V2_ENABLED ("1")                                             Environment Variable
+env.AUTH_ORIGIN ("https://class-pdf-comment-viewer-v01....")          Environment Variable
+env.PUBLIC_ORIGIN ("https://class-pdf-comment-viewer-v01....")        Environment Variable
+
+--dry-run: exiting now.

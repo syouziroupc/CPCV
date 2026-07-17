@@ -1,0 +1,52 @@
+[PASS] V2 flag disables legacy teacher login with 410
+[PASS] V2 flag disables all legacy master APIs with 410
+[PASS] Bearer token cannot authenticate V2 private API
+[PASS] HttpOnly-cookie session authenticates private API
+[PASS] private API rejects organization selector query
+[PASS] production refuses AUTH_V2_ENABLED=0
+[PASS] teacher creates a session
+[PASS] DB_V2 and legacy DB use identical session identity
+[PASS] legacy teacher projection uses V2 user id
+[PASS] session creation audit is recorded
+[PASS] student public session API reads the V2 source of truth
+[PASS] legacy student message shape remains accepted
+[PASS] public message reaches the verified comment room path
+[PASS] teacher sees the created own session
+[PASS] Admin sees all organization sessions
+[PASS] Teacher cannot read another teacher session
+[PASS] other organization cannot read session by id
+[PASS] Teacher cannot update another teacher session
+[PASS] Admin updates a session in the same organization
+[PASS] settings update remains identical in both databases
+[PASS] settings update reaches comment room state
+[PASS] settings body cannot select another organization
+[PASS] legacy projection failure never returns success
+[PASS] failed create is compensated to deleted in DB_V2
+[PASS] failed create records projection audit
+[PASS] failed create leaves no legacy session
+[PASS] compensation audit failure never returns success
+[PASS] audit failure fallback still deletes the orphan V2 session
+[PASS] audit failure fallback leaves no legacy session
+[PASS] audit failure fallback records projection inconsistency
+[PASS] V2 settings failure returns an error
+[PASS] legacy settings are rolled back after V2 failure
+[PASS] V2 settings remain unchanged after atomic batch failure
+[PASS] rollback failure returns generic 500
+[PASS] failed rollback is left visible as safe-side legacy state
+[PASS] rollback failure records projection inconsistency
+[PASS] V2 end failure returns error
+[PASS] end failure keeps legacy projection safely stopped
+[PASS] end failure does not falsely end DB_V2
+[PASS] end failure records projection inconsistency
+[PASS] V2 delete failure returns error
+[PASS] delete failure keeps legacy projection safely deleted
+[PASS] delete failure records projection inconsistency
+[PASS] authenticated clear operation succeeds
+[PASS] clear reaches unchanged comment room endpoint
+[PASS] clear operation is audited
+[PASS] authenticated viewer receives a one-time live ticket
+[PASS] ticket-authenticated WebSocket bridge reaches comment room
+[PASS] V2 WebSocket bridge strips obsolete token subprotocol
+[PASS] cross-origin WebSocket request is rejected
+
+Stage 3-C integration test summary: 50 passed, 0 failed, 50 total.

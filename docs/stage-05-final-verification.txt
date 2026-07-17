@@ -1,0 +1,51 @@
+Stage 5 final verification
+
+1. Functional regression
+   588 passed / 0 failed
+
+2. Boundaries
+   Stage compatibility 6 / 0
+   Deployment verifier 11 / 0
+   Stage 5 boundary 31 / 0
+   Precision boundary 89 / 0
+
+3. Build and dependencies
+   npm run check: passed
+   npm run check:project: passed
+   npm run check:pdf-links: passed
+   npm run deploy:dry-run: passed
+   npm ls --all: passed
+   npm audit: 0 vulnerabilities
+   npm audit --omit=dev: 0 vulnerabilities
+   git diff --check: passed
+
+4. Local migration
+   0001 through 0006 applied
+   second apply: no migrations to apply
+   Owner bootstrap: passed
+
+5. Real Worker E2E
+   login: passed
+   premoderated session creation: passed
+   pending anonymous post: passed
+   idempotent replay: passed
+   approve: passed
+   hide: passed
+   visible restore: passed
+   delete: passed
+   deleted safe-side restore: passed
+   moderation history: passed
+   CSV: passed
+   session end: passed
+   logout: passed
+   scheduled handler: passed
+
+6. Visual and manual
+   Admin moderation desktop: inspected
+   Admin moderation mobile: inspected
+   page-level horizontal overflow: not detected
+   moderation table overflow: confined to table wrapper
+   manual PDF: 13 pages rendered and inspected
+
+7. Remote
+   GitHub and Cloudflare remote operations were not executed.

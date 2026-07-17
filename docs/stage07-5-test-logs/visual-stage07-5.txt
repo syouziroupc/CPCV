@@ -1,0 +1,1 @@
+{"ok": true, "screenshots": 5, "outputDir": "/mnt/data/stage75_work/docs/stage07-5-screenshots"}

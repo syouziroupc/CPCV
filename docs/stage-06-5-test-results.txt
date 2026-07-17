@@ -1,0 +1,42 @@
+CPCV Stage 6.5 final local test results
+Date: 2026-07-14 JST
+Version: 0.6.5
+
+Functional suites
+- DB_V2 schema and bootstrap: 159 passed, 0 failed
+- Stage 3-A authentication: 120 passed, 0 failed
+- Stage 3-B authentication API: 118 passed, 0 failed
+- Stage 3-C private integration: 50 passed, 0 failed
+- Stage 4 comment persistence: 67 passed, 0 failed
+- Stage 5 moderation: 75 passed, 0 failed
+- Stage 6 realtime: 44 passed, 0 failed
+- Stage 6.5-A email authentication: 42 passed, 0 failed
+- Stage 6.5 account lifecycle: 35 passed, 0 failed
+
+Functional total
+- 710 passed, 0 failed
+
+Boundary and deployment-helper suites
+- Precision boundaries: 105 passed, 0 failed
+- Stage 6.5 boundaries: 25 passed, 0 failed
+- Deployment verifier fixtures: 11 passed, 0 failed
+- Stage compatibility commands: 7 passed, 0 failed
+
+Other checks
+- JavaScript syntax and project verification: passed
+- PDF link and reconnect logic: passed
+- Wrangler deploy dry-run: passed
+- npm audit: 0 vulnerabilities
+- npm audit --omit=dev: 0 vulnerabilities
+- Visual screenshots: 10 passed
+- Horizontal overflow: 0
+- Visible input/select/button below 39px: 0
+
+Expected production gate
+- npm run verify:deployment exits 1 because remote UUID, four limiter namespaces, sender addresses, and Turnstile site key are intentionally unset.
+- This is the correct pre-deployment state.
+- EMAIL_AUTH_REQUIRED remains 0 until all active Owners have verified email addresses.
+
+Evidence directory
+- docs/stage06-5-final-logs/
+- docs/stage06-5-screenshots/

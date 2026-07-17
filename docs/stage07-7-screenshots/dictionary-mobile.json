@@ -1,0 +1,28 @@
+{
+  "viewport": {
+    "w": 390,
+    "h": 844
+  },
+  "documentWidth": 390,
+  "bodyWidth": 390,
+  "section": {
+    "left": 35,
+    "right": 355,
+    "top": 0.390625,
+    "bottom": 2631.546875,
+    "width": 320,
+    "height": 2631.15625
+  },
+  "outside": [],
+  "short": [],
+  "tableWraps": [
+    {
+      "clientWidth": 318,
+      "scrollWidth": 680
+    },
+    {
+      "clientWidth": 318,
+      "scrollWidth": 680
+    }
+  ]
+}

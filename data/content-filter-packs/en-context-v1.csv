@@ -1,0 +1,111 @@
+﻿term,language_code,category,severity,match_mode,fuzzy_enabled,boundary_mode,active
+sexual,en,sexual,1,normalized,0,word,1
+sexuality,en,sexual,1,normalized,0,word,1
+sexy,en,sexual,1,normalized,0,word,1
+porno,en,sexual,1,normalized,0,word,1
+pornography,en,sexual,1,normalized,0,word,1
+adult video,en,sexual,1,normalized,0,word,1
+adult content,en,sexual,1,normalized,0,word,1
+nude,en,sexual,1,normalized,0,word,1
+nudity,en,sexual,1,normalized,0,word,1
+naked,en,sexual,1,normalized,0,word,1
+breast,en,sexual,1,normalized,0,word,1
+breasts,en,sexual,1,normalized,0,word,1
+boob,en,sexual,1,normalized,0,word,1
+vulva,en,sexual,1,normalized,0,word,1
+clitoris,en,sexual,1,normalized,0,word,1
+anus,en,sexual,1,normalized,0,word,1
+anal,en,sexual,1,normalized,0,word,1
+intercourse,en,sexual,1,normalized,0,word,1
+orgasm,en,sexual,1,normalized,0,word,1
+ejaculation,en,sexual,1,normalized,0,word,1
+semen,en,sexual,1,normalized,0,word,1
+genitals,en,sexual,1,normalized,0,word,1
+condom,en,sexual,1,normalized,0,word,1
+masturbate,en,sexual,1,normalized,0,word,1
+masturbation,en,sexual,1,normalized,0,word,1
+erotic,en,sexual,1,normalized,0,word,1
+fetish,en,sexual,1,normalized,0,word,1
+bdsm,en,sexual,1,normalized,0,word,1
+bondage,en,sexual,1,normalized,0,word,1
+dominatrix,en,sexual,1,normalized,0,word,1
+escort,en,sexual,1,normalized,0,word,1
+hooker,en,sexual,1,normalized,0,word,1
+prostitute,en,sexual,1,normalized,0,word,1
+stripper,en,sexual,1,normalized,0,word,1
+strip club,en,sexual,1,normalized,0,word,1
+sex worker,en,sexual,1,normalized,0,word,1
+oral sex,en,sexual,1,normalized,0,word,1
+anal sex,en,sexual,1,normalized,0,word,1
+phone sex,en,sexual,1,normalized,0,word,1
+gay sex,en,sexual,1,normalized,0,word,1
+lesbian sex,en,sexual,1,normalized,0,word,1
+threesome,en,sexual,1,normalized,0,word,1
+orgy,en,sexual,1,normalized,0,word,1
+swinger,en,sexual,1,normalized,0,word,1
+hentai,en,sexual,1,normalized,0,word,1
+yaoi,en,sexual,1,normalized,0,word,1
+yuri,en,sexual,1,normalized,0,word,1
+onlyfans,en,sexual,1,normalized,0,word,1
+camgirl,en,sexual,1,normalized,0,word,1
+cam boy,en,sexual,1,normalized,0,word,1
+adult toy,en,sexual,1,normalized,0,word,1
+sex toy,en,sexual,1,normalized,0,word,1
+vibrator,en,sexual,1,normalized,0,word,1
+erection,en,sexual,1,normalized,0,word,1
+erectile dysfunction,en,sexual,1,normalized,0,word,1
+virgin,en,sexual,1,normalized,0,word,1
+virginity,en,sexual,1,normalized,0,word,1
+circumcision,en,sexual,1,normalized,0,word,1
+pubic hair,en,sexual,1,normalized,0,word,1
+nipple,en,sexual,1,normalized,0,word,1
+nipples,en,sexual,1,normalized,0,word,1
+lingerie,en,sexual,1,normalized,0,word,1
+panties,en,sexual,1,normalized,0,word,1
+upskirt,en,sexual,1,normalized,0,word,1
+voyeur,en,sexual,1,normalized,0,word,1
+voyeurism,en,sexual,1,normalized,0,word,1
+pedophile,en,sexual,1,normalized,0,word,1
+paedophile,en,sexual,1,normalized,0,word,1
+child abuse,en,violence,2,normalized,0,word,1
+sexual assault,en,violence,2,normalized,0,word,1
+sexual harassment,en,violence,2,normalized,0,word,1
+hell,en,profanity,1,normalized,0,word,1
+bloody,en,profanity,1,normalized,0,word,1
+bollocks,en,profanity,1,normalized,0,word,1
+sucks,en,profanity,1,normalized,0,word,1
+suck,en,profanity,1,normalized,0,word,1
+douche,en,profanity,1,normalized,0,word,1
+arse,en,profanity,1,normalized,0,word,1
+piss,en,profanity,1,normalized,0,word,1
+bugger,en,profanity,1,normalized,0,word,1
+git,en,profanity,1,normalized,0,word,1
+tosser,en,profanity,1,normalized,0,word,1
+bellend,en,profanity,1,normalized,0,word,1
+dumb,en,harassment,2,normalized,0,word,1
+fat,en,harassment,2,normalized,0,word,1
+skinny,en,harassment,2,normalized,0,word,1
+lame,en,harassment,2,normalized,0,word,1
+psycho,en,harassment,2,normalized,0,word,1
+crazy,en,harassment,2,normalized,0,word,1
+insane,en,harassment,2,normalized,0,word,1
+freak,en,harassment,2,normalized,0,word,1
+weirdo,en,harassment,2,normalized,0,word,1
+old hag,en,harassment,2,normalized,0,word,1
+old fart,en,harassment,2,normalized,0,word,1
+brat,en,harassment,2,normalized,0,word,1
+jerk,en,harassment,2,normalized,0,word,1
+clown,en,harassment,2,normalized,0,word,1
+trash,en,harassment,2,normalized,0,word,1
+garbage,en,harassment,2,normalized,0,word,1
+smelly,en,harassment,2,normalized,0,word,1
+homo,en,discrimination,1,normalized,0,word,1
+dyke,en,discrimination,1,normalized,0,word,1
+queer,en,discrimination,1,normalized,0,word,1
+spastic,en,discrimination,1,normalized,0,word,1
+mong,en,discrimination,1,normalized,0,word,1
+oriental,en,discrimination,1,normalized,0,word,1
+gypsy,en,discrimination,1,normalized,0,word,1
+eskimo,en,discrimination,1,normalized,0,word,1
+illegal alien,en,discrimination,1,normalized,0,word,1
+colored,en,discrimination,1,normalized,0,word,1

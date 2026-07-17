@@ -1,0 +1,5 @@
+db /mnt/data/cpcv_stage04_audit/source/CPCV_stage04_implemented_source/.dev-d1/v3/d1/miniflare-D1DatabaseObject/bf34411247d52dd443ef376e21554f19dce2e41c0bfc40c05201fbb796235d95.sqlite
+owners [('audit.owner', 'owner', 'active')]
+audit [('organization.bootstrap',)]
+foreign []
+quick [('ok',)]

@@ -1,0 +1,37 @@
+[PASS] self-registration returns Owner session
+[PASS] Owner can create a teacher invitation
+[PASS] invitation email contains a path token
+[PASS] invitation stores only token hash
+[PASS] invitation delivery is attributed to organization
+[PASS] public invitation inspection exposes only masked address
+[PASS] new user accepts invitation and receives session
+[PASS] accepted invitation creates active membership
+[PASS] invitation token cannot be replayed
+[PASS] account endpoint returns verified email and memberships
+[PASS] manager reset sends email without returning a raw token
+[PASS] manager reset token is emailed
+[PASS] manager reset token is hashed in D1
+[PASS] a logged-in user with another email cannot consume an invitation
+[PASS] existing user can join a second organization
+[PASS] existing invitation acceptance does not create a duplicate user
+[PASS] existing user now has two active memberships
+[PASS] manager reset blocks a multi-organization account
+[PASS] verified user can request email change
+[PASS] email change confirmation uses a path token
+[PASS] email change raw token is absent from D1
+[PASS] email change confirmation succeeds
+[PASS] email change revokes all sessions
+[PASS] old address receives a change notice
+[PASS] email change token cannot be replayed
+[PASS] legacy account can enroll its first email
+[PASS] legacy email enrollment becomes verified
+[PASS] temporary-password member creation is disabled
+[PASS] Owner can invite Admin
+[PASS] Admin cannot invite Admin
+[PASS] Admin can invite Teacher
+[PASS] pending invitation quota is enforced
+[PASS] daily invitation email quota is enforced
+[PASS] invitation resend rotates successfully below quota
+[PASS] active member quota rejects invitation acceptance
+
+Stage 6.5 account lifecycle summary: 35 passed, 0 failed, 35 total.

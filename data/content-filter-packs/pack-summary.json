@@ -1,0 +1,50 @@
+[
+  {
+    "id": "ja-core-v1",
+    "version": 2,
+    "terms": 128,
+    "categories": {
+      "sexual": 52,
+      "profanity": 22,
+      "harassment": 28,
+      "violence": 20,
+      "discrimination": 6
+    }
+  },
+  {
+    "id": "ja-context-v1",
+    "version": 1,
+    "terms": 101,
+    "categories": {
+      "sexual": 63,
+      "violence": 7,
+      "profanity": 1,
+      "harassment": 9,
+      "discrimination": 21
+    }
+  },
+  {
+    "id": "en-core-v1",
+    "version": 2,
+    "terms": 161,
+    "categories": {
+      "profanity": 40,
+      "sexual": 47,
+      "harassment": 31,
+      "discrimination": 25,
+      "violence": 18
+    }
+  },
+  {
+    "id": "en-context-v1",
+    "version": 1,
+    "terms": 110,
+    "categories": {
+      "sexual": 68,
+      "violence": 3,
+      "profanity": 12,
+      "harassment": 17,
+      "discrimination": 10
+    }
+  }
+]

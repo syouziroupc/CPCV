@@ -1,0 +1,499 @@
+### db
+
+=== Stage 2 schema and constraint suite ===
+[PASS] migration applies to an empty local D1
+[PASS] first migration run applies 0001_initial_schema.sql
+[PASS] second migration apply exits successfully
+[PASS] second migration apply is a no-op
+[PASS] migration history contains exactly the Stage 2 and Stage 3-A migrations after the second apply
+[PASS] exactly the seven application tables exist
+[PASS] bootstrap schema fingerprint matches the migrated canonical schema
+[PASS] all table columns, types, nullability, defaults, and primary keys match the design
+[PASS] all foreign keys and ON DELETE rules match the design
+[PASS] all 17 specified indexes exist
+[PASS] PRAGMA foreign_key_check returns zero rows
+[PASS] D1-supported PRAGMA quick_check returns ok
+[PASS] underlying local SQLite PRAGMA integrity_check returns ok
+[PASS] seed organizations
+[PASS] seed users
+[PASS] seed organization memberships
+[PASS] organization rejects a NULL primary key
+[PASS] organization rejects an invalid status
+[PASS] organization rejects an empty name
+[PASS] organization rejects a whitespace-only name
+[PASS] organization names are not globally unique
+[PASS] organization rejects updated_at before created_at
+[PASS] active organization rejects deleted_at
+[PASS] deleted organization requires deleted_at
+[PASS] deleted organization accepts a consistent deleted_at
+[PASS] user rejects a NULL primary key
+[PASS] user rejects an exact duplicate login ID
+[PASS] user rejects a case-only duplicate login ID
+[PASS] user rejects an uppercase unique login ID
+[PASS] user rejects an empty login ID
+[PASS] user rejects forbidden login ID characters
+[PASS] user rejects an invalid status
+[PASS] user rejects a whitespace-only display name
+[PASS] user rejects a short password hash
+[PASS] user rejects password_changed_at before creation
+[PASS] active user rejects deleted_at
+[PASS] deleted user requires deleted_at
+[PASS] deleted user accepts a consistent deleted_at
+[PASS] membership rejects a duplicate organization and user pair
+[PASS] one user can belong to another organization
+[PASS] membership rejects a missing organization
+[PASS] membership rejects a missing user
+[PASS] membership rejects an invalid role
+[PASS] membership rejects an invalid status
+[PASS] active membership rejects removed_at
+[PASS] membership rejects updated_at before created_at
+[PASS] removed membership requires removed_at
+[PASS] removed membership accepts a consistent removed_at
+[PASS] auth session rejects a NULL primary key
+[PASS] valid organization-bound auth session is accepted
+[PASS] auth session rejects a user without membership
+[PASS] auth session rejects a duplicate token hash
+[PASS] auth session rejects a duplicate CSRF hash
+[PASS] auth session rejects a NULL organization
+[PASS] auth session rejects last_seen_at before creation
+[PASS] auth session rejects idle expiry at last_seen_at
+[PASS] auth session rejects idle expiry beyond absolute expiry
+[PASS] auth session rejects revoked_at before creation
+[PASS] password reset token rejects a NULL primary key
+[PASS] valid password reset token is accepted
+[PASS] password reset rejects duplicate token hash
+[PASS] password reset rejects a missing user
+[PASS] password reset rejects a missing creator
+[PASS] password reset rejects used_at and revoked_at together
+[PASS] password reset rejects used_at after expiry
+[PASS] password reset rejects revoked_at before creation
+[PASS] password reset rejects expiry at creation
+[PASS] live session rejects a NULL primary key
+[PASS] valid active live session is accepted
+[PASS] live session rejects a missing organization
+[PASS] live session rejects a NULL organization
+[PASS] live session rejects a whitespace-only title
+[PASS] live session rejects a creator outside the organization
+[PASS] live session rejects a duplicate public code
+[PASS] live session rejects a public code with wrong length
+[PASS] live session rejects forbidden public code characters
+[PASS] live session rejects lowercase public codes
+[PASS] live session rejects an invalid display mode
+[PASS] live session rejects display seconds below range
+[PASS] live session rejects display seconds above range
+[PASS] live session rejects posting boolean outside 0 and 1
+[PASS] live session rejects visibility boolean outside 0 and 1
+[PASS] ended live session rejects posting enabled
+[PASS] ended live session rejects comments visible
+[PASS] active live session rejects ended_at
+[PASS] live session rejects expiry at started_at
+[PASS] ended live session rejects ended_at before started_at
+[PASS] ended live session requires ended_at
+[PASS] deleted live session requires deleted_at
+[PASS] consistent ended live session is accepted
+[PASS] deleted live session rejects deleted_at before ended_at
+[PASS] consistent deleted live session is accepted
+[PASS] audit log rejects a NULL primary key
+[PASS] valid system audit log is accepted
+[PASS] global system audit log with no organization is accepted
+[PASS] valid user audit log is accepted
+[PASS] system audit rejects actor user ID
+[PASS] system audit rejects actor role
+[PASS] user audit requires actor user ID
+[PASS] audit log rejects invalid JSON
+[PASS] audit log rejects a whitespace-only action
+[PASS] audit log rejects a missing organization reference
+[PASS] audit log rejects a missing actor user
+[PASS] audit log rejects an invalid actor role
+[PASS] organization A-only user cannot create organization B auth session
+[PASS] organization A-only user cannot create organization B live session
+[PASS] multi-organization user can create organization A auth session
+[PASS] multi-organization user can create organization B auth session
+[PASS] organization physical deletion is restricted while memberships exist
+[PASS] user physical deletion is restricted while memberships exist
+[PASS] membership list query uses an index
+[PASS] organization owner query uses an index
+[PASS] active live session query uses an index
+[PASS] auth token lookup uses a unique index
+[PASS] expired auth cleanup query uses an index
+[PASS] organization audit query uses an index
+[PASS] foreign keys remain clean after all schema tests
+[PASS] D1 quick_check remains ok after all schema tests
+[PASS] local SQLite integrity_check remains ok after all schema tests
+
+DB_V2 test summary: 119 passed, 0 failed, 119 total.
+(node:5657) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== Stage 2 Owner bootstrap suite ===
+[PASS] remote bootstrap verifies the actual D1 UUID and name before reading the password
+[PASS] bootstrap utility binds only to loopback and uses remote=true for remote D1 access
+[PASS] bootstrap verifies migration, table set, foreign keys, and quick_check before writing
+[PASS] remote bootstrap rejects a missing database ID
+[PASS] local bootstrap rejects a remote database ID argument
+[PASS] remote bootstrap rejects --password-stdin
+[PASS] remote bootstrap rejects the legacy DB UUID
+[PASS] remote bootstrap rejects non-TTY password input
+[PASS] bootstrap test database migration succeeds
+[PASS] bootstrap latest-schema extensions are installed
+[PASS] bootstrap accepts the required core schema after later migrations
+[PASS] latest-schema bootstrap creates exactly one organization
+[PASS] latest-schema bootstrap removes its temporary config
+[PASS] latest-schema bootstrap leaves the extended database healthy
+[PASS] coexisting legacy D1 fixture is installed
+[PASS] bootstrap selects DB_V2 when the persist directory also contains the legacy D1
+[PASS] coexisting-D1 bootstrap writes exactly one V2 organization
+[PASS] coexisting-D1 bootstrap does not modify the legacy sibling
+[PASS] coexisting-D1 bootstrap removes its temporary config
+[PASS] bootstrap missing-index fixture is installed
+[PASS] bootstrap rejects a DB whose schema objects differ even when all seven tables remain
+[PASS] missing-index bootstrap leaves the database empty
+[PASS] missing-index bootstrap removes its temporary config
+[PASS] bootstrap missing-index fixture is removed
+[PASS] bootstrap rollback trigger is installed
+[PASS] bootstrap reports failure when the audit insert is forced to fail
+[PASS] bootstrap output does not contain the plaintext password on failure
+[PASS] failed bootstrap removes its temporary config
+[PASS] failed bootstrap rolls back organization, user, membership, and audit together
+[PASS] bootstrap rollback trigger is removed
+[PASS] bootstrap creates the first Owner successfully
+[PASS] bootstrap output does not contain the plaintext password on success
+[PASS] successful bootstrap removes its temporary config
+[PASS] bootstrap creates organization, active Owner membership, and system audit
+[PASS] plaintext bootstrap password is absent from stored user fields
+[PASS] bootstrap output does not contain the stored password hash or salt
+[PASS] bootstrap rejects a second execution by default
+[PASS] second bootstrap output does not contain the plaintext password
+[PASS] rejected second bootstrap removes its temporary config
+[PASS] second bootstrap leaves exactly one organization
+
+DB_V2 bootstrap test summary: 40 passed, 0 failed, 40 total.
+(node:6156) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+DB_V2 complete test summary: 159 passed, 0 failed, 159 total.
+### auth core
+(node:6354) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[PASS] 0001 and 0002 migrations apply to an empty local D1
+[PASS] migration output includes 0002_auth_security.sql
+[PASS] second Stage 3-A migration apply succeeds
+[PASS] second Stage 3-A migration apply is a no-op
+[PASS] users has all three Stage 3-A security columns
+[PASS] failed_login_count default is zero and NOT NULL
+[PASS] require_password_change default is zero and NOT NULL
+[PASS] idx_users_lock_state exists
+[PASS] failed_login_count CHECK rejects negative values
+[PASS] require_password_change CHECK rejects values outside 0 and 1
+[PASS] password salt contains at least 16 random bytes
+[PASS] session token contains at least 32 random bytes
+[PASS] two generated tokens differ
+[PASS] 11-character password is rejected
+[PASS] 12-character password is accepted
+[PASS] 128-character password is accepted
+[PASS] 129-character password is rejected
+[PASS] Unicode password is accepted
+[PASS] password identical to login ID is rejected
+[PASS] password whitespace is not trimmed
+[PASS] PBKDF2 v2 password verifies
+[PASS] wrong PBKDF2 v2 password does not verify
+[PASS] legacy PBKDF2 v1 password verifies during migration
+[PASS] legacy scheme requires rehash
+[PASS] current scheme does not require rehash
+[PASS] constant-time equality accepts equal strings
+[PASS] constant-time equality rejects different strings
+[PASS] token hash is deterministic
+[PASS] token hash does not equal raw token
+[PASS] empty token hash input is rejected
+[PASS] production cookie uses __Host prefix
+[PASS] production cookie has Secure
+[PASS] production cookie has HttpOnly
+[PASS] production cookie has SameSite Strict
+[PASS] production cookie has Path root
+[PASS] production cookie has no Domain attribute
+[PASS] production cookie has 12-hour Max-Age
+[PASS] logout cookie uses same production name
+[PASS] logout cookie has Max-Age zero
+[PASS] logout cookie preserves Secure and HttpOnly
+[PASS] local cookie uses development name
+[PASS] local cookie token is parsed
+[PASS] local cookie omits Secure
+[PASS] APP_ENV local is rejected on a remote hostname
+[PASS] cookie parser keeps first duplicate value
+[PASS] cookie parser decodes values
+[PASS] GET is not unsafe
+[PASS] POST is unsafe
+[PASS] exact Origin succeeds
+[PASS] Origin rejects different scheme
+[PASS] Origin rejects different host
+[PASS] Origin rejects different port
+[PASS] Origin rejects suffix attack
+[PASS] Origin rejects multiple values
+[PASS] Origin rejects missing value
+[PASS] misconfigured AUTH_ORIGIN is rejected
+[PASS] JSON content type is accepted
+[PASS] non-JSON content type is rejected
+[PASS] correct CSRF token succeeds
+[PASS] missing CSRF token is rejected
+[PASS] modified CSRF token is rejected
+[PASS] CSRF token from another session is rejected
+[PASS] GET does not require CSRF
+[PASS] owner permission owner:manage matches matrix
+[PASS] owner permission audit:read matches matrix
+[PASS] admin permission teacher:manage matches matrix
+[PASS] admin permission admin:manage matches matrix
+[PASS] admin permission owner:manage matches matrix
+[PASS] teacher permission session:manage_own matches matrix
+[PASS] teacher permission members:list matches matrix
+[PASS] teacher permission audit:read matches matrix
+[PASS] Owner can manage Admin
+[PASS] Owner cannot issue reset token to Owner
+[PASS] Admin can manage Teacher
+[PASS] Admin cannot manage Admin
+[PASS] Admin cannot manage Owner
+[PASS] Teacher cannot manage members
+[PASS] unknown member action is rejected
+[PASS] requirePermission returns authorized context
+[PASS] requirePermission rejects unauthorized role
+[PASS] requireRole returns allowed role
+[PASS] requireRole rejects disallowed role
+[PASS] rate-limit key is deterministic
+[PASS] rate-limit key does not contain raw identifier
+[PASS] rate limiter receives Cloudflare object argument
+[PASS] successful rate limiter allows request
+[PASS] failed rate limiter produces 429
+[PASS] limiter failure fails open
+[PASS] limiter failure callback runs
+[PASS] limiter and failure callback outage still fails open
+[PASS] missing local limiter fails open
+[PASS] session material has independent raw tokens
+[PASS] session token hash does not expose raw token
+[PASS] CSRF token hash does not expose raw token
+[PASS] session idle expiry is two hours
+[PASS] session absolute expiry is twelve hours
+[PASS] session does not refresh before five minutes
+[PASS] session refreshes at five minutes
+[PASS] idle refresh never exceeds absolute expiry
+[PASS] session internal data is accessible to middleware utilities
+[PASS] session internal data is not enumerable
+[PASS] middleware returns exact public AuthContext fields
+[PASS] middleware AuthContext uses session organization
+[PASS] middleware performs one JOIN lookup
+[PASS] middleware does not refresh last_seen before five minutes
+[PASS] lookup SQL uses a bound token hash
+[PASS] middleware refreshes last_seen after five minutes
+[PASS] middleware refresh is conditional on old last_seen value
+[PASS] refreshed idle expiry does not exceed absolute expiry
+[PASS] missing session cookie is rejected
+[PASS] unknown session token is rejected
+[PASS] revoked session is rejected
+[PASS] idle-expired session is rejected
+[PASS] absolute-expired session is rejected
+[PASS] invalid last_seen_at is rejected
+[PASS] suspended user is rejected
+[PASS] suspended organization is rejected
+[PASS] suspended membership is rejected
+[PASS] removed membership is rejected
+[PASS] invalid database role is rejected
+
+Stage 3-A test summary: 120 passed, 0 failed, 120 total.
+### auth api
+[PASS] single-organization login succeeds and ignores supplied organizationId
+[PASS] login response uses no-store security headers
+[PASS] login response does not expose raw session token
+[PASS] login selects the server-side active organization
+[PASS] local login sets HttpOnly SameSite Strict dev cookie
+[PASS] D1 stores only session token hash
+[PASS] D1 stores only CSRF token hash
+[PASS] session lookup succeeds
+[PASS] GET session issues an additional CSRF token
+[PASS] separate tab receives a distinct CSRF token
+[PASS] primary login CSRF hash remains stable
+[PASS] secondary CSRF hashes are stored separately
+[PASS] secondary CSRF storage is capped at eight tokens
+[PASS] oldest secondary CSRF token is evicted after the cap
+[PASS] login CSRF token remains valid
+[PASS] latest tab CSRF token remains valid
+[PASS] authenticated query organization selector is rejected
+[PASS] organization selector separator variants are rejected
+[PASS] logout without CSRF is rejected
+[PASS] logout rejects body organization selector
+[PASS] logout succeeds with Origin and CSRF
+[PASS] logout clears identical cookie name
+[PASS] logged-out token replay is rejected
+[PASS] unknown user and wrong password share generic response
+[PASS] suspended user receives generic 401
+[PASS] suspended membership receives generic 401
+[PASS] multiple active organizations require selection
+[PASS] invalid selected organization remains generic
+[PASS] valid selected organization creates scoped session
+[PASS] login rejects a different Origin
+[PASS] login rejects a missing Origin
+[PASS] authentication JSON body is capped
+[PASS] each login issues a new session token
+[PASS] suspended organization receives generic 401
+[PASS] email reset request endpoint validates its input
+[PASS] deleted user receives generic 401
+[PASS] user without membership receives generic 401
+[PASS] legacy password scheme is rehashed on successful login
+[PASS] legacy rehash preserves actual password change time
+[PASS] failed login 1 returns generic 401
+[PASS] failed login 2 returns generic 401
+[PASS] failed login 3 returns generic 401
+[PASS] failed login 4 returns generic 401
+[PASS] failed login 5 returns generic 401
+[PASS] fifth failure sets a 15-minute account lock
+[PASS] correct password is rejected while locked
+[PASS] login succeeds after lock expiry
+[PASS] successful login clears failure count and lock
+[PASS] IP limiter rejection returns 429 and Retry-After
+[PASS] account limiter rejection returns 429
+[PASS] limiter failure fails open while D1 authentication continues
+[PASS] limiter failure audit contains no raw IP or login ID
+req_685ee48fe6ba4d15a563578c36f9af5b AuthError: AUTH_RATE_LIMITER_NOT_CONFIGURED
+    at enforceLoginRateLimits (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/src/routes/auth.js:518:11)
+    at handleLogin (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/src/routes/auth.js:71:9)
+    at async Object.fetch (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/src/index.js:38:49)
+    at async testLockAndRateLimit (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/scripts/test-auth-api-v2.mjs:188:14)
+    at async runGroup (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/scripts/test-auth-api-v2.mjs:39:5)
+    at async main (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/scripts/test-auth-api-v2.mjs:25:3)
+    at async file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/scripts/test-auth-api-v2.mjs:783:1 {
+  status: 500,
+  code: 'AUTH_RATE_LIMITER_NOT_CONFIGURED',
+  headers: {},
+  expose: false
+}
+[PASS] production refuses login without rate limiter bindings
+req_987e6540a0404a5e8227e6e80f05dd15 AuthError: AUTH_CLIENT_IP_UNAVAILABLE
+    at enforceLoginRateLimits (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/src/routes/auth.js:515:42)
+    at handleLogin (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/src/routes/auth.js:71:9)
+    at async Object.fetch (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/src/index.js:38:49)
+    at async testLockAndRateLimit (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/scripts/test-auth-api-v2.mjs:191:14)
+    at async runGroup (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/scripts/test-auth-api-v2.mjs:39:5)
+    at async main (file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/scripts/test-auth-api-v2.mjs:25:3)
+    at async file:///mnt/data/stage78_work/CPCV_stage07_7_complete_source/scripts/test-auth-api-v2.mjs:783:1 {
+  status: 500,
+  code: 'AUTH_CLIENT_IP_UNAVAILABLE',
+  headers: {},
+  expose: false
+}
+[PASS] production refuses login without Cloudflare client IP
+[PASS] password change rejects incorrect current password
+[PASS] password change enforces 12-character minimum
+[PASS] password change rejects body organization selector
+[PASS] password change succeeds and issues a fresh session
+[PASS] password change revokes the old session
+[PASS] old password no longer authenticates
+[PASS] new password authenticates
+[PASS] password change audit exists
+[PASS] owner can read current organization
+[PASS] owner can list members with stable pagination
+[PASS] member cursor returns remaining members
+[PASS] owner creates a new teacher
+[PASS] new member requires password change
+[PASS] global duplicate login ID returns 409
+[PASS] owner can add an explicit existing user membership
+[PASS] admin cannot create another admin
+[PASS] admin can create a teacher
+[PASS] admin can suspend a teacher
+[PASS] membership suspension invalidates existing session
+[PASS] admin cannot manage another admin
+[PASS] admin cannot promote a teacher to admin
+[PASS] teacher cannot list organization members
+[PASS] owner may demote a non-final owner
+[PASS] role change revokes the target session
+[PASS] CSRF token from another session is rejected
+[PASS] last active owner cannot be suspended
+[PASS] last active owner cannot be removed
+[PASS] owner can remove a teacher membership
+[PASS] removed membership cannot be silently reactivated by PATCH
+[PASS] reset email request accepts an omitted JSON body
+[PASS] owner can request a one-time reset email for admin
+[PASS] manager reset stores only a new SHA-256 token hash
+[PASS] issuing a new reset email revokes the previous token
+[PASS] admin cannot request reset for admin
+[PASS] admin can request reset email for a teacher
+[PASS] owner reset token issuance is forbidden
+[PASS] multi-organization user reset requires system operator
+[PASS] expired reset token is rejected
+[PASS] revoked reset token is rejected
+[PASS] issued reset token changes password
+[PASS] reset success revokes other unused tokens
+[PASS] used reset token cannot be replayed
+[PASS] password reset revokes all existing sessions
+[PASS] reset password authenticates
+[PASS] owner can read organization audit log
+[PASS] admin can read organization audit log
+[PASS] multi-organization session remains fixed to authenticated organization
+[PASS] audit action filter is exact
+[PASS] audit response contains no password or raw reset token
+[PASS] organization header selector is rejected
+[PASS] malformed encoded member path returns a controlled 400
+[PASS] member update reports failure when its audit write fails
+[PASS] failed member update rolls back membership state
+[PASS] failed member update rolls back session revocation
+[PASS] member creation reports failure when its audit write fails
+[PASS] failed member creation rolls back the new user
+[PASS] password change reports failure when its audit write fails
+[PASS] failed password change rolls back session revocation
+[PASS] failed password change preserves the old password
+[PASS] failed password change does not install the new password
+[PASS] password reset reports failure when its audit write fails
+[PASS] failed password reset leaves token unused
+[PASS] failed password reset rolls back session revocation
+[PASS] reset token remains usable after rolled-back failure
+
+Stage 3-B API test summary: 118 passed, 0 failed, 118 total.
+### private
+[PASS] V2 flag disables legacy teacher login with 410
+[PASS] V2 flag disables all legacy master APIs with 410
+[PASS] Bearer token cannot authenticate V2 private API
+[PASS] HttpOnly-cookie session authenticates private API
+[PASS] private API rejects organization selector query
+[PASS] production refuses AUTH_V2_ENABLED=0
+[PASS] teacher creates a session
+[PASS] DB_V2 and legacy DB use identical session identity
+[PASS] legacy teacher projection uses V2 user id
+[PASS] session creation audit is recorded
+[PASS] student public session API reads the V2 source of truth
+[PASS] legacy student message shape remains accepted
+[PASS] public message reaches the verified comment room path
+[PASS] teacher sees the created own session
+[PASS] Admin sees all organization sessions
+[PASS] Teacher cannot read another teacher session
+[PASS] other organization cannot read session by id
+[PASS] Teacher cannot update another teacher session
+[PASS] Admin updates a session in the same organization
+[PASS] settings update remains identical in both databases
+[PASS] settings update reaches comment room state
+[PASS] settings body cannot select another organization
+[PASS] legacy projection failure never returns success
+[PASS] failed create is compensated to deleted in DB_V2
+[PASS] failed create records projection audit
+[PASS] failed create leaves no legacy session
+[PASS] compensation audit failure never returns success
+[PASS] audit failure fallback still deletes the orphan V2 session
+[PASS] audit failure fallback leaves no legacy session
+[PASS] audit failure fallback records projection inconsistency
+[PASS] V2 settings failure returns an error
+[PASS] legacy settings are rolled back after V2 failure
+[PASS] V2 settings remain unchanged after atomic batch failure
+[PASS] rollback failure returns generic 500
+[PASS] failed rollback is left visible as safe-side legacy state
+[PASS] rollback failure records projection inconsistency
+[PASS] V2 end failure returns error
+[PASS] end failure keeps legacy projection safely stopped
+[PASS] end failure does not falsely end DB_V2
+[PASS] end failure records projection inconsistency
+[PASS] V2 delete failure returns error
+[PASS] delete failure keeps legacy projection safely deleted
+[PASS] delete failure records projection inconsistency
+[PASS] authenticated clear operation succeeds
+[PASS] clear reaches unchanged comment room endpoint
+[PASS] clear operation is audited
+[PASS] authenticated viewer receives a one-time live ticket
+[PASS] ticket-authenticated WebSocket bridge reaches comment room
+[PASS] V2 WebSocket bridge strips obsolete token subprotocol
+[PASS] cross-origin WebSocket request is rejected
+
+Stage 3-C integration test summary: 50 passed, 0 failed, 50 total.

@@ -1,0 +1,13 @@
+{
+  "ok": true,
+  "baseUrl": "http://localhost:8796",
+  "sessionId": "sess_0f55fd1e23b04db498d5c5854c4754cd",
+  "publicCode": "L5UP67",
+  "oneTimeTicketVerified": true,
+  "persistedSequenceVerified": true,
+  "catchUpVerified": true,
+  "duplicateTicketRejected": true,
+  "clearWatermarkVerified": true,
+  "roomClosureVerified": true,
+  "logoutVerified": true
+}

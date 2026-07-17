@@ -1,0 +1,34 @@
+CPCV Stage 7 test results
+Date: 2026-07-15 JST
+
+Functional tests
+- Stage 2 DB: 159 passed
+- Stage 3-A auth core: 120 passed
+- Stage 3-B auth API: 118 passed
+- Stage 3-C private integration: 50 passed
+- Stage 4 comments: 67 passed
+- Stage 5 moderation: 75 passed
+- Stage 6 realtime: 44 passed
+- Stage 6.5-A email auth: 42 passed
+- Stage 6.5 account lifecycle: 35 passed
+- Stage 7 AI: 47 passed
+Functional total: 757 passed, 0 failed
+
+Top-level boundary and deployment tests
+- Precision boundaries: 108 passed
+- Stage compatibility command: 7 passed
+- Deployment verifier tests: 11 passed
+- Stage 6.5 boundaries: 25 passed
+- Stage 7 boundaries: 52 passed
+Boundary total: 203 passed, 0 failed
+
+Other checks
+- npm run check: PASS
+- npm run check:project: PASS
+- npm run check:pdf-links: PASS
+- npm run deploy:dry-run: PASS
+- npm audit: 0 vulnerabilities
+- npm audit --omit=dev: 0 vulnerabilities
+- Visual screenshots: PASS
+
+Nested compatibility subtests are not added again to the top-level total.

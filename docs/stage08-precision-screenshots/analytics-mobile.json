@@ -1,0 +1,22 @@
+{
+  "viewport": {
+    "w": 390,
+    "h": 844
+  },
+  "documentWidth": 390,
+  "bodyWidth": 390,
+  "box": {
+    "left": 35,
+    "right": 355,
+    "width": 320,
+    "height": 924.421875
+  },
+  "outside": [],
+  "short": [],
+  "table": [
+    {
+      "clientWidth": 320,
+      "scrollWidth": 720
+    }
+  ]
+}

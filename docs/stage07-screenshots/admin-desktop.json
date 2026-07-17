@@ -1,0 +1,48 @@
+{
+  "viewportWidth": 1440,
+  "viewportHeight": 1000,
+  "documentWidth": 1440,
+  "documentHeight": 1877,
+  "bodyWidth": 1440,
+  "keyRects": [
+    {
+      "id": "organizationAiSection",
+      "cls": "section",
+      "type": "",
+      "left": 255,
+      "right": 1185,
+      "top": 164.390625,
+      "bottom": 335.1875,
+      "width": 930,
+      "height": 170.796875
+    },
+    {
+      "id": "sessionAiSection",
+      "cls": "ai-settings-panel",
+      "type": "",
+      "left": 255,
+      "right": 1185,
+      "top": 1002.34375,
+      "bottom": 1187.796875,
+      "width": 930,
+      "height": 185.453125
+    },
+    {
+      "id": "moderationSection",
+      "cls": "moderation-section",
+      "type": "",
+      "left": 255,
+      "right": 1185,
+      "top": 1211.796875,
+      "bottom": 1780.3125,
+      "width": 930,
+      "height": 568.515625
+    }
+  ],
+  "outside": [],
+  "shortControls": [],
+  "moderationScrollWidth": 963,
+  "moderationClientWidth": 928,
+  "topBarScrollWidth": 0,
+  "topBarClientWidth": 0
+}

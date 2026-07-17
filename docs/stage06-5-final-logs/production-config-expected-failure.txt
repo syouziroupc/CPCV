@@ -1,0 +1,13 @@
+
+> class-pdf-comment-viewer-v01@0.6.5 verify:deployment
+> node scripts/verify-deployment-config.mjs
+
+[FAIL] DB_V2 requires its real remote UUID before deployment.
+[FAIL] AUTH_LOGIN_IP_LIMITER binding is missing.
+[FAIL] AUTH_LOGIN_ACCOUNT_LIMITER binding is missing.
+[FAIL] PUBLIC_COMMENT_RATE_LIMITER binding is missing.
+[FAIL] AUTH_PUBLIC_EMAIL_LIMITER binding is missing.
+[FAIL] AUTH_EMAIL_FROM must contain the final production value.
+[FAIL] AUTH_EMAIL_REPLY_TO must contain the final production value.
+[FAIL] TURNSTILE_SITE_KEY must contain the final production value.
+exit_status=1

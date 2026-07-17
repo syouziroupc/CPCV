@@ -1,0 +1,124 @@
+(node:27148) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[PASS] 0001 and 0002 migrations apply to an empty local D1
+[PASS] migration output includes 0002_auth_security.sql
+[PASS] second Stage 3-A migration apply succeeds
+[PASS] second Stage 3-A migration apply is a no-op
+[PASS] users has all three Stage 3-A security columns
+[PASS] failed_login_count default is zero and NOT NULL
+[PASS] require_password_change default is zero and NOT NULL
+[PASS] idx_users_lock_state exists
+[PASS] failed_login_count CHECK rejects negative values
+[PASS] require_password_change CHECK rejects values outside 0 and 1
+[PASS] password salt contains at least 16 random bytes
+[PASS] session token contains at least 32 random bytes
+[PASS] two generated tokens differ
+[PASS] 11-character password is rejected
+[PASS] 12-character password is accepted
+[PASS] 128-character password is accepted
+[PASS] 129-character password is rejected
+[PASS] Unicode password is accepted
+[PASS] password identical to login ID is rejected
+[PASS] password whitespace is not trimmed
+[PASS] PBKDF2 v2 password verifies
+[PASS] wrong PBKDF2 v2 password does not verify
+[PASS] legacy PBKDF2 v1 password verifies during migration
+[PASS] legacy scheme requires rehash
+[PASS] current scheme does not require rehash
+[PASS] constant-time equality accepts equal strings
+[PASS] constant-time equality rejects different strings
+[PASS] token hash is deterministic
+[PASS] token hash does not equal raw token
+[PASS] empty token hash input is rejected
+[PASS] production cookie uses __Host prefix
+[PASS] production cookie has Secure
+[PASS] production cookie has HttpOnly
+[PASS] production cookie has SameSite Strict
+[PASS] production cookie has Path root
+[PASS] production cookie has no Domain attribute
+[PASS] production cookie has 12-hour Max-Age
+[PASS] logout cookie uses same production name
+[PASS] logout cookie has Max-Age zero
+[PASS] logout cookie preserves Secure and HttpOnly
+[PASS] local cookie uses development name
+[PASS] local cookie token is parsed
+[PASS] local cookie omits Secure
+[PASS] APP_ENV local is rejected on a remote hostname
+[PASS] cookie parser keeps first duplicate value
+[PASS] cookie parser decodes values
+[PASS] GET is not unsafe
+[PASS] POST is unsafe
+[PASS] exact Origin succeeds
+[PASS] Origin rejects different scheme
+[PASS] Origin rejects different host
+[PASS] Origin rejects different port
+[PASS] Origin rejects suffix attack
+[PASS] Origin rejects multiple values
+[PASS] Origin rejects missing value
+[PASS] misconfigured AUTH_ORIGIN is rejected
+[PASS] JSON content type is accepted
+[PASS] non-JSON content type is rejected
+[PASS] correct CSRF token succeeds
+[PASS] missing CSRF token is rejected
+[PASS] modified CSRF token is rejected
+[PASS] CSRF token from another session is rejected
+[PASS] GET does not require CSRF
+[PASS] owner permission owner:manage matches matrix
+[PASS] owner permission audit:read matches matrix
+[PASS] admin permission teacher:manage matches matrix
+[PASS] admin permission admin:manage matches matrix
+[PASS] admin permission owner:manage matches matrix
+[PASS] teacher permission session:manage_own matches matrix
+[PASS] teacher permission members:list matches matrix
+[PASS] teacher permission audit:read matches matrix
+[PASS] Owner can manage Admin
+[PASS] Owner cannot issue reset token to Owner
+[PASS] Admin can manage Teacher
+[PASS] Admin cannot manage Admin
+[PASS] Admin cannot manage Owner
+[PASS] Teacher cannot manage members
+[PASS] unknown member action is rejected
+[PASS] requirePermission returns authorized context
+[PASS] requirePermission rejects unauthorized role
+[PASS] requireRole returns allowed role
+[PASS] requireRole rejects disallowed role
+[PASS] rate-limit key is deterministic
+[PASS] rate-limit key does not contain raw identifier
+[PASS] rate limiter receives Cloudflare object argument
+[PASS] successful rate limiter allows request
+[PASS] failed rate limiter produces 429
+[PASS] limiter failure fails open
+[PASS] limiter failure callback runs
+[PASS] limiter and failure callback outage still fails open
+[PASS] missing local limiter fails open
+[PASS] session material has independent raw tokens
+[PASS] session token hash does not expose raw token
+[PASS] CSRF token hash does not expose raw token
+[PASS] session idle expiry is two hours
+[PASS] session absolute expiry is twelve hours
+[PASS] session does not refresh before five minutes
+[PASS] session refreshes at five minutes
+[PASS] idle refresh never exceeds absolute expiry
+[PASS] session internal data is accessible to middleware utilities
+[PASS] session internal data is not enumerable
+[PASS] middleware returns exact public AuthContext fields
+[PASS] middleware AuthContext uses session organization
+[PASS] middleware performs one JOIN lookup
+[PASS] middleware does not refresh last_seen before five minutes
+[PASS] lookup SQL uses a bound token hash
+[PASS] middleware refreshes last_seen after five minutes
+[PASS] middleware refresh is conditional on old last_seen value
+[PASS] refreshed idle expiry does not exceed absolute expiry
+[PASS] missing session cookie is rejected
+[PASS] unknown session token is rejected
+[PASS] revoked session is rejected
+[PASS] idle-expired session is rejected
+[PASS] absolute-expired session is rejected
+[PASS] invalid last_seen_at is rejected
+[PASS] suspended user is rejected
+[PASS] suspended organization is rejected
+[PASS] suspended membership is rejected
+[PASS] removed membership is rejected
+[PASS] invalid database role is rejected
+
+Stage 3-A test summary: 120 passed, 0 failed, 120 total.

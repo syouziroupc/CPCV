@@ -1,0 +1,46 @@
+[PASS] Stage 6 creates realtime tables
+[PASS] comment realtime triggers exist
+[PASS] realtime foreign keys are clean
+[PASS] realtime quick check is ok
+[PASS] live ticket expires after sixty seconds
+[PASS] live ticket preserves reconnect sequence
+[PASS] live ticket is one-time
+[PASS] ticket cannot cross users
+[PASS] expired ticket is rejected
+[PASS] ticket consumption revalidates the auth session
+[PASS] ticket consumption revalidates active membership
+[PASS] ticket consumption revalidates the live session
+[PASS] visible comment receives sequence one
+[PASS] manual realtime event increments sequence
+[PASS] sequences are gapless
+[PASS] catch-up returns missing events in order
+[PASS] up-to-date reconnect has no duplicate events
+[PASS] clear sequence is persisted for snapshot reconstruction
+[PASS] pending comment creates no viewer event
+[PASS] approval creates restoration event
+[PASS] hide creates removal event
+[PASS] pruned history requests a snapshot reset
+[PASS] snapshot contains only currently visible comments
+[PASS] snapshot does not resurrect comments from before the last clear
+[PASS] future client sequence forces reset
+[PASS] scheduled maintenance prunes realtime events
+[PASS] scheduled maintenance prunes tickets
+[PASS] edge limiter receives a pseudonymous key
+[PASS] production requires public limiter binding
+[PASS] edge limiter rejection returns rate limit
+[PASS] auth-session revalidation is safely chunked for many sockets
+[PASS] ack updates serialized hibernation attachment
+[PASS] ack beyond sent sequence is ignored
+[PASS] oversized client frame closes socket
+[PASS] hibernation broadcast sends sequence envelope
+[PASS] same sequence is not sent twice
+[PASS] revoked auth session closes an existing socket before delivery
+[PASS] room closure closes hibernated sockets
+[PASS] viewer requests one-time live tickets
+[PASS] viewer uses bounded exponential reconnect
+[PASS] viewer discards duplicate sequence
+[PASS] viewer detects sequence gaps
+[PASS] viewer persists only non-secret sequence state
+[PASS] viewer stops reconnecting when room closes
+
+Stage 6 realtime test summary: 44 passed, 0 failed, 44 total.

@@ -1,0 +1,5 @@
+
+> class-pdf-comment-viewer-v01@0.7.0 check:pdf-links
+> node scripts/verify-pdf-link-logic.mjs
+
+PDF link and reconnect logic verified

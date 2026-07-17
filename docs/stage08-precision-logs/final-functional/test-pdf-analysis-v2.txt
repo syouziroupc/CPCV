@@ -1,0 +1,49 @@
+[PASS] schema includes pdf_documents
+[PASS] schema includes session_pdf_bindings
+[PASS] schema includes session_pdf_state
+[PASS] schema includes pdf_page_events
+[PASS] schema includes comment_page_links
+[PASS] schema includes understanding_signals
+[PASS] schema includes analytics_snapshots
+[PASS] PDF metadata table excludes filename, bytes, text, and storage URL
+[PASS] PDF binds with hash metadata only
+[PASS] binding creates one page event
+[PASS] binding the same PDF is idempotent
+[PASS] reordered page update is ignored
+[PASS] monotonic page update is accepted
+[PASS] comment is linked to server current PDF page
+[PASS] page link evidence is persisted
+[PASS] three anonymous signals are stored for page 2
+[PASS] understanding response is rejected when the displayed page has changed
+[PASS] understanding works while comment posting is disabled
+[PASS] understanding retention is fixed at 180 days
+[PASS] analytics counts comments and question marks by page
+[PASS] group of three exposes aggregate understanding only
+[PASS] group smaller than three suppresses signal breakdown
+[PASS] analytics response contains no participant identifiers or comment text
+[PASS] page dwell is derived from page-change events
+[PASS] snapshot has deterministic SHA-256 checksum
+[PASS] snapshot reload preserves checksum and aggregate pages
+[PASS] snapshot appears in session-scoped list
+[PASS] analytics CSV is aggregate and has no personal columns
+[PASS] Stage 8 retention deletes expired signals and snapshots
+[PASS] Stage 8 migration preserves foreign keys
+[PASS] Stage 8 database quick_check is ok
+[PASS] PDF fingerprint rejects control characters
+[PASS] database trigger rejects page numbers outside the document
+[PASS] overall small-group suppression counts distinct people, not page answers
+[PASS] expired understanding signals are excluded before scheduled cleanup
+[PASS] expired comments are excluded before scheduled cleanup
+[PASS] an expired response can be renewed safely
+[PASS] database prevents snapshot mutation
+[PASS] snapshot checksum verification detects valid-JSON corruption
+[PASS] expired snapshots are hidden before scheduled cleanup
+[PASS] expired snapshots cannot be exported before cleanup
+[PASS] database trigger rejects cross-document understanding evidence
+[PASS] old page events are deleted after metadata retention
+[PASS] unused old PDF bindings and state are deleted
+[PASS] orphan PDF metadata is deleted after retention
+[PASS] pre-Stage-8 DB still accepts comments
+[PASS] pre-Stage-8 comment list returns null page instead of failing
+
+Stage 8 PDF analytics summary: 47 passed, 0 failed, 47 total.

@@ -1,0 +1,162 @@
+﻿term,language_code,category,severity,match_mode,fuzzy_enabled,boundary_mode,active
+fuck,en,profanity,4,normalized,1,word,1
+fucking,en,profanity,4,normalized,1,word,1
+fucked,en,profanity,4,normalized,1,word,1
+fucker,en,profanity,4,normalized,1,word,1
+motherfucker,en,profanity,5,normalized,1,word,1
+shit,en,profanity,3,normalized,1,word,1
+bullshit,en,profanity,4,normalized,1,word,1
+bitch,en,profanity,4,normalized,1,word,1
+cunt,en,profanity,5,normalized,1,word,1
+asshole,en,profanity,4,normalized,1,word,1
+ass,en,profanity,1,normalized,0,word,1
+bastard,en,profanity,3,normalized,1,word,1
+damn,en,profanity,1,normalized,0,word,1
+crap,en,profanity,1,normalized,0,word,1
+dick,en,sexual,3,normalized,1,word,1
+cock,en,sexual,3,normalized,1,word,1
+pussy,en,sexual,4,normalized,1,word,1
+whore,en,sexual,4,normalized,1,word,1
+slut,en,sexual,4,normalized,1,word,1
+porn,en,sexual,1,normalized,0,word,1
+blowjob,en,sexual,4,normalized,1,word,1
+handjob,en,sexual,4,normalized,1,word,1
+penis,en,sexual,1,normalized,0,word,1
+vagina,en,sexual,1,normalized,0,word,1
+boobs,en,sexual,1,normalized,0,word,1
+tits,en,sexual,1,normalized,0,word,1
+sex,en,sexual,1,normalized,0,word,1
+idiot,en,harassment,2,normalized,1,word,1
+moron,en,harassment,3,normalized,1,word,1
+stupid,en,harassment,2,normalized,0,word,1
+dumbass,en,harassment,4,normalized,1,word,1
+jackass,en,harassment,3,normalized,1,word,1
+loser,en,harassment,2,normalized,0,word,1
+ugly,en,harassment,2,normalized,0,word,1
+shut up,en,harassment,3,normalized,1,word,1
+go die,en,harassment,5,normalized,1,word,1
+kill yourself,en,harassment,5,normalized,1,word,1
+kys,en,harassment,5,normalized,0,word,1
+nigger,en,discrimination,4,normalized,1,word,1
+nigga,en,discrimination,4,normalized,1,word,1
+faggot,en,discrimination,4,normalized,1,word,1
+retard,en,discrimination,4,normalized,1,word,1
+tranny,en,discrimination,4,normalized,1,word,1
+chink,en,discrimination,4,normalized,1,word,1
+spic,en,discrimination,4,normalized,1,word,1
+rape,en,violence,2,normalized,0,word,1
+rapist,en,violence,2,normalized,0,word,1
+kill you,en,violence,5,normalized,1,word,1
+murder you,en,violence,5,normalized,1,word,1
+bomb threat,en,violence,5,normalized,1,word,1
+motherfucking,en,profanity,5,normalized,1,word,1
+fuckface,en,profanity,4,normalized,1,word,1
+fuckhead,en,profanity,4,normalized,1,word,1
+fuck off,en,profanity,4,normalized,1,word,1
+shithead,en,profanity,4,normalized,1,word,1
+piece of shit,en,profanity,4,normalized,1,word,1
+dipshit,en,profanity,4,normalized,1,word,1
+dumbshit,en,profanity,4,normalized,1,word,1
+horseshit,en,profanity,4,normalized,1,word,1
+batshit,en,profanity,4,normalized,1,word,1
+son of a bitch,en,profanity,5,normalized,1,word,1
+arsehole,en,profanity,4,normalized,1,word,1
+dickhead,en,profanity,4,normalized,1,word,1
+prick,en,profanity,3,normalized,1,word,1
+twat,en,profanity,4,normalized,1,word,1
+wanker,en,profanity,4,normalized,1,word,1
+douchebag,en,profanity,4,normalized,1,word,1
+piss off,en,profanity,3,normalized,1,word,1
+goddamn,en,profanity,3,normalized,1,word,1
+clusterfuck,en,profanity,4,normalized,1,word,1
+shitbag,en,profanity,4,normalized,1,word,1
+shitface,en,profanity,4,normalized,1,word,1
+cockhead,en,profanity,4,normalized,1,word,1
+bitchass,en,profanity,4,normalized,1,word,1
+fuckwit,en,profanity,4,normalized,1,word,1
+fucktard,en,profanity,4,normalized,1,word,1
+rimjob,en,sexual,4,normalized,1,word,1
+cumshot,en,sexual,4,normalized,1,word,1
+jizz,en,sexual,3,normalized,1,word,1
+dildo,en,sexual,3,normalized,1,word,1
+jack off,en,sexual,4,normalized,1,word,1
+jerk off,en,sexual,4,normalized,1,word,1
+fingerbang,en,sexual,4,normalized,1,word,1
+gangbang,en,sexual,5,normalized,1,word,1
+bukkake,en,sexual,5,normalized,1,word,1
+creampie,en,sexual,4,normalized,1,word,1
+deepthroat,en,sexual,4,normalized,1,word,1
+fisting,en,sexual,4,normalized,1,word,1
+footjob,en,sexual,4,normalized,1,word,1
+pegging,en,sexual,4,normalized,1,word,1
+rimming,en,sexual,4,normalized,1,word,1
+scat,en,sexual,4,normalized,1,word,1
+golden shower,en,sexual,4,normalized,1,word,1
+bestiality,en,sexual,5,normalized,1,word,1
+zoophilia,en,sexual,5,normalized,1,word,1
+incest,en,sexual,5,normalized,1,word,1
+child porn,en,sexual,5,normalized,1,word,1
+child pornography,en,sexual,5,normalized,1,word,1
+underage porn,en,sexual,5,normalized,1,word,1
+pedo porn,en,sexual,5,normalized,1,word,1
+lolicon,en,sexual,4,normalized,1,word,1
+rape porn,en,sexual,5,normalized,1,word,1
+revenge porn,en,sexual,5,normalized,1,word,1
+camwhore,en,sexual,4,normalized,1,word,1
+camslut,en,sexual,4,normalized,1,word,1
+cumslut,en,sexual,5,normalized,1,word,1
+fucktoy,en,sexual,5,normalized,1,word,1
+sex slave,en,sexual,5,normalized,1,word,1
+meat hole,en,sexual,5,normalized,1,word,1
+cum dumpster,en,sexual,5,normalized,1,word,1
+worthless,en,harassment,4,normalized,1,word,1
+useless piece of shit,en,harassment,5,normalized,1,word,1
+nobody likes you,en,harassment,4,normalized,1,word,1
+everyone hates you,en,harassment,4,normalized,1,word,1
+you should die,en,harassment,5,normalized,1,word,1
+drop dead,en,harassment,5,normalized,1,word,1
+fatass,en,harassment,4,normalized,1,word,1
+lardass,en,harassment,4,normalized,1,word,1
+ugly bitch,en,harassment,5,normalized,1,word,1
+stupid bitch,en,harassment,5,normalized,1,word,1
+dumb bitch,en,harassment,5,normalized,1,word,1
+pathetic loser,en,harassment,4,normalized,1,word,1
+human garbage,en,harassment,5,normalized,1,word,1
+piece of trash,en,harassment,4,normalized,1,word,1
+scumbag,en,harassment,4,normalized,1,word,1
+creep,en,harassment,3,normalized,1,word,1
+pervert,en,harassment,3,normalized,1,word,1
+freakshow,en,harassment,3,normalized,1,word,1
+you are disgusting,en,harassment,4,normalized,1,word,1
+you disgust me,en,harassment,4,normalized,1,word,1
+shoot you,en,violence,5,normalized,1,word,1
+stab you,en,violence,5,normalized,1,word,1
+beat you up,en,violence,5,normalized,1,word,1
+burn you alive,en,violence,5,normalized,1,word,1
+blow you up,en,violence,5,normalized,1,word,1
+school shooting,en,violence,5,normalized,1,word,1
+rape you,en,violence,5,normalized,1,word,1
+i will kill you,en,violence,5,normalized,1,word,1
+i'll kill you,en,violence,5,normalized,1,word,1
+i will hurt you,en,violence,5,normalized,1,word,1
+i know where you live,en,violence,5,normalized,1,word,1
+watch your back,en,violence,4,normalized,1,word,1
+you are dead,en,violence,5,normalized,1,word,1
+wetback,en,discrimination,4,normalized,1,word,1
+beaner,en,discrimination,4,normalized,1,word,1
+kike,en,discrimination,4,normalized,1,word,1
+paki,en,discrimination,4,normalized,1,word,1
+raghead,en,discrimination,4,normalized,1,word,1
+towelhead,en,discrimination,4,normalized,1,word,1
+coon,en,discrimination,4,normalized,1,word,1
+darkie,en,discrimination,4,normalized,1,word,1
+gook,en,discrimination,4,normalized,1,word,1
+jigaboo,en,discrimination,4,normalized,1,word,1
+slanteye,en,discrimination,4,normalized,1,word,1
+zipperhead,en,discrimination,4,normalized,1,word,1
+sand nigger,en,discrimination,4,normalized,1,word,1
+porch monkey,en,discrimination,4,normalized,1,word,1
+camel jockey,en,discrimination,4,normalized,1,word,1
+white trash,en,discrimination,4,normalized,1,word,1
+redskin,en,discrimination,4,normalized,1,word,1
+cripple,en,discrimination,4,normalized,1,word,1

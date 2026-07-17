@@ -1,0 +1,8 @@
+
+> class-pdf-comment-viewer-v01@0.4.2 db:v2:bootstrap
+> node scripts/bootstrap-owner.mjs --persist-to .dev-d1 --organization-name Second Organization --login-id audit.owner2 --display-name Second Owner --password-stdin
+
+(node:38404) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+Bootstrap failed: BOOTSTRAP_ALREADY_COMPLETED
+repeat_exit=1

@@ -1,0 +1,43 @@
+CPCV Stage 3-C final local test results
+Date: 2026-07-13 JST
+
+Regression and feature tests
+- Stage 2 DB_V2: 154 passed, 0 failed
+- Stage 3-A authentication foundation: 120 passed, 0 failed
+- Stage 3-B auth and organization APIs: 109 passed, 0 failed
+- Stage 3-C private session integration: 48 passed, 0 failed
+- Total: 431 passed, 0 failed
+
+Static and build verification
+- npm run check: PASS
+- npm run check:project: PASS
+- npm run check:pdf-links: PASS
+- node scripts/verify-stage03c-boundaries.mjs: PASS
+- npm run deploy:dry-run: PASS
+- npm ls --all: PASS
+- npm audit: 0 vulnerabilities
+- npm audit --omit=dev: 0 vulnerabilities
+
+Local development verification
+- npm run db:dev:migrate on an empty .dev-d1: PASS
+- second npm run db:dev:migrate: PASS and DB_V2 migration no-op
+- npm run dev with local Origin overrides: PASS
+- GET /admin: HTTP 200
+- GET /api/auth/session without Cookie: HTTP 401 AUTH_REQUIRED
+
+Visual verification
+- Admin login desktop 1440x1000: PASS
+- Admin login mobile 390x844: PASS
+- Master login desktop 1440x1000: PASS
+- Master login mobile 390x844: PASS
+- Master authenticated panel desktop: PASS
+- Master authenticated panel mobile: PASS
+- Viewer login desktop 1440x1000: PASS
+- Viewer login mobile 390x844: PASS
+- Horizontal overflow: none detected
+- Input/button overlap: none detected
+
+Remote operations
+- GitHub push: not executed
+- Cloudflare remote D1: not accessed
+- Worker deployment: not executed
