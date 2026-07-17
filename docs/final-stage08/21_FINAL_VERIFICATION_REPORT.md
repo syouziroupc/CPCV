@@ -21,7 +21,7 @@ sourceはCloudflare反映前のrelease candidateです。監査71件は全件修
 
 ## 再検証結果
 
-- source manifest: 927件一致
+- source manifest: 930件一致
 - JavaScript module static check: 134件
 - documentation validation: 94件成功
 - deployment verifier: 26件成功
