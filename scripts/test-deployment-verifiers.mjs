@@ -2,10 +2,13 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const require = createRequire(import.meta.url);
+const WRANGLER_ENTRY = require.resolve("wrangler");
 const temp = mkdtempSync(join(tmpdir(), "cpcv-deploy-verifiers-"));
 const results = [];
 const acceptanceSpecText = readFileSync(resolve(ROOT, "docs/final-stage08/10_STAGING_ACCEPTANCE_TEST.md"), "utf8");
@@ -14,9 +17,18 @@ const acceptanceItemCount = acceptanceSpecText.split(/\r?\n/).filter((line) => /
 try {
   const current = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
   const validConfig = current
-    .replace('name = \"EMAIL\"', 'name = \"EMAIL\"\nallowed_sender_addresses = [ \"noreply@auth.real-domain.jp\" ]')
-    .replace('database_name = "class_comment_db_v2"\nmigrations_dir', 'database_name = "class_comment_db_v2"\ndatabase_id = "123e4567-e89b-42d3-a456-426614174000"\nmigrations_dir')
-    .replace('PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"', 'PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"\nAUTH_EMAIL_FROM = "noreply@auth.real-domain.jp"\nAUTH_EMAIL_REPLY_TO = "support@auth.real-domain.jp"\nTURNSTILE_SITE_KEY = "0x4AAAAA-real-site-key"')
+    .replace(
+      /(\[\[send_email\]\]\s*\n\s*name = "EMAIL"\s*\n)/m,
+      '$1allowed_sender_addresses = [ "noreply@auth.real-domain.jp" ]\n'
+    )
+    .replace(
+      /(\[\[d1_databases\]\]\s*\n\s*binding = "DB_V2"\s*\n\s*database_name = "class_comment_db_v2"\s*\n)(?=migrations_dir\s*=)/m,
+      '$1database_id = "123e4567-e89b-42d3-a456-426614174000"\n'
+    )
+    .replace(
+      /PUBLIC_ORIGIN = "https:\/\/class-pdf-comment-viewer-v01\.syouziroupc\.workers\.dev"/,
+      'PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"\nAUTH_EMAIL_FROM = "noreply@auth.real-domain.jp"\nAUTH_EMAIL_REPLY_TO = "support@auth.real-domain.jp"\nTURNSTILE_SITE_KEY = "0x4AAAAA-real-site-key"'
+    )
     + `\n[[ratelimits]]\nname = "AUTH_LOGIN_IP_LIMITER"\nnamespace_id = "1001"\n[ratelimits.simple]\nlimit = 20\nperiod = 60\n\n[[ratelimits]]\nname = "AUTH_LOGIN_ACCOUNT_LIMITER"\nnamespace_id = "1002"\n[ratelimits.simple]\nlimit = 10\nperiod = 60\n\n[[ratelimits]]\nname = "PUBLIC_COMMENT_RATE_LIMITER"\nnamespace_id = "1003"\n[ratelimits.simple]\nlimit = 30\nperiod = 60\n\n[[ratelimits]]\nname = "AUTH_PUBLIC_EMAIL_LIMITER"\nnamespace_id = "1004"\n[ratelimits.simple]\nlimit = 30\nperiod = 60\n`;
   const incompletePath = join(temp, "incomplete.toml");
   writeFileSync(incompletePath, current);
@@ -45,8 +57,14 @@ try {
 
   const stagingConfig = validConfig
     .replace(/^name = "class-pdf-comment-viewer-v01"$/m, 'name = "class-pdf-comment-viewer-v01-staging"')
-    .replace('database_name = "class_comment_db"\ndatabase_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"', 'database_name = "class_comment_db_staging"\ndatabase_id = "223e4567-e89b-42d3-a456-426614174001"')
-    .replace('database_name = "class_comment_db_v2"\ndatabase_id = "123e4567-e89b-42d3-a456-426614174000"', 'database_name = "class_comment_db_v2_staging"\ndatabase_id = "323e4567-e89b-42d3-a456-426614174002"')
+    .replace(
+      /database_name = "class_comment_db"\s*\ndatabase_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"/,
+      'database_name = "class_comment_db_staging"\ndatabase_id = "223e4567-e89b-42d3-a456-426614174001"'
+    )
+    .replace(
+      /database_name = "class_comment_db_v2"\s*\ndatabase_id = "123e4567-e89b-42d3-a456-426614174000"/,
+      'database_name = "class_comment_db_v2_staging"\ndatabase_id = "323e4567-e89b-42d3-a456-426614174002"'
+    )
     .replaceAll('queue = "cpcv-ai-jobs"', 'queue = "cpcv-ai-jobs-staging"')
     .replaceAll('https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev', 'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev')
     .replace('TURNSTILE_SITE_KEY = "0x4AAAAA-real-site-key"', 'TURNSTILE_SITE_KEY = "0x4AAAAA-staging-site-key"')
@@ -60,7 +78,7 @@ try {
   rmSync(runtimeStagingPath, { force: true });
   const materialized = run("scripts/materialize-staging-config.mjs", [stagingPath, "--expected-sha256", createHash("sha256").update(stagingConfig).digest("hex")]);
   check("external staging config is materialized byte-for-byte at source root", materialized.status === 0 && readFileSync(runtimeStagingPath).equals(Buffer.from(stagingConfig)), materialized);
-  const stagingDryRun = runNpx(["wrangler", "deploy", "--dry-run", "--config", runtimeStagingPath]);
+  const stagingDryRun = runNpx(["deploy", "--dry-run", "--config", runtimeStagingPath]);
   check("materialized staging config resolves source-relative Wrangler paths", stagingDryRun.status === 0, stagingDryRun);
   rmSync(runtimeStagingPath, { force: true });
   const separated = run("scripts/verify-environment-separation.mjs", [validPath, stagingPath]);
@@ -139,8 +157,10 @@ function run(script, args = []) {
   return spawnSync(process.execPath, [resolve(ROOT, script), ...args], { encoding: "utf8", cwd: ROOT });
 }
 function runNpx(args = []) {
-  const command = process.platform === "win32" ? "npx.cmd" : "npx";
-  return spawnSync(command, args, { encoding: "utf8", cwd: ROOT });
+  const normalizedArgs = String(args[0] || "") === "wrangler" ? args.slice(1) : args;
+  return process.platform === "win32"
+    ? spawnSync(process.execPath, [WRANGLER_ENTRY, ...normalizedArgs], { encoding: "utf8", cwd: ROOT })
+    : spawnSync("npx", ["wrangler", ...normalizedArgs], { encoding: "utf8", cwd: ROOT });
 }
 function check(name, condition, detail = "") {
   const ok = Boolean(condition);

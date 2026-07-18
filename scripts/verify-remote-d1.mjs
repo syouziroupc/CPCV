@@ -1,9 +1,12 @@
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDeploymentOptions, withWranglerConfig } from "./deployment-cli.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const require = createRequire(import.meta.url);
+const WRANGLER_ENTRY = require.resolve("wrangler");
 let target;
 try {
   target = parseDeploymentOptions(process.argv.slice(2), {
@@ -33,12 +36,12 @@ const requiredTables = [
   "pdf_page_events", "comment_page_links", "understanding_signals",
   "analytics_snapshots"
 ];
-const schemaRows = query(`SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;`);
+const schemaRows = query(`SELECT name FROM sqlite_schema WHERE type='table' AND name IN (${requiredTables.map((name) => `'${name}'`).join(",")}) ORDER BY name;`);
 const tableNames = new Set(schemaRows.map((row) => String(row.name || "")));
 const missingTables = requiredTables.filter((name) => !tableNames.has(name));
 assert(missingTables.length === 0, `DB_V2 is missing required table(s): ${missingTables.join(", ")}`);
 
-for (const [prefix, label] of [
+const migrationChecks = [
   ["0006_manual_moderation", "Stage 5 migration 0006_manual_moderation"],
   ["0007_realtime", "Stage 6 migration 0007_realtime"],
   ["0008_email_auth", "Stage 6.5-A migration 0008_email_auth"],
@@ -51,9 +54,11 @@ for (const [prefix, label] of [
   ["0015_pdf_page_analytics", "Stage 8 migration 0015_pdf_page_analytics"],
   ["0016_stage08_precision_hardening", "Stage 8.1 migration 0016_stage08_precision_hardening"],
   ["0017_final_integrity_hardening", "Stage 8.2 migration 0017_final_integrity_hardening"]
-]) {
-  const rows = query(`SELECT name FROM d1_migrations WHERE name LIKE '${prefix}%' LIMIT 1;`);
-  assert(rows.length === 1, `DB_V2 ${label} is not recorded.`);
+];
+const migrationRows = query(`SELECT name FROM d1_migrations WHERE ${migrationChecks.map(([prefix]) => `name LIKE '${prefix}%'`).join(" OR ")} ORDER BY name;`);
+const migrationNames = new Set(migrationRows.map((row) => String(row.name || "")));
+for (const [prefix, label] of migrationChecks) {
+  assert([...migrationNames].some((name) => name.startsWith(prefix)), `DB_V2 ${label} is not recorded.`);
 }
 
 const moderationTriggers = query(`SELECT name FROM sqlite_schema WHERE type='trigger' AND name IN ('trg_comments_moderation_transition','trg_comments_moderation_timestamp') ORDER BY name;`);
@@ -171,10 +176,11 @@ if (unverifiedOwnerCount > 0) {
 console.log(`remote DB_V2 health verified; ${requiredTables.length} required tables, migrations through Stage 8.2, moderation/realtime/quota/Stage8 precision and Stage8.2 integrity triggers (${stage82TriggerNames.length}), active Owners: ${ownerCount}, unverified Owners: ${unverifiedOwnerCount}`);
 
 function query(sql) {
+  const command = sql.replace(/\s+/g, " ").trim();
   const args = withWranglerConfig([
-    "wrangler", "d1", "execute", DATABASE, "--remote", "--json", "--command", sql
+    "wrangler", "d1", "execute", DATABASE, "--remote", "--json", "--command", command
   ], target.configPath);
-  const result = spawnSync(npxCommand(), args,
+  const result = spawnSync(process.execPath, [WRANGLER_ENTRY, ...args.slice(1)],
     { cwd: ROOT, env: process.env, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
   if (result.status !== 0) {
     process.stderr.write(result.stderr || result.stdout || "Remote D1 query failed.\n");
@@ -191,5 +197,4 @@ function query(sql) {
   return executions.flatMap((entry) => Array.isArray(entry?.results) ? entry.results : []);
 }
 
-function npxCommand() { return process.platform === "win32" ? "npx.cmd" : "npx"; }
 function assert(condition, message) { if (!condition) { console.error(message); process.exit(1); } }

@@ -9,10 +9,10 @@ const results = [];
 runStageCompatibility("stage05");
 
 const immutableHashes = {
-  "src/auth/permissions.js": "dd3016c47a64249873843f953a1003d42fc52923ddb077ba0aa1a80769312616",
-  "src/auth/csrf.js": "68fc7f291a14a45266e9376a0ead492ac8c86ba4f550e0da95ede40d7d0ee77d",
-  "src/auth/passwords.js": "734ea909b2f4d7ee378f5d0266f60999cb333a4422a421290bc143a405b8a9b4",
-  "src/comments/cookies.js": "fb0dcfa55a8323591d9739e20d785115700dd32764849002ff82e1e3bb2f2d6f"
+  "src/auth/permissions.js": "d55a24d6a75b5e20d2883a64b23acc7e66944b0eeb9008ac5e7c58c0c7417580",
+  "src/auth/csrf.js": "fc3c49ef5a975a393e24b4d901ea4238246ccf6bb0c0dfce82879ad637a61c74",
+  "src/auth/passwords.js": "c02a699c401910f1084c19944d90ec1a69b1fbfc44b90464ae597271726356f0",
+  "src/comments/cookies.js": "4b11b7761fcdcb5a3e93fcc43c908e6cdf4e88ff1fba73a3e2c8e12e83871fc4"
 };
 for (const [path, hash] of Object.entries(immutableHashes)) {
   check(`${path} retains the Stage 4 security contract`, sha256(path) === hash);

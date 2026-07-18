@@ -1,9 +1,12 @@
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseDeploymentOptions, withWranglerConfig } from "./deployment-cli.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const require = createRequire(import.meta.url);
+const WRANGLER_ENTRY = require.resolve("wrangler");
 let target;
 try {
   target = parseDeploymentOptions(process.argv.slice(2), {
@@ -15,52 +18,53 @@ try {
   process.exit(2);
 }
 const DATABASE = target.database;
-const sql = `
-SELECT 'audit_logs.actor_user' AS check_name, COUNT(*) AS violation_count
+const sqlChecks = [
+  `SELECT 'audit_logs.actor_user' AS check_name, COUNT(*) AS violation_count
 FROM audit_logs a
 WHERE a.actor_user_id IS NOT NULL AND a.organization_id IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=a.organization_id AND m.user_id=a.actor_user_id)
-UNION ALL SELECT 'comment_events.actor_user', COUNT(*) FROM comment_events e
-WHERE e.actor_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=e.organization_id AND m.user_id=e.actor_user_id)
-UNION ALL SELECT 'comment_moderation_actions.actor_user', COUNT(*) FROM comment_moderation_actions a
-WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=a.organization_id AND m.user_id=a.actor_user_id)
-UNION ALL SELECT 'session_moderation_settings.updated_by', COUNT(*) FROM session_moderation_settings x
-WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)
-UNION ALL SELECT 'content_filter_terms.created_by', COUNT(*) FROM content_filter_terms x
-WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.created_by_user_id)
-UNION ALL SELECT 'organization_content_filter_policies.updated_by', COUNT(*) FROM organization_content_filter_policies x
-WHERE x.updated_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)
-UNION ALL SELECT 'session_content_filter_settings.updated_by', COUNT(*) FROM session_content_filter_settings x
-WHERE x.updated_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)
-UNION ALL SELECT 'content_filter_pack_installs.installed_by', COUNT(*) FROM content_filter_pack_installs x
-WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.installed_by_user_id)
-UNION ALL SELECT 'organization_ai_settings.updated_by', COUNT(*) FROM organization_ai_settings x
-WHERE x.updated_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)
-UNION ALL SELECT 'session_ai_settings.updated_by', COUNT(*) FROM session_ai_settings x
-WHERE x.updated_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)
-UNION ALL SELECT 'organization_origins.created_by', COUNT(*) FROM organization_origins x
-WHERE x.created_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.created_by_user_id)
-UNION ALL SELECT 'pdf_documents.created_by', COUNT(*) FROM pdf_documents x
-WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.created_by_user_id)
-UNION ALL SELECT 'organization_invitations.accepted_user', COUNT(*) FROM organization_invitations x
-WHERE x.accepted_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.accepted_user_id)
-UNION ALL SELECT 'realtime_connection_tickets.user', COUNT(*) FROM realtime_connection_tickets x
-WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.user_id)
-UNION ALL SELECT 'realtime_connection_tickets.auth_session', COUNT(*) FROM realtime_connection_tickets x
-WHERE NOT EXISTS (SELECT 1 FROM auth_sessions a WHERE a.id=x.auth_session_id AND a.organization_id=x.organization_id AND a.user_id=x.user_id)
-UNION ALL SELECT 'realtime_events.source_comment', COUNT(*) FROM realtime_events x
-WHERE x.source_comment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM comments c WHERE c.id=x.source_comment_id AND c.organization_id=x.organization_id AND c.live_session_id=x.live_session_id)
-UNION ALL SELECT 'comment_filter_matches.term', COUNT(*) FROM comment_filter_matches x
-WHERE x.term_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM content_filter_terms t WHERE t.id=x.term_id AND t.organization_id=x.organization_id)
-UNION ALL SELECT 'ai_results.job_context', COUNT(*) FROM ai_results x
-WHERE NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.id=x.job_id AND j.organization_id=x.organization_id AND j.live_session_id=x.live_session_id AND j.comment_id=x.comment_id AND j.job_type='moderation')
-UNION ALL SELECT 'translations.job_context', COUNT(*) FROM translations x
-WHERE NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.id=x.job_id AND j.organization_id=x.organization_id AND j.live_session_id=x.live_session_id AND j.comment_id=x.comment_id AND j.job_type='translation' AND j.target_language=x.target_language)
-UNION ALL SELECT 'ai_usage_events.job_context', COUNT(*) FROM ai_usage_events x
-WHERE NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.id=x.job_id AND j.organization_id=x.organization_id AND j.job_type=x.job_type AND x.attempt_number<=j.attempt_count)
-UNION ALL SELECT 'content_filter_terms.active_limit', COUNT(*) FROM (
+  AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=a.organization_id AND m.user_id=a.actor_user_id)`,
+  `SELECT 'comment_events.actor_user' AS check_name, COUNT(*) AS violation_count FROM comment_events e
+WHERE e.actor_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=e.organization_id AND m.user_id=e.actor_user_id)`,
+  `SELECT 'comment_moderation_actions.actor_user' AS check_name, COUNT(*) AS violation_count FROM comment_moderation_actions a
+WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=a.organization_id AND m.user_id=a.actor_user_id)`,
+  `SELECT 'session_moderation_settings.updated_by' AS check_name, COUNT(*) AS violation_count FROM session_moderation_settings x
+WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)`,
+  `SELECT 'content_filter_terms.created_by' AS check_name, COUNT(*) AS violation_count FROM content_filter_terms x
+WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.created_by_user_id)`,
+  `SELECT 'organization_content_filter_policies.updated_by' AS check_name, COUNT(*) AS violation_count FROM organization_content_filter_policies x
+WHERE x.updated_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)`,
+  `SELECT 'session_content_filter_settings.updated_by' AS check_name, COUNT(*) AS violation_count FROM session_content_filter_settings x
+WHERE x.updated_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)`,
+  `SELECT 'content_filter_pack_installs.installed_by' AS check_name, COUNT(*) AS violation_count FROM content_filter_pack_installs x
+WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.installed_by_user_id)`,
+  `SELECT 'organization_ai_settings.updated_by' AS check_name, COUNT(*) AS violation_count FROM organization_ai_settings x
+WHERE x.updated_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)`,
+  `SELECT 'session_ai_settings.updated_by' AS check_name, COUNT(*) AS violation_count FROM session_ai_settings x
+WHERE x.updated_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.updated_by_user_id)`,
+  `SELECT 'organization_origins.created_by' AS check_name, COUNT(*) AS violation_count FROM organization_origins x
+WHERE x.created_by_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.created_by_user_id)`,
+  `SELECT 'pdf_documents.created_by' AS check_name, COUNT(*) AS violation_count FROM pdf_documents x
+WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.created_by_user_id)`,
+  `SELECT 'organization_invitations.accepted_user' AS check_name, COUNT(*) AS violation_count FROM organization_invitations x
+WHERE x.accepted_user_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.accepted_user_id)`,
+  `SELECT 'realtime_connection_tickets.user' AS check_name, COUNT(*) AS violation_count FROM realtime_connection_tickets x
+WHERE NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id=x.organization_id AND m.user_id=x.user_id)`,
+  `SELECT 'realtime_connection_tickets.auth_session' AS check_name, COUNT(*) AS violation_count FROM realtime_connection_tickets x
+WHERE NOT EXISTS (SELECT 1 FROM auth_sessions a WHERE a.id=x.auth_session_id AND a.organization_id=x.organization_id AND a.user_id=x.user_id)`,
+  `SELECT 'realtime_events.source_comment' AS check_name, COUNT(*) AS violation_count FROM realtime_events x
+WHERE x.source_comment_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM comments c WHERE c.id=x.source_comment_id AND c.organization_id=x.organization_id AND c.live_session_id=x.live_session_id)`,
+  `SELECT 'comment_filter_matches.term' AS check_name, COUNT(*) AS violation_count FROM comment_filter_matches x
+WHERE x.term_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM content_filter_terms t WHERE t.id=x.term_id AND t.organization_id=x.organization_id)`,
+  `SELECT 'ai_results.job_context' AS check_name, COUNT(*) AS violation_count FROM ai_results x
+WHERE NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.id=x.job_id AND j.organization_id=x.organization_id AND j.live_session_id=x.live_session_id AND j.comment_id=x.comment_id AND j.job_type='moderation')`,
+  `SELECT 'translations.job_context' AS check_name, COUNT(*) AS violation_count FROM translations x
+WHERE NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.id=x.job_id AND j.organization_id=x.organization_id AND j.live_session_id=x.live_session_id AND j.comment_id=x.comment_id AND j.job_type='translation' AND j.target_language=x.target_language)`,
+  `SELECT 'ai_usage_events.job_context' AS check_name, COUNT(*) AS violation_count FROM ai_usage_events x
+WHERE NOT EXISTS (SELECT 1 FROM ai_jobs j WHERE j.id=x.job_id AND j.organization_id=x.organization_id AND j.job_type=x.job_type AND x.attempt_number<=j.attempt_count)`,
+  `SELECT 'content_filter_terms.active_limit' AS check_name, COUNT(*) AS violation_count FROM (
   SELECT organization_id FROM content_filter_terms WHERE deleted_at IS NULL GROUP BY organization_id HAVING COUNT(*)>2000
-);`;
+)`
+];
 
 const tableRows = query("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;");
 const tableNames = new Set(tableRows.map((row) => String(row.name || "")));
@@ -85,7 +89,11 @@ if (missing.length) {
   console.error(`DB_V2 is not fresh and lacks Stage 8.1 prerequisite table(s): ${missing.join(", ")}`);
   process.exit(1);
 }
-const rows = query(sql);
+const rows = [];
+for (const [index, batch] of chunk(sqlChecks, 5).entries()) {
+  const command = batch.join(" UNION ALL ");
+  rows.push(...query(command, `batch ${index + 1}/${Math.ceil(sqlChecks.length / 5)}`));
+}
 const invalid = rows.filter((row) => Number(row?.violation_count) > 0);
 for (const row of rows) console.log(`${row.check_name}\t${Number(row.violation_count)}`);
 if (invalid.length) {
@@ -94,13 +102,15 @@ if (invalid.length) {
 }
 console.log(`Stage 8.2 existing-data preflight passed (${rows.length} checks).`);
 
-function query(command) {
+function query(command, label = "query") {
+  const sql = command.replace(/\s+/g, " ").trim();
   const args = withWranglerConfig([
-    "wrangler", "d1", "execute", DATABASE, "--remote", "--json", "--command", command
+    "wrangler", "d1", "execute", DATABASE, "--remote", "--json", "--command", sql
   ], target.configPath);
-  const result = spawnSync(process.platform === "win32" ? "npx.cmd" : "npx", args,
+  const result = spawnSync(process.execPath, [WRANGLER_ENTRY, ...args.slice(1)],
     { cwd: ROOT, env: process.env, encoding: "utf8", maxBuffer: 10 * 1024 * 1024 });
   if (result.status !== 0) {
+    process.stderr.write(`Stage 8.2 preflight ${label} failed.\n`);
     process.stderr.write(result.stderr || result.stdout || "Stage 8.2 preflight query failed.\n");
     process.exit(result.status || 1);
   }
@@ -113,4 +123,12 @@ function query(command) {
     process.exit(1);
   }
   return executions.flatMap((entry) => Array.isArray(entry?.results) ? entry.results : []);
+}
+
+function chunk(items, size) {
+  const batches = [];
+  for (let index = 0; index < items.length; index += size) {
+    batches.push(items.slice(index, index + size));
+  }
+  return batches;
 }

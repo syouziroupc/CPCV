@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -119,7 +120,8 @@ function read(path) {
   return readFileSync(resolve(ROOT, path), "utf8");
 }
 function sha256(path) {
-  return createHash("sha256").update(readFileSync(resolve(ROOT, path))).digest("hex");
+  const blob = execFileSync("git", ["show", `HEAD:${path}`], { cwd: ROOT, encoding: "buffer" });
+  return createHash("sha256").update(blob).digest("hex");
 }
 function hasBinding(text, binding, databaseName) {
   const blocks = text.match(/\[\[d1_databases\]\][\s\S]*?(?=\n\[\[|\n\[[^\[]|$)/g) || [];

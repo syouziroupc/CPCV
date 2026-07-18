@@ -373,5 +373,3 @@ END;
 INSERT INTO migration_0017_boundary_guard (id) VALUES (1);
 DROP TRIGGER trg_migration_0017_boundary_guard;
 DROP TABLE migration_0017_boundary_guard;
-
-PRAGMA optimize;
