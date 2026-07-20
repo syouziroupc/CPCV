@@ -85,5 +85,5 @@
     "pdfjs-dist": "5.4.624",
     "qrcode": "1.5.4"
   },
-  "packageManager": "npm@10.9.2"
+  "packageManager": "npm@11.18.0"
 }
