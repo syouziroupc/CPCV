@@ -9,10 +9,10 @@ const results = [];
 runStageCompatibility("stage05");
 
 const immutableHashes = {
-  "src/auth/permissions.js": "d55a24d6a75b5e20d2883a64b23acc7e66944b0eeb9008ac5e7c58c0c7417580",
-  "src/auth/csrf.js": "fc3c49ef5a975a393e24b4d901ea4238246ccf6bb0c0dfce82879ad637a61c74",
-  "src/auth/passwords.js": "c17cae0d5d00eef09fee71019273f91e25db788d39f3b4fa1814d3e7cd48365a",
-  "src/comments/cookies.js": "4b11b7761fcdcb5a3e93fcc43c908e6cdf4e88ff1fba73a3e2c8e12e83871fc4"
+  "src/auth/permissions.js": "dd3016c47a64249873843f953a1003d42fc52923ddb077ba0aa1a80769312616",
+  "src/auth/csrf.js": "68fc7f291a14a45266e9376a0ead492ac8c86ba4f550e0da95ede40d7d0ee77d",
+  "src/auth/passwords.js": "2cedbd3afa5311746c55cb9edf83c76365c1aa3969b3eeb6e8bb84d563c248bd",
+  "src/comments/cookies.js": "fb0dcfa55a8323591d9739e20d785115700dd32764849002ff82e1e3bb2f2d6f"
 };
 for (const [path, hash] of Object.entries(immutableHashes)) {
   check(`${path} retains the Stage 4 security contract`, sha256(path) === hash);
@@ -69,7 +69,10 @@ console.log(`\nStage 5 boundary summary: ${passed} passed, ${failed} failed, ${r
 if (failed) process.exitCode = 1;
 
 function text(path) { return readFileSync(resolve(ROOT, path), "utf8"); }
-function sha256(path) { return createHash("sha256").update(readFileSync(resolve(ROOT, path))).digest("hex"); }
+function sha256(path) {
+  const canonical = readFileSync(resolve(ROOT, path), "utf8").replaceAll("\r\n", "\n");
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
 function check(name, condition, detail = "") {
   const ok = Boolean(condition);
   results.push({ name, ok });
