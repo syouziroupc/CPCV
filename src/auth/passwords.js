@@ -1,6 +1,7 @@
 import { AuthError } from "./errors.js";
 
-export const PASSWORD_SCHEME = "pbkdf2-sha256-600000-v2";
+export const PASSWORD_SCHEME = "pbkdf2-sha256-100000-v3";
+export const HIGH_ITERATION_PASSWORD_SCHEME = "pbkdf2-sha256-600000-v2";
 export const LEGACY_PASSWORD_SCHEME = "pbkdf2-sha256-100000-v1";
 export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 128;
@@ -9,7 +10,8 @@ const HASH_LENGTH_BYTES = 32;
 const SALT_LENGTH_BYTES = 16;
 const TOKEN_LENGTH_BYTES = 32;
 const SCHEME_PARAMETERS = Object.freeze({
-  [PASSWORD_SCHEME]: Object.freeze({ iterations: 600_000, decodeSalt: true }),
+  [PASSWORD_SCHEME]: Object.freeze({ iterations: 100_000, decodeSalt: true }),
+  [HIGH_ITERATION_PASSWORD_SCHEME]: Object.freeze({ iterations: 600_000, decodeSalt: true }),
   [LEGACY_PASSWORD_SCHEME]: Object.freeze({ iterations: 100_000, decodeSalt: false })
 });
 

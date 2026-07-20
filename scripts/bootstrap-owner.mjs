@@ -216,7 +216,7 @@ function bootstrapLocalDatabase({ persistTo, organizationName, loginId, displayN
         `INSERT INTO users (
            id, login_id, display_name, password_scheme, password_hash,
            password_salt, password_changed_at, status, created_at, updated_at, deleted_at
-         ) VALUES (?, ?, ?, 'pbkdf2-sha256-600000-v2', ?, ?, ?, 'active', ?, ?, NULL)`
+         ) VALUES (?, ?, ?, 'pbkdf2-sha256-100000-v3', ?, ?, ?, 'active', ?, ?, NULL)`
       ).run(userId, loginId, displayName, passwordHash, passwordSalt, now, now, now);
       database.prepare(
         `INSERT INTO organization_members (

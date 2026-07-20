@@ -1,4 +1,4 @@
-const PASSWORD_SCHEME = "pbkdf2-sha256-600000-v2";
+const PASSWORD_SCHEME = "pbkdf2-sha256-100000-v3";
 const EXPECTED_SCHEMA_SHA256 = "62b899df8e4e8be885937a851c8818eec98daffab280b541cfa656838e4146fa";
 const EXPECTED_APPLICATION_TABLES = [
   "audit_logs",
