@@ -96,9 +96,19 @@ export function tokenFromPath(prefix) {
 }
 
 async function waitForTurnstile() {
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    if (typeof globalThis.turnstile?.render === "function") return;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+  if (typeof globalThis.turnstile?.render === "function") return;
+  await new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      globalThis.removeEventListener("cpcv:turnstile-ready", onReady);
+      reject(new Error("TURNSTILE_SCRIPT_UNAVAILABLE"));
+    }, 30_000);
+    const onReady = () => {
+      clearTimeout(timeout);
+      resolve();
+    };
+    globalThis.addEventListener("cpcv:turnstile-ready", onReady, { once: true });
+  });
+  if (typeof globalThis.turnstile?.render !== "function") {
+    throw new Error("TURNSTILE_SCRIPT_UNAVAILABLE");
   }
-  throw new Error("TURNSTILE_SCRIPT_UNAVAILABLE");
 }
