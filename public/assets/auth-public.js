@@ -25,7 +25,9 @@ export async function configureTurnstile(container, onToken) {
     throw new Error("TURNSTILE_NOT_CONFIGURED");
   }
   try {
-    await loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit");
+    if (typeof globalThis.turnstile?.render !== "function") {
+      await loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit");
+    }
     await waitForTurnstile();
   } catch {
     throw new Error("TURNSTILE_SCRIPT_UNAVAILABLE");
@@ -99,9 +101,9 @@ function loadScript(src) {
 }
 
 async function waitForTurnstile() {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
     if (typeof globalThis.turnstile?.render === "function") return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error("TURNSTILE_SCRIPT_UNAVAILABLE");
 }
