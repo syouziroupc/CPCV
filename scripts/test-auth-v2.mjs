@@ -143,8 +143,9 @@ async function testPasswords() {
   assert("password whitespace is not trimmed", validatePassword(` ${"a".repeat(10)} `, "user") === "");
 
   const hash = await hashPassword("correct horse battery", salt);
-  assert("PBKDF2 v2 password verifies", await verifyPassword("correct horse battery", salt, hash, PASSWORD_SCHEME));
-  assert("wrong PBKDF2 v2 password does not verify", !await verifyPassword("wrong password value", salt, hash, PASSWORD_SCHEME));
+  assert("current PBKDF2 password verifies", await verifyPassword("correct horse battery", salt, hash, PASSWORD_SCHEME));
+  assert("wrong current PBKDF2 password does not verify", !await verifyPassword("wrong password value", salt, hash, PASSWORD_SCHEME));
+  assert("current password scheme respects the Workers PBKDF2 limit", PASSWORD_SCHEME === "pbkdf2-sha256-100000-v3");
   const legacySalt = createSalt();
   const legacyHash = await legacyHashPassword("legacy password value", legacySalt);
   assert("legacy PBKDF2 v1 password verifies during migration", await verifyPassword("legacy password value", legacySalt, legacyHash, LEGACY_PASSWORD_SCHEME));

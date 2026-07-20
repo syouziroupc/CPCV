@@ -19,7 +19,7 @@ if (caseIndex >= 0) {
 }
 
 const results = [];
-const bootstrapSource = readFileSync(resolve(ROOT, "scripts/bootstrap-owner.mjs"), "utf8");
+const bootstrapSource = readFileSync(resolve(ROOT, "scripts/bootstrap-owner.mjs"), "utf8").replaceAll("\r\n", "\n");
 const identityCheckPosition = bootstrapSource.indexOf("await verifyRemoteDatabaseIdentity(options);");
 const passwordReadPosition = bootstrapSource.indexOf("let password = await readPassword");
 assert(
