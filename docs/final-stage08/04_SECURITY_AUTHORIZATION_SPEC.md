@@ -14,7 +14,7 @@
 
 - PBKDF2-HMAC-SHA-256を使用する。
 - 現行iterationは600,000である。
-- passwordは12文字以上128文字以下である。
+- passwordは8文字以上128文字以下である。
 - password変更とreset後は既存sessionを失効する。
 - plaintext。hash。saltをlogへ出さない。
 

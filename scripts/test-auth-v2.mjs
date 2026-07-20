@@ -134,8 +134,8 @@ async function testPasswords() {
   assert("password salt contains at least 16 random bytes", decodeBase64Url(salt).length >= 16, { salt });
   assert("session token contains at least 32 random bytes", decodeBase64Url(token).length >= 32, { tokenLength: token.length });
   assert("two generated tokens differ", token !== createToken());
-  assert("11-character password is rejected", validatePassword("a".repeat(11), "user") === "PASSWORD_POLICY_FAILED");
-  assert("12-character password is accepted", validatePassword("a".repeat(12), "user") === "");
+  assert("7-character password is rejected", validatePassword("a".repeat(7), "user") === "PASSWORD_POLICY_FAILED");
+  assert("8-character password is accepted", validatePassword("a".repeat(8), "user") === "");
   assert("128-character password is accepted", validatePassword("あ".repeat(128), "user") === "");
   assert("129-character password is rejected", validatePassword("あ".repeat(129), "user") === "PASSWORD_POLICY_FAILED");
   assert("Unicode password is accepted", validatePassword("安全なパスワードです12", "user") === "");

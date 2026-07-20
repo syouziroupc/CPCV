@@ -43,11 +43,14 @@ export async function configureTurnstile(container, onToken) {
 }
 
 export function errorMessage(code) {
+  if (code === "TURNSTILE_SCRIPT_UNAVAILABLE") {
+    return "セキュリティ確認を読み込めません。広告ブロッカーを無効にするか、ネットワーク設定を確認してから再試行してください。";
+  }
   return ({
     EMAIL_INVALID: "メールアドレスを確認してください。",
     DISPLAY_NAME_INVALID: "表示名を確認してください。",
     ORGANIZATION_NAME_INVALID: "組織名を確認してください。",
-    PASSWORD_POLICY_FAILED: "パスワードは12文字以上128文字以下にしてください。",
+    PASSWORD_POLICY_FAILED: "パスワードは8文字以上128文字以下にしてください。",
     TURNSTILE_REQUIRED: "確認操作を完了してください。",
     TURNSTILE_INVALID: "確認操作が失効しました。もう一度実行してください。",
     TURNSTILE_UNAVAILABLE: "確認サービスへ接続できません。時間を置いて再試行してください。",

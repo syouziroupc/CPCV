@@ -205,9 +205,9 @@ async function testPasswordChange(h) {
     method: "POST",
     cookie: login.cookie,
     csrf: login.body.csrfToken,
-    body: { currentPassword: DEFAULT_PASSWORD, newPassword: "12345678901" }
+    body: { currentPassword: DEFAULT_PASSWORD, newPassword: "1234567" }
   });
-  check("password change enforces 12-character minimum", response.status === 400 && (await response.json()).error === "PASSWORD_POLICY_FAILED");
+  check("password change enforces 8-character minimum", response.status === 400 && (await response.json()).error === "PASSWORD_POLICY_FAILED");
   response = await h.api("/api/auth/password/change", {
     method: "POST",
     cookie: login.cookie,

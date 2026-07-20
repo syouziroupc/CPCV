@@ -19,14 +19,14 @@
       <label class="label" for="organizationName">組織名</label>
       <input id="organizationName" class="input" maxlength="120" required>
       <label class="label" for="password">パスワード</label>
-      <input id="password" class="input" type="password" autocomplete="new-password" minlength="12" maxlength="128" required>
-      <p class="muted">12文字以上。128文字以下。</p>
+      <input id="password" class="input" type="password" autocomplete="new-password" minlength="8" maxlength="128" required aria-describedby="passwordHint">
+      <p id="passwordHint" class="muted" aria-live="polite">8文字以上。128文字以下。</p>
       <div id="turnstile" class="auth-challenge"></div>
       <button id="submitButton" class="button primary auth-submit" type="submit">確認メールを送る</button>
     </form>
     <p id="status" class="status" aria-live="polite"></p>
     <p><a href="/admin">ログインへ戻る</a></p>
   </main>
-  <script type="module" src="/assets/signup.js?v=0.6.5a"></script>
+  <script type="module" src="/assets/signup.js?v=0.6.5b"></script>
 </body>
 </html>

@@ -2,7 +2,7 @@ import { AuthError } from "./errors.js";
 
 export const PASSWORD_SCHEME = "pbkdf2-sha256-600000-v2";
 export const LEGACY_PASSWORD_SCHEME = "pbkdf2-sha256-100000-v1";
-export const PASSWORD_MIN_LENGTH = 12;
+export const PASSWORD_MIN_LENGTH = 8;
 export const PASSWORD_MAX_LENGTH = 128;
 
 const HASH_LENGTH_BYTES = 32;

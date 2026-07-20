@@ -11,7 +11,7 @@ runStageCompatibility("stage05");
 const immutableHashes = {
   "src/auth/permissions.js": "d55a24d6a75b5e20d2883a64b23acc7e66944b0eeb9008ac5e7c58c0c7417580",
   "src/auth/csrf.js": "fc3c49ef5a975a393e24b4d901ea4238246ccf6bb0c0dfce82879ad637a61c74",
-  "src/auth/passwords.js": "c02a699c401910f1084c19944d90ec1a69b1fbfc44b90464ae597271726356f0",
+  "src/auth/passwords.js": "a1d7709b63f10188672a6f2ebd31e6d23b226394be845c962c81733d8f037ebf",
   "src/comments/cookies.js": "4b11b7761fcdcb5a3e93fcc43c908e6cdf4e88ff1fba73a3e2c8e12e83871fc4"
 };
 for (const [path, hash] of Object.entries(immutableHashes)) {
