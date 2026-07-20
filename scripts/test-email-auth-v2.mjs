@@ -41,7 +41,6 @@ async function testRegistrationLoginAndReset() {
       body: {
         email: " Owner@Example.COM ",
         displayName: "Owner A",
-        organizationName: "Organization A",
         password: PASSWORD,
         turnstileToken: "test-turnstile"
       }
@@ -67,6 +66,7 @@ async function testRegistrationLoginAndReset() {
     check("verification creates one user", h.count("users") === 1);
     check("verification creates one organization", h.count("organizations") === 1);
     check("verification creates one Owner membership", h.row("SELECT role, status FROM organization_members")?.role === "owner");
+    check("verification creates a personal workspace", h.row("SELECT name FROM organizations")?.name === "Owner Aの個人用ワークスペース");
     check("verification creates organization origin", h.row("SELECT source FROM organization_origins")?.source === "self_signup");
     check("verification creates organization quota", h.row("SELECT active_member_limit FROM organization_quotas")?.active_member_limit === 25);
     check("verified email timestamp is stored", Boolean(h.row("SELECT email_verified_at FROM users")?.email_verified_at));
@@ -141,7 +141,6 @@ async function testRegistrationConflictRollback() {
       body: {
         email: "race@example.com",
         displayName: "Race Owner",
-        organizationName: "Race Organization",
         password: PASSWORD,
         turnstileToken: "test-turnstile"
       }
@@ -217,7 +216,6 @@ async function testRateLimitAndDeliveryFailure() {
       body: {
         email: "failure@example.com",
         displayName: "Failure User",
-        organizationName: "Failure Organization",
         password: PASSWORD,
         turnstileToken: "test-turnstile"
       }

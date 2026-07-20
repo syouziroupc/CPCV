@@ -166,8 +166,8 @@ async function testInvitationAuthorizationAndQuotas() {
   } finally { h.close(); }
 }
 
-async function register(h, email, displayName, organizationName) {
-  let response = await h.api("/api/auth/registration/request", { method: "POST", body: { email, displayName, organizationName, password: PASSWORD, turnstileToken: "test-turnstile" } });
+async function register(h, email, displayName) {
+  let response = await h.api("/api/auth/registration/request", { method: "POST", body: { email, displayName, password: PASSWORD, turnstileToken: "test-turnstile" } });
   if (response.status !== 202) throw new Error(`registration request failed ${response.status}`);
   await h.drain();
   const token = tokenFromMessage(h.emails.at(-1), "verify-email");

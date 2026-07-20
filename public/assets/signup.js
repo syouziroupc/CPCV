@@ -44,7 +44,6 @@ form.addEventListener("submit", async (event) => {
   const { response, data } = await api("/api/auth/registration/request", {
     email: email.value,
     displayName: document.getElementById("displayName").value,
-    organizationName: document.getElementById("organizationName").value,
     password: password.value,
     turnstileToken
   });

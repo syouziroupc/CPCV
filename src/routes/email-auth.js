@@ -46,13 +46,12 @@ function handleConfig(request, env) {
 async function handleRegistrationRequest(request, env, ctx) {
   requirePublicPost(request, env);
   const input = await readJsonObject(request);
-  assertOnlyFields(input, ["email", "displayName", "organizationName", "password", "turnstileToken"]);
+  assertOnlyFields(input, ["email", "displayName", "password", "turnstileToken"]);
   const email = requireEmail(input.email);
   const displayName = normalizeDisplayName(input.displayName);
-  const organizationName = normalizeOrganizationName(input.organizationName);
   const password = typeof input.password === "string" ? input.password : "";
   if (!displayName) throw new AuthError(400, "DISPLAY_NAME_INVALID");
-  if (!organizationName) throw new AuthError(400, "ORGANIZATION_NAME_INVALID");
+  const organizationName = personalWorkspaceName(displayName);
   requireValidPassword(password, email);
   await requireTurnstile(request, env, input.turnstileToken);
   await consumePublicEmailRateLimit(request, env, email, "registration");
@@ -318,6 +317,10 @@ function requirePublicPost(request, env) {
 
 function emailAuthRequired(env) {
   return String(env?.EMAIL_AUTH_REQUIRED || "0") === "1";
+}
+
+function personalWorkspaceName(displayName) {
+  return normalizeOrganizationName(`${displayName}の個人用ワークスペース`);
 }
 
 function schedule(ctx, promise) {

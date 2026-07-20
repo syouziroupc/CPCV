@@ -26,6 +26,7 @@ export async function configureTurnstile(container, onToken) {
   }
   try {
     await loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit");
+    await waitForTurnstile();
   } catch {
     throw new Error("TURNSTILE_SCRIPT_UNAVAILABLE");
   }
@@ -95,4 +96,12 @@ function loadScript(src) {
     script.onerror = reject;
     document.head.append(script);
   });
+}
+
+async function waitForTurnstile() {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (typeof globalThis.turnstile?.render === "function") return;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error("TURNSTILE_SCRIPT_UNAVAILABLE");
 }
