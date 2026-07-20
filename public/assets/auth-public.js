@@ -25,29 +25,36 @@ export async function configureTurnstile(container, onToken) {
     throw new Error("TURNSTILE_NOT_CONFIGURED");
   }
   try {
-    if (typeof globalThis.turnstile?.render !== "function") {
-      await loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit");
-    }
     await waitForTurnstile();
   } catch {
     throw new Error("TURNSTILE_SCRIPT_UNAVAILABLE");
   }
-  const widgetId = globalThis.turnstile.render(container, {
-    sitekey: siteKey,
-    callback: onToken,
-    "expired-callback": () => onToken("")
-  });
+  let widgetId;
+  try {
+    widgetId = globalThis.turnstile.render(container, {
+      sitekey: siteKey,
+      callback: onToken,
+      "error-callback": () => onToken(""),
+      "expired-callback": () => onToken(""),
+      "timeout-callback": () => onToken("")
+    });
+  } catch {
+    throw new Error("TURNSTILE_RENDER_FAILED");
+  }
   return {
     reset() {
       onToken("");
-      globalThis.turnstile.reset(widgetId);
+      try { globalThis.turnstile.reset(widgetId); } catch {}
     }
   };
 }
 
 export function errorMessage(code) {
-  if (code === "TURNSTILE_SCRIPT_UNAVAILABLE") {
+  if (code === "TURNSTILE_SCRIPT_UNAVAILABLE" || code === "TURNSTILE_RENDER_FAILED") {
     return "セキュリティ確認を読み込めません。広告ブロッカーを無効にするか、ネットワーク設定を確認してから再試行してください。";
+  }
+  if (code === "NETWORK_ERROR") {
+    return "通信に失敗しました。ネットワーク接続を確認してから再試行してください。";
   }
   return ({
     EMAIL_INVALID: "メールアドレスを確認してください。",
@@ -86,18 +93,6 @@ export function tokenFromPath(prefix) {
   if (!path.startsWith(prefix)) return "";
   try { return decodeURIComponent(path.slice(prefix.length).split("/", 1)[0]); }
   catch { return ""; }
-}
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = src;
-    script.async = true;
-    script.defer = true;
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.append(script);
-  });
 }
 
 async function waitForTurnstile() {

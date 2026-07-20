@@ -39,9 +39,10 @@ check("delivery attempts never store body or raw token columns", !/INSERT INTO e
 
 
 const securityHeaders = text("src/security-headers.js");
+const publicAuth = text("public/assets/auth-public.js");
 check("HTML CSP allows the Turnstile script", securityHeaders.includes("script-src 'self' https://challenges.cloudflare.com"));
 check("HTML CSP allows the Turnstile frame", securityHeaders.includes("frame-src https://challenges.cloudflare.com"));
-const publicAuth = text("public/assets/auth-public.js");
+check("public auth pages load one static deferred Turnstile script", ["signup", "forgot-password"].every((page) => text(`public/${page}/index.html`).includes('src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer')) && !publicAuth.includes('document.createElement("script")'));
 check("missing production Turnstile configuration fails closed", publicAuth.includes("turnstileTestBypass") && publicAuth.includes("TURNSTILE_NOT_CONFIGURED"));
 
 const auth = text("src/routes/auth.js");

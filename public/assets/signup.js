@@ -29,7 +29,11 @@ password.addEventListener("input", validatePassword);
 email.addEventListener("input", validatePassword);
 
 try {
-  challenge = await configureTurnstile(document.getElementById("turnstile"), (value) => { turnstileToken = value; });
+  challenge = await configureTurnstile(document.getElementById("turnstile"), (value) => {
+    turnstileToken = value;
+    button.disabled = !value;
+    if (value) status.textContent = "";
+  });
 } catch (error) {
   button.disabled = true;
   status.textContent = errorMessage(error?.message || "TURNSTILE_NOT_CONFIGURED");
@@ -38,15 +42,28 @@ try {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!validatePassword() || !form.reportValidity()) return;
+  if (!turnstileToken) {
+    button.disabled = true;
+    status.textContent = errorMessage("TURNSTILE_REQUIRED");
+    return;
+  }
 
   button.disabled = true;
   status.textContent = "送信しています。";
-  const { response, data } = await api("/api/auth/registration/request", {
-    email: email.value,
-    displayName: document.getElementById("displayName").value,
-    password: password.value,
-    turnstileToken
-  });
+  let response;
+  let data;
+  try {
+    ({ response, data } = await api("/api/auth/registration/request", {
+      email: email.value,
+      displayName: document.getElementById("displayName").value,
+      password: password.value,
+      turnstileToken
+    }));
+  } catch {
+    status.textContent = errorMessage("NETWORK_ERROR");
+    challenge?.reset();
+    return;
+  }
   if (response.status === 202) {
     form.reset();
     validatePassword();
@@ -54,6 +71,5 @@ form.addEventListener("submit", async (event) => {
   } else {
     status.textContent = errorMessage(data.error);
     challenge?.reset();
-    button.disabled = false;
   }
 });
