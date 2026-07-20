@@ -57,7 +57,13 @@ async function handleRegistrationRequest(request, env, ctx) {
   await consumePublicEmailRateLimit(request, env, email, "registration");
 
   const salt = createSalt();
-  const passwordHash = await hashPassword(password, salt);
+  let passwordHash;
+  try {
+    passwordHash = await hashPassword(password, salt);
+  } catch (error) {
+    console.error("Registration password hashing failed", safeErrorCode(error));
+    throw new AuthError(503, "REGISTRATION_PASSWORD_HASH_UNAVAILABLE", { expose: true });
+  }
   const existing = await env.DB_V2.prepare(
     `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
   ).bind(email).first();
@@ -85,7 +91,8 @@ async function handleRegistrationRequest(request, env, ctx) {
     ]);
   } catch (error) {
     if (isEmailConflict(error)) return authJson(ACCEPTED, 202);
-    throw error;
+    console.error("Registration persistence failed", safeErrorCode(error));
+    throw new AuthError(503, "REGISTRATION_PERSISTENCE_UNAVAILABLE", { expose: true });
   }
   const requestId = makeId("req");
   schedule(ctx, sendRegistrationVerification(env, { email, rawToken, requestId }));
@@ -342,4 +349,8 @@ function makeClaimMarker(now) {
 function isEmailConflict(error) {
   const message = String(error?.message || error).toLowerCase();
   return message.includes("unique") && (message.includes("email") || message.includes("token_hash"));
+}
+
+function safeErrorCode(error) {
+  return String(error?.code || error?.name || "ERROR").replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 80);
 }

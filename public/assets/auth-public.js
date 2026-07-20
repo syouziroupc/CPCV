@@ -82,6 +82,8 @@ export function errorMessage(code) {
     EMAIL_CHANGE_TOKEN_EXPIRED: "メール確認リンクの有効期限が切れています。",
     EMAIL_UNAVAILABLE: "このメールアドレスは使用できません。",
     EMAIL_UNCHANGED: "現在と同じメールアドレスです。",
+    REGISTRATION_PASSWORD_HASH_UNAVAILABLE: "パスワードの安全な処理に失敗しました。しばらく待ってから再試行してください。",
+    REGISTRATION_PERSISTENCE_UNAVAILABLE: "登録情報を保存できませんでした。しばらく待ってから再試行してください。",
     CURRENT_PASSWORD_INVALID: "現在のパスワードが正しくありません。",
     AUTH_INVALID: "メールアドレスまたはパスワードを確認してください。",
     ORGANIZATION_SELECTION_REQUIRED: "ログイン先組織を選択してください。"
