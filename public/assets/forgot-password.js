@@ -7,7 +7,7 @@ let turnstileToken = "";
 let challenge;
 
 try {
-  challenge = await configureTurnstile(document.getElementById("turnstile"), (value) => {
+  challenge = await configureTurnstile(document.getElementById("turnstileWidget"), (value) => {
     turnstileToken = value;
     button.disabled = !value;
     if (value) status.textContent = "";

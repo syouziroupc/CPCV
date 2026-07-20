@@ -29,7 +29,7 @@ password.addEventListener("input", validatePassword);
 email.addEventListener("input", validatePassword);
 
 try {
-  challenge = await configureTurnstile(document.getElementById("turnstile"), (value) => {
+  challenge = await configureTurnstile(document.getElementById("turnstileWidget"), (value) => {
     turnstileToken = value;
     button.disabled = !value;
     if (value) status.textContent = "";

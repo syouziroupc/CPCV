@@ -45,7 +45,9 @@ check("HTML CSP allows the Turnstile frame", securityHeaders.includes("frame-src
 check("public auth pages load one callback-driven Turnstile script", ["signup", "forgot-password"].every((page) => {
   const html = text(`public/${page}/index.html`);
   return html.includes('src="/assets/turnstile-bootstrap.js?v=0.6.5a"')
-    && html.includes('api.js?onload=cpcvTurnstileReady&amp;render=explicit" defer');
+    && html.includes('api.js?onload=cpcvTurnstileReady&amp;render=explicit" defer')
+    && html.includes('id="turnstileWidget"')
+    && !html.includes('id="turnstile"');
 }) && !publicAuth.includes('document.createElement("script")'));
 check("missing production Turnstile configuration fails closed", publicAuth.includes("turnstileTestBypass") && publicAuth.includes("TURNSTILE_NOT_CONFIGURED"));
 
