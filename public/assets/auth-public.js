@@ -24,7 +24,11 @@ export async function configureTurnstile(container, onToken) {
     container.classList.add("muted");
     throw new Error("TURNSTILE_NOT_CONFIGURED");
   }
-  await loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit");
+  try {
+    await loadScript("https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit");
+  } catch {
+    throw new Error("TURNSTILE_SCRIPT_UNAVAILABLE");
+  }
   const widgetId = globalThis.turnstile.render(container, {
     sitekey: siteKey,
     callback: onToken,

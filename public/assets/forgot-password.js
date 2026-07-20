@@ -6,9 +6,9 @@ let turnstileToken = "";
 let challenge;
 try {
   challenge = await configureTurnstile(document.getElementById("turnstile"), (value) => { turnstileToken = value; });
-} catch {
+} catch (error) {
   button.disabled = true;
-  status.textContent = errorMessage("TURNSTILE_NOT_CONFIGURED");
+  status.textContent = errorMessage(error?.message || "TURNSTILE_NOT_CONFIGURED");
 }
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
