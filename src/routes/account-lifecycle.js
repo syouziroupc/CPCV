@@ -45,7 +45,11 @@ const ACCEPTED = Object.freeze({ ok: true, accepted: true });
 
 export async function handleAccountLifecycleAuthApi(request, env, ctx) {
   const path = new URL(request.url).pathname;
-  if (path === "/api/auth/account") return handleAccount(request, env);
+  if (path === "/api/auth/account") {
+    if (request.method === "GET") return handleAccount(request, env);
+    if (request.method === "DELETE") return handleAccountDelete(request, env);
+    throw methodNotAllowed("GET, DELETE");
+  }
   if (path === "/api/auth/invitations/inspect") return handleInvitationInspect(request, env);
   if (path === "/api/auth/invitations/accept") return handleInvitationAccept(request, env);
   if (path === "/api/auth/email-change/request") return handleEmailChangeRequest(request, env, ctx);
@@ -118,6 +122,95 @@ async function handleAccount(request, env) {
       expiresAt: pending.expires_at
     } : null
   });
+}
+
+async function handleAccountDelete(request, env) {
+  const auth = await requireAuth(request, env, { refresh: false });
+  const input = await readJsonObject(request);
+  rejectOrganizationSelector(request, input);
+  assertOnlyFields(input, ["currentPassword", "confirmation"]);
+  await requireUnsafeRequestProtection(request, env, auth);
+  if (input.confirmation !== "DELETE") throw new AuthError(400, "ACCOUNT_DELETE_CONFIRMATION_INVALID");
+
+  const currentPassword = typeof input.currentPassword === "string" ? input.currentPassword : "";
+  const user = await env.DB_V2.prepare(
+    `SELECT password_scheme, password_hash, password_salt
+     FROM users WHERE id = ?1 AND status = 'active' LIMIT 1`
+  ).bind(auth.userId).first();
+  if (!user || !await verifyPassword(currentPassword, user.password_salt, user.password_hash, user.password_scheme)) {
+    throw new AuthError(401, "CURRENT_PASSWORD_INVALID");
+  }
+
+  const soleExternalOwner = await env.DB_V2.prepare(
+    `SELECT m.organization_id
+     FROM organization_members m
+     WHERE m.user_id = ?1 AND m.role = 'owner' AND m.status = 'active'
+       AND (SELECT COUNT(*) FROM organization_members owners
+            WHERE owners.organization_id = m.organization_id
+              AND owners.role = 'owner' AND owners.status = 'active') = 1
+       AND NOT EXISTS (
+         SELECT 1 FROM organization_origins origin
+         WHERE origin.organization_id = m.organization_id
+           AND origin.source = 'self_signup' AND origin.created_by_user_id = ?1
+       )
+     LIMIT 1`
+  ).bind(auth.userId).first();
+  if (soleExternalOwner) throw new AuthError(409, "ACCOUNT_DELETE_OWNERSHIP_TRANSFER_REQUIRED");
+
+  const personalWorkspaceWithMembers = await env.DB_V2.prepare(
+    `SELECT origin.organization_id
+     FROM organization_origins origin
+     WHERE origin.source = 'self_signup' AND origin.created_by_user_id = ?1
+       AND EXISTS (
+         SELECT 1 FROM organization_members m
+         WHERE m.organization_id = origin.organization_id
+           AND m.user_id <> ?1 AND m.status = 'active'
+       )
+     LIMIT 1`
+  ).bind(auth.userId).first();
+  if (personalWorkspaceWithMembers) throw new AuthError(409, "ACCOUNT_DELETE_ORGANIZATION_MEMBERS_REMAIN");
+
+  const nowIso = new Date().toISOString();
+  await env.DB_V2.batch([
+    env.DB_V2.prepare(`UPDATE auth_sessions SET revoked_at = ?1 WHERE user_id = ?2 AND revoked_at IS NULL`).bind(nowIso, auth.userId),
+    env.DB_V2.prepare(`UPDATE password_reset_tokens SET revoked_at = ?1 WHERE user_id = ?2 AND used_at IS NULL AND revoked_at IS NULL`).bind(nowIso, auth.userId),
+    env.DB_V2.prepare(`UPDATE email_change_requests SET revoked_at = ?1 WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`).bind(nowIso, auth.userId),
+    env.DB_V2.prepare(`UPDATE email_enrollment_requests SET revoked_at = ?1 WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`).bind(nowIso, auth.userId),
+    env.DB_V2.prepare(
+      `UPDATE live_sessions
+       SET status = 'deleted', posting_enabled = 0, comments_visible = 0,
+           ended_at = COALESCE(ended_at, ?1), deleted_at = ?1, updated_at = ?1
+       WHERE organization_id IN (
+         SELECT organization_id FROM organization_origins
+         WHERE source = 'self_signup' AND created_by_user_id = ?2
+       ) AND status <> 'deleted'`
+    ).bind(nowIso, auth.userId),
+    env.DB_V2.prepare(
+      `UPDATE organizations SET status = 'deleted', deleted_at = ?1, updated_at = ?1
+       WHERE id IN (
+         SELECT organization_id FROM organization_origins
+         WHERE source = 'self_signup' AND created_by_user_id = ?2
+       ) AND status <> 'deleted'`
+    ).bind(nowIso, auth.userId),
+    env.DB_V2.prepare(
+      `UPDATE organization_members SET status = 'removed', removed_at = ?1, updated_at = ?1
+       WHERE user_id = ?2 AND status <> 'removed'`
+    ).bind(nowIso, auth.userId),
+    env.DB_V2.prepare(
+      `UPDATE users SET status = 'deleted', deleted_at = ?1, updated_at = ?1
+       WHERE id = ?2 AND status = 'active'`
+    ).bind(nowIso, auth.userId)
+  ]);
+
+  const deleted = await env.DB_V2.prepare(
+    `SELECT 1 AS complete FROM users
+     WHERE id = ?1 AND status = 'deleted' AND deleted_at = ?2
+       AND NOT EXISTS (SELECT 1 FROM organization_members WHERE user_id = ?1 AND status <> 'removed')
+       AND NOT EXISTS (SELECT 1 FROM auth_sessions WHERE user_id = ?1 AND revoked_at IS NULL)
+     LIMIT 1`
+  ).bind(auth.userId, nowIso).first();
+  if (!deleted) throw new AuthError(503, "ACCOUNT_DELETE_INCOMPLETE", { expose: true });
+  return authJson(null, 204, { "set-cookie": serializeClearedSessionCookie(request, env) });
 }
 
 async function handleInvitationList(request, env) {

@@ -58,6 +58,7 @@ export default {
       if (path === "/" || path === "/index.html") return serveAsset(request, env, "/index.html", false);
       if (path.startsWith("/j/")) return serveAsset(request, env, "/_j_spa.html", false);
       if (path === "/signup") return serveAsset(request, env, "/signup/index.html", true);
+      if (path === "/check-email") return serveAsset(request, env, "/check-email/index.html", true);
       if (path === "/forgot-password") return serveAsset(request, env, "/forgot-password/index.html", true);
       if (path === "/verify-email" || path.startsWith("/verify-email/")) return serveAsset(request, env, "/verify-email/index.html", true);
       if (path === "/reset-password" || path.startsWith("/reset-password/")) return serveAsset(request, env, "/reset-password/index.html", true);

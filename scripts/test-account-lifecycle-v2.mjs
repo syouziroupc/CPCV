@@ -13,10 +13,37 @@ const results = [];
 async function main() {
   await testInvitationAndAccountLifecycle();
   await testInvitationAuthorizationAndQuotas();
+  await testAccountDeletion();
   const passed = results.filter((x) => x.ok).length;
   const failed = results.length - passed;
   console.log(`\nStage 6.5 account lifecycle summary: ${passed} passed, ${failed} failed, ${results.length} total.`);
   if (failed) process.exitCode = 1;
+}
+
+async function testAccountDeletion() {
+  const h = createHarness();
+  try {
+    const owner = await register(h, "delete-owner@example.com", "Delete Owner");
+    let response = await h.api("/api/auth/account", {
+      method: "DELETE", auth: owner,
+      body: { currentPassword: "wrong-password", confirmation: "DELETE" }
+    });
+    check("account deletion requires the current password", response.status === 401 && (await response.json()).error === "CURRENT_PASSWORD_INVALID");
+
+    response = await h.api("/api/auth/account", {
+      method: "DELETE", auth: owner,
+      body: { currentPassword: PASSWORD, confirmation: "DELETE" }
+    });
+    check("account owner can delete a private personal workspace", response.status === 204);
+    check("account deletion clears the session cookie", String(response.headers.get("set-cookie") || "").includes("Max-Age=0"));
+    check("account deletion logically deletes the user", h.row("SELECT status FROM users WHERE id = ?1", owner.data.user.id)?.status === "deleted");
+    check("account deletion removes all memberships", h.row("SELECT COUNT(*) AS count FROM organization_members WHERE user_id = ?1 AND status <> 'removed'", owner.data.user.id)?.count === 0);
+    check("account deletion deletes the personal workspace", h.row("SELECT status FROM organizations WHERE id = ?1", owner.data.organization.id)?.status === "deleted");
+    check("account deletion revokes every session", h.row("SELECT COUNT(*) AS count FROM auth_sessions WHERE user_id = ?1 AND revoked_at IS NULL", owner.data.user.id)?.count === 0);
+
+    response = await h.api("/api/auth/login", { method: "POST", body: { email: "delete-owner@example.com", password: PASSWORD } });
+    check("deleted account cannot log in", response.status === 401);
+  } finally { h.close(); }
 }
 
 async function testInvitationAndAccountLifecycle() {

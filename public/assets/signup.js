@@ -65,9 +65,7 @@ form.addEventListener("submit", async (event) => {
     return;
   }
   if (response.status === 202) {
-    form.reset();
-    validatePassword();
-    status.textContent = "確認メールを送信しました。メール内のリンクを開いてください。";
+    location.href = "/check-email";
   } else {
     status.textContent = errorMessage(data.error);
     challenge?.reset();
