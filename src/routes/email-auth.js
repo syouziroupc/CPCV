@@ -156,9 +156,8 @@ async function handleRegistrationVerify(request, env) {
   const sessionId = makeId("ses");
   const loginId = internalLoginId();
   const session = await createSessionMaterial(now);
-  let results;
   try {
-    results = await env.DB_V2.batch([
+    await env.DB_V2.batch([
       env.DB_V2.prepare(
         `UPDATE pending_registrations SET verified_at = ?1
          WHERE id = ?2 AND token_hash = ?3 AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?4`
@@ -228,14 +227,28 @@ async function handleRegistrationVerify(request, env) {
     if (isEmailConflict(error)) throw new AuthError(400, "REGISTRATION_ALREADY_COMPLETED");
     throw error;
   }
-  if (Number(results?.[0]?.meta?.changes || 0) !== 1
-      || Number(results?.[1]?.meta?.changes || 0) !== 1
-      || Number(results?.[2]?.meta?.changes || 0) !== 1
-      || Number(results?.[3]?.meta?.changes || 0) !== 1
-      || Number(results?.[4]?.meta?.changes || 0) !== 1
-      || Number(results?.[5]?.meta?.changes || 0) !== 1
-      || Number(results?.[6]?.meta?.changes || 0) !== 1
-      || Number(results?.[7]?.meta?.changes || 0) !== 1) {
+
+  // D1's per-statement change metadata is not a reliable completion signal for
+  // INSERT ... SELECT. Verify the durable graph created by this exact claim.
+  const completed = await env.DB_V2.prepare(
+    `SELECT 1 AS complete
+     FROM pending_registrations p
+     JOIN users u ON u.email = p.email COLLATE NOCASE
+       AND u.email_verified_at IS NOT NULL AND u.status = 'active'
+     JOIN organization_members m ON m.user_id = u.id
+       AND m.role = 'owner' AND m.status = 'active'
+     JOIN organizations o ON o.id = m.organization_id AND o.status = 'active'
+     JOIN organization_origins origin ON origin.organization_id = o.id
+       AND origin.created_by_user_id = u.id AND origin.source = 'self_signup'
+     JOIN organization_quotas quota ON quota.organization_id = o.id
+     JOIN auth_sessions s ON s.organization_id = o.id AND s.user_id = u.id
+       AND s.id = ?3 AND s.revoked_at IS NULL
+     WHERE p.id = ?1 AND p.verified_at = ?2
+       AND u.id = ?4 AND o.id = ?5
+     LIMIT 1`
+  ).bind(pending.id, claimMarker, sessionId, userId, organizationId).first();
+  if (!completed) {
+    console.error("Registration verification completion invariant failed");
     throw new AuthError(400, "REGISTRATION_TOKEN_INVALID");
   }
 

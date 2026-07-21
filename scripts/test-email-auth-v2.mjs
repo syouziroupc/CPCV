@@ -55,12 +55,14 @@ async function testRegistrationLoginAndReset() {
     check("raw verification token is not stored", pending?.token_hash === await hashToken(verificationToken) && pending.token_hash !== verificationToken);
     check("plaintext password is absent from pending registration", !JSON.stringify(pending).includes(PASSWORD));
 
+    h.db.zeroNextBatchChangeMetadata = true;
     response = await h.api("/api/auth/registration/verify", {
       method: "POST",
       body: { token: verificationToken }
     });
     const verified = await response.json();
     check("verification creates an authenticated Owner", response.status === 201 && verified.organization?.role === "owner" && verified.user?.email === "owner@example.com", verified);
+    check("verification ignores unreliable D1 batch change metadata", response.status === 201);
     const signupCookie = response.headers.get("set-cookie") || "";
     check("verification sets an HttpOnly session cookie", signupCookie.includes("HttpOnly") && signupCookie.includes("SameSite=Strict"), signupCookie);
     check("verification creates one user", h.count("users") === 1);
@@ -295,6 +297,10 @@ class D1DatabaseAdapter {
     this.sqlite.exec("BEGIN IMMEDIATE;");
     try {
       const output = statements.map((statement) => statement.executeRun());
+      if (this.zeroNextBatchChangeMetadata) {
+        this.zeroNextBatchChangeMetadata = false;
+        for (const result of output) result.meta.changes = 0;
+      }
       this.sqlite.exec("COMMIT;");
       return output;
     } catch (error) {
