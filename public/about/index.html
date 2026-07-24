@@ -3,35 +3,57 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CPCVの仕組みと主な機能を説明します。">
-  <title>CPCVとは | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10">
+  <meta name="description" content="CPCVの目的と基本機能を説明します。">
+  <title>CPCVとは | 授業の反応をその場で拾う</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui2">
 </head>
-<body class="site-page">
-  <a class="skip-link" href="#mainContent">本文へ移動</a>
+<body class="site-page about-page">
   <header class="site-header">
+    <a class="brand" href="/"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業の反応</small></span></a>
     <nav class="site-nav" aria-label="メインメニュー">
-      <a class="site-brand" href="/">CPCV</a>
-      <div class="site-links"><a href="/about">CPCVとは</a><a href="/guide">使い方</a><a href="/privacy">プライバシー</a><a class="button primary" href="/admin">授業管理</a></div>
+      <a aria-current="page" href="/about">CPCVとは</a>
+      <a href="/guide">使い方</a>
+      <a href="/privacy">プライバシー</a>
+      <a class="nav-cta" href="/admin">先生用</a>
     </nav>
   </header>
-  <main id="mainContent" class="site-main content-page">
-    <p class="eyebrow">ABOUT</p>
-    <h1>CPCVとは</h1>
-    <p class="site-lead">CPCVはPDFを使う授業で学生の反応をリアルタイムに受け取る授業支援ツールです。</p>
 
-    <h2>授業を止めずに反応を確認</h2>
-    <p>学生は合言葉やリンクから参加します。投稿は投影画面へ表示されます。教員は投稿受付やコメント表示と承認を授業管理から切り替えられます。</p>
+  <main>
+    <section class="about-hero public-hero">
+      <p class="eyebrow">CPCVについて</p>
+      <h1>授業中の「分からない」を<br>次の説明につなげる。</h1>
+      <p class="hero-lead">CPCVはPDF投影と匿名コメントを組み合わせた授業参加システムです。学生の反応を授業中に拾い 先生が説明の順番や深さを調整できる状態をつくります。</p>
+    </section>
 
-    <h2>PDFは教員の端末で開く</h2>
-    <p>投影するPDFは教員のブラウザで開きます。PDF本体やファイル名はCPCVへアップロードしません。ページ別分析を使う場合も送信するのはページ番号などの集計情報です。</p>
+    <section class="principle-section" aria-labelledby="principleHeading">
+      <div class="section-intro"><p class="section-kicker">設計方針</p><h2 id="principleHeading">基本は少なく。<br>必要なら足す。</h2></div>
+      <div class="principle-list">
+        <article><span>01</span><h3>開始を軽くする</h3><p>学生登録は不要です。先生も授業名を入力するだけで参加用コードを発行できます。</p></article>
+        <article><span>02</span><h3>日常操作を分離する</h3><p>投稿受付とコメント表示を授業操作へ集約し 高度な設定を別画面へ分けています。</p></article>
+        <article><span>03</span><h3>追加機能を強制しない</h3><p>アンケート。分析。承認制。AI補助は必要な授業だけ有効化できます。</p></article>
+      </div>
+    </section>
 
-    <h2>AIは補助機能</h2>
-    <p>AI判定とAI翻訳は必要な授業だけで使用できます。原文は変更しません。AI判定は教員の判断を補助する情報として表示します。</p>
+    <section class="capability-grid">
+      <article class="capability-main"><p class="section-kicker">基本機能</p><h2>コメントを送り<br>投影する。</h2><p>最小構成は匿名コメントと投影だけです。授業中に必要な操作を増やさず 反応を共有できます。</p></article>
+      <article><span>配信</span><h3>リアルタイム配信</h3><p>学生画面。管理画面。投影画面を即時同期します。</p></article>
+      <article><span>PDF</span><h3>ページ連動</h3><p>PDFをブラウザで開き 現在ページとコメントを関連付けられます。</p></article>
+      <article><span>制御</span><h3>先生による制御</h3><p>投稿受付。表示。承認。非表示を授業単位で管理できます。</p></article>
+      <article><span>追加</span><h3>追加機能</h3><p>参加度確認。分析。辞書判定。AI補助を必要な場合だけ使えます。</p></article>
+    </section>
 
-    <h2>設定を役割ごとに整理</h2>
-    <p>授業中に使う設定は授業管理へ集約しています。辞書の語句や組織全体のAI上限はアカウント設定で管理します。</p>
+    <section class="system-boundary">
+      <div><p class="section-kicker">設定の境界</p><h2>設定の境界</h2></div>
+      <div class="boundary-grid">
+        <article><strong>アカウント設定</strong><p>本人のメールやパスワード。新規授業の既定値。</p></article>
+        <article><strong>授業設定</strong><p>その授業で実際に使う機能と表示方法。</p></article>
+        <article><strong>組織管理</strong><p>メンバー。権限。招待。共有辞書と利用上限。</p></article>
+      </div>
+    </section>
+
+    <section class="about-cta"><p>仕組みが分かったら<br>操作を確認する。</p><a class="button primary large" href="/guide">使い方を見る</a></section>
   </main>
-  <footer class="site-footer"><div class="site-footer-inner"><span>© 正二郎商事株式会社</span><a href="/privacy">プライバシー</a></div></footer>
+  <footer class="site-footer"><span>CPCV</span><span>授業コメントビューアー</span><nav aria-label="フッター"><a href="/">ホーム</a><a href="/guide">使い方</a><a href="/privacy">プライバシー</a></nav></footer>
 </body>
 </html>
+

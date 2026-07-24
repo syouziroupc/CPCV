@@ -81,7 +81,7 @@ const viewerHtml = text('public/viewer/index.html');
 check('student and viewer pages include skip links', joinHtml.includes('skip-link') && viewerHtml.includes('skip-link'));
 check('student and viewer statuses are announced', joinHtml.includes('aria-live="polite"') && viewerHtml.includes('aria-live="polite"'));
 const htmlAssetVersions = [...joinHtml.matchAll(/\?v=([^"']+)/g)].map((match) => match[1]);
-check('student page asset versions match 0.8.10', htmlAssetVersions.length > 0 && htmlAssetVersions.every((value) => value === '0.8.10'));
+check('student page asset versions match the 0.8.10 UI release', htmlAssetVersions.length > 0 && htmlAssetVersions.every((value) => value === '0.8.10' || value === '0.8.10-ui2'));
 
 const admin = text('public/admin/index.html');
 const adminSpa = text('public/_admin_spa.html');
