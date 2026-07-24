@@ -1,0 +1,50 @@
+name: Fix CPCV 0.8.10 source manifest
+
+on:
+  push:
+    branches:
+      - agent/cpcv-v0.8.10
+    paths:
+      - ".github/workflows/fix-v0810-manifest.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-v0810-manifest
+  cancel-in-progress: false
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify expected source commit
+        run: test "$(git rev-parse HEAD^)" = "dbcebb1c3c0f7137e593e68eabf797fa90d488a9"
+
+      - name: Remove temporary workflow from index
+        run: git rm .github/workflows/fix-v0810-manifest.yml
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Regenerate and validate manifest
+        run: |
+          npm run manifest:source
+          npm run verify:source-manifest
+          npm run verify:final-docs
+          npm run check:v0810
+          node --no-warnings scripts/test-ai-v2.mjs
+          node --no-warnings scripts/test-realtime-v2.mjs
+
+      - name: Commit and push correction
+        run: |
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "fix: regenerate 0.8.10 source manifest"
+          git push origin HEAD:agent/cpcv-v0.8.10
