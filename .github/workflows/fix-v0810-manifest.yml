@@ -24,7 +24,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify expected source commit
-        run: test "$(git rev-parse HEAD^)" = "dbcebb1c3c0f7137e593e68eabf797fa90d488a9"
+        run: test "$(git rev-parse HEAD^)" = "a792c990c8ec6d4b7540edecc6e91639282d1c90"
 
       - name: Remove temporary workflow from index
         run: git rm .github/workflows/fix-v0810-manifest.yml
