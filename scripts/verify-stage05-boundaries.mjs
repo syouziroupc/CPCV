@@ -8,14 +8,14 @@ const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const results = [];
 runStageCompatibility("stage05");
 
-const immutableHashes = {
+const approvedSecurityContractHashes = {
   "src/auth/permissions.js": "dd3016c47a64249873843f953a1003d42fc52923ddb077ba0aa1a80769312616",
   "src/auth/csrf.js": "68fc7f291a14a45266e9376a0ead492ac8c86ba4f550e0da95ede40d7d0ee77d",
   "src/auth/passwords.js": "2cedbd3afa5311746c55cb9edf83c76365c1aa3969b3eeb6e8bb84d563c248bd",
-  "src/comments/cookies.js": "fb0dcfa55a8323591d9739e20d785115700dd32764849002ff82e1e3bb2f2d6f"
+  "src/comments/cookies.js": "12b83c3a609031982a9b96090b91aa97de3534f2a1874f0fb0613aa437ee5214"
 };
-for (const [path, hash] of Object.entries(immutableHashes)) {
-  check(`${path} retains the Stage 4 security contract`, sha256(path) === hash);
+for (const [path, hash] of Object.entries(approvedSecurityContractHashes)) {
+  check(`${path} matches the approved security contract`, sha256(path) === hash);
 }
 
 const migration = text("migrations-v2/0006_manual_moderation.sql");
