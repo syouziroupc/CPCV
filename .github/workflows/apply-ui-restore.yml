@@ -47,6 +47,41 @@ jobs:
           git apply --check /tmp/cpcv-ui-restore.patch
           git apply /tmp/cpcv-ui-restore.patch
           grep -RIl '0.8.10-ui2-ui2' public | xargs -r sed -i 's/0\.8\.10-ui2-ui2/0.8.10-ui2/g'
+          python - <<'PY'
+          from pathlib import Path
+
+          privacy = Path('public/privacy/index.html')
+          value = privacy.read_text(encoding='utf-8')
+          value = value.replace(
+              '<article><strong>コメント</strong><p>環境で設定された保持期限を超えたコメントは 削除処理前でも通常の一覧や投影対象から除外します。</p></article>',
+              '<article><strong>コメント</strong><p>コメントの標準保持期間は30日です。設定された期限を超えたコメントは、削除処理前でも通常の一覧や投影対象から除外します。</p></article>'
+          )
+          value = value.replace(
+              '<article><strong>出力制限</strong><p>個人別理解度履歴。個人ランキング。特定学生の滞在時間は提供しません。</p></article>',
+              '<article><strong>端末内データ</strong><p>投影画面のブラウザには受信コメントを最大2,000件保存します。共用端末では授業後にログを消去してください。</p></article>'
+          )
+          value = value.replace(
+              '<div><p>AI判定と翻訳は追加機能です。有効にした授業ではコメント本文を処理対象にします。PDF内容はAIへ送りません。AIを使わず 辞書判定だけで運用することもできます。</p></div>',
+              '<div><p>AI判定と翻訳は追加機能です。有効にした授業ではコメント本文をCloudflare Workers AIへ送信します。PDF内容は送りません。AIを使わず、辞書判定だけで運用することもできます。</p></div>'
+          )
+          privacy.write_text(value, encoding='utf-8')
+
+          guide = Path('public/guide/index.html')
+          value = guide.read_text(encoding='utf-8')
+          value = value.replace(
+              '<li>AI判定と翻訳</li></ul></article>',
+              '<li>AI判定と翻訳</li></ul><p>辞書や組織全体のAI上限は、授業管理上部の「アカウント設定」から変更します。</p></article>'
+          )
+          guide.write_text(value, encoding='utf-8')
+
+          test = Path('scripts/test-v0810-security-ui.mjs')
+          value = test.read_text(encoding='utf-8')
+          value = value.replace(
+              "check('student page asset versions match 0.8.10', htmlAssetVersions.length > 0 && htmlAssetVersions.every((value) => value === '0.8.10'));",
+              "check('student page asset versions match the 0.8.10 UI release', htmlAssetVersions.length > 0 && htmlAssetVersions.every((value) => value === '0.8.10' || value === '0.8.10-ui2'));"
+          )
+          test.write_text(value, encoding='utf-8')
+          PY
       - name: Confirm functional system remains intact
         shell: bash
         run: |
