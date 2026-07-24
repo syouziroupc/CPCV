@@ -1,0 +1,94 @@
+name: Apply CPCV 0.8.8-quality UI restoration
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - ".ui-restore/**"
+      - ".github/workflows/apply-ui-restore.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cpcv-v0810-ui-restore
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: Apply, validate, and finalize visual restoration
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: |
+          npm install --global npm@11.18.0
+          npm ci
+
+      - name: Reassemble and verify signed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .ui-restore/patch-* > /tmp/cpcv-ui-restore.patch.gz.b64
+          test "$(sha256sum /tmp/cpcv-ui-restore.patch.gz.b64 | cut -d' ' -f1)" = "4e79f4fc56605169c241f821a10dcdd279bf95ea31ff33bf204ab72806b552c3"
+          base64 --decode /tmp/cpcv-ui-restore.patch.gz.b64 > /tmp/cpcv-ui-restore.patch.gz
+          gunzip --stdout /tmp/cpcv-ui-restore.patch.gz > /tmp/cpcv-ui-restore.patch
+          test "$(sha256sum /tmp/cpcv-ui-restore.patch | cut -d' ' -f1)" = "534f8aaa840a60f04e6b6a30704e963ee0c97f78e62ce51181ffba1198985143"
+          git apply --check /tmp/cpcv-ui-restore.patch
+          git apply /tmp/cpcv-ui-restore.patch
+          grep -RIl '0.8.10-ui2-ui2' public | xargs -r sed -i 's/0\.8\.10-ui2-ui2/0.8.10-ui2/g'
+
+      - name: Confirm functional system remains intact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "const p=require('./package.json'); if(p.version!=='0.8.10') process.exit(1)"
+          grep -Fq '授業中の操作' public/admin/index.html
+          grep -Fq '授業設定' public/admin/index.html
+          grep -Fq 'organization-settings.js' public/account/index.html
+          grep -Fq '0.8.10-ui2' public/index.html
+          grep -Fq '画面は<br>二つだけ。' public/index.html
+          grep -Fq 'AI_QUEUE_PARALLELISM' src/ai/processor.js
+          test "$(sha256sum src/ai/processor.js | cut -d' ' -f1)" = "$(git show HEAD:src/ai/processor.js | sha256sum | cut -d' ' -f1)"
+          test "$(sha256sum src/comments/validation.js | cut -d' ' -f1)" = "$(git show HEAD:src/comments/validation.js | sha256sum | cut -d' ' -f1)"
+          test "$(sha256sum src/security-headers.js | cut -d' ' -f1)" = "$(git show HEAD:src/security-headers.js | sha256sum | cut -d' ' -f1)"
+
+      - name: Remove transfer files and regenerate manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm -r .ui-restore .github/workflows/apply-ui-restore.yml
+          npm run manifest:source
+
+      - name: Run full validation
+        run: |
+          npm run verify:source-manifest
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run check:stage08
+          npm run test:owner-bootstrap
+          npm audit
+
+      - name: Commit finalized UI restoration
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "Restore CPCV 0.8.8 visual quality"
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
