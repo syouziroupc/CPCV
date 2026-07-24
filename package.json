@@ -81,7 +81,7 @@
     "check:security-ui": "node scripts/test-v0810-security-ui.mjs"
   },
   "devDependencies": {
-    "wrangler": "4.110.0",
+    "wrangler": "4.114.0",
     "ws": "8.21.0"
   },
   "dependencies": {
