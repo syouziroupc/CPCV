@@ -66,14 +66,19 @@ jobs:
           test "$(sha256sum src/comments/validation.js | cut -d' ' -f1)" = "$(git show HEAD:src/comments/validation.js | sha256sum | cut -d' ' -f1)"
           test "$(sha256sum src/security-headers.js | cut -d' ' -f1)" = "$(git show HEAD:src/security-headers.js | sha256sum | cut -d' ' -f1)"
 
-      - name: Remove transfer files and regenerate manifest
+      - name: Finalize tree and source manifest
         shell: bash
         run: |
           set -euo pipefail
           git rm -r .ui-restore .github/workflows/apply-ui-restore.yml
+          git add -A
           npm run manifest:source
+          git add SOURCE_SHA256SUMS.txt
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git commit -m "Restore CPCV 0.8.8 visual quality"
 
-      - name: Run full validation
+      - name: Run full validation on finalized commit
         run: |
           npm run verify:source-manifest
           npm run check
@@ -83,12 +88,8 @@ jobs:
           npm run test:owner-bootstrap
           npm audit
 
-      - name: Commit finalized UI restoration
+      - name: Push finalized UI restoration
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "ChatGPT Codex Connector"
-          git config user.email "noreply@openai.com"
-          git add -A
-          git commit -m "Restore CPCV 0.8.8 visual quality"
           git push origin HEAD:${{ github.event.pull_request.head.ref }}
