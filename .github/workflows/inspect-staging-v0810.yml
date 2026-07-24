@@ -19,6 +19,7 @@ jobs:
   inspect:
     name: Read current Cloudflare staging configuration
     runs-on: ubuntu-latest
+    environment: production
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
