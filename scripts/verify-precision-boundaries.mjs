@@ -59,7 +59,7 @@ check("expired authentication records are pruned with a retention delay and batc
 const participantCookies = text("src/comments/cookies.js");
 check("participant token cookie accepts only the issued token length", participantCookies.includes("{43}"));
 const viewer = text("public/assets/viewer.js");
-check("viewer local logs have retention and hard cap", viewer.includes("pruneLocalLogs") && viewer.includes("MAX_LOCAL_LOG_ENTRIES = 10_000") && viewer.includes("retainedUntil"));
+check("viewer local logs have retention and hard cap", viewer.includes("pruneLocalLogs") && viewer.includes("MAX_LOCAL_LOG_ENTRIES = 2_000") && viewer.includes("retainedUntil"));
 check("viewer pruning avoids quadratic object lookups", viewer.includes("const expiredIds = new Set") && viewer.includes("!expiredIds.has(entry.id)") && !viewer.includes("!expired.includes(entry)"));
 const packageVersion = JSON.parse(text("package.json")).version;
 check("viewer cache version matches package release", text("public/_viewer_spa.html").includes(`/assets/viewer.js?v=${packageVersion}`));

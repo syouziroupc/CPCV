@@ -24,7 +24,7 @@ import {
 import { buildCommentsCsv } from "../comments/csv.js";
 import { scheduleAiForComment } from "../ai/processor.js";
 import { retentionDays } from "../comments/validation.js";
-import { listCommentsForExport, listSessionComments, runCommentRetention } from "../comments/repository.js";
+import { listCommentsForExport, listSessionComments } from "../comments/repository.js";
 import {
   listCommentModerationActions,
   moderateComment,
@@ -87,13 +87,6 @@ export async function handlePrivateV2Api(request, env, ctx = { waitUntil() {} })
         role: auth.role
       }
     });
-  }
-  if (parts[2] === "maintenance" && parts[3] === "comment-retention" && parts.length === 4) {
-    if (request.method !== "POST") throw methodNotAllowed("POST");
-    requireRole(auth, "owner");
-    await requireUnsafeRequestProtection(request, env, auth);
-    const result = await runCommentRetention(env.DB_V2, { now: Date.now(), limit: 500 });
-    return authJson({ ok: true, ...result });
   }
   if (parts[2] !== "sessions") return authJson({ ok: false, error: "NOT_FOUND" }, 404);
 

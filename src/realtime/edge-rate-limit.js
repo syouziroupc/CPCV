@@ -1,14 +1,14 @@
 import { AuthError } from "../auth/errors.js";
 
-export async function enforcePublicCommentEdgeLimit(request, env, publicCode) {
-  return enforcePublicEdgeLimit(request, env, publicCode, "comment");
+export async function enforcePublicCommentEdgeLimit(request, env, publicCode, participantToken) {
+  return enforcePublicEdgeLimit(request, env, publicCode, "comment", participantToken);
 }
 
-export async function enforcePublicUnderstandingEdgeLimit(request, env, publicCode) {
-  return enforcePublicEdgeLimit(request, env, publicCode, "understanding");
+export async function enforcePublicUnderstandingEdgeLimit(request, env, publicCode, participantToken) {
+  return enforcePublicEdgeLimit(request, env, publicCode, "understanding", participantToken);
 }
 
-async function enforcePublicEdgeLimit(request, env, publicCode, scope) {
+async function enforcePublicEdgeLimit(request, env, publicCode, scope, participantToken) {
   const limiter = env?.PUBLIC_COMMENT_RATE_LIMITER;
   const production = String(env?.APP_ENV || "").toLowerCase() === "production";
   if (!limiter || typeof limiter.limit !== "function") {
@@ -20,8 +20,12 @@ async function enforcePublicEdgeLimit(request, env, publicCode, scope) {
     if (production) throw new AuthError(500, "PUBLIC_RATE_LIMIT_PEPPER_NOT_CONFIGURED");
     return { success: true, skipped: true };
   }
-  const address = String(request.headers.get("cf-connecting-ip") || "local").trim();
-  const key = await hmacHex(pepper, `${publicCode}\n${scope}\n${address}`);
+  const subject = String(participantToken || "").trim();
+  if (!/^[A-Za-z0-9_-]{43}$/.test(subject)) {
+    if (production) throw new AuthError(500, "PARTICIPANT_TOKEN_REQUIRED");
+  }
+  const fallback = String(request.headers.get("cf-connecting-ip") || "local").trim();
+  const key = await hmacHex(pepper, `${publicCode}\n${scope}\n${subject || fallback}`);
   const result = await limiter.limit({ key });
   if (!result?.success) throw new AuthError(429, "RATE_LIMITED");
   return result;

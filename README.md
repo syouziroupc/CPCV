@@ -1,14 +1,22 @@
-# Class PDF Comment Viewer v0.8.2
+# Class PDF Comment Viewer v0.8.10
 
 Cloudflare Workers。D1。Durable Objects。Queues。Workers AIを使う授業向けPDFコメントシステムです。
 
+v0.8.10では授業操作の一画面化に加え、AI応答形式の互換性。翻訳通知の再送。Queue同時実行数。公開入力の安全性。tabletとmobile表示を修正しました。詳細は`docs/v0.8.10-debug-fixes.md`と`docs/v0.8.10-security-ui-audit.md`を参照してください。
+
 PDF本体は教員端末のbrowser内だけで処理します。PDF bytes。ファイル名。page text。画像をCloudflareへ保存しません。コメント。認証。組織。授業。moderation。Realtime。辞書filter。AI。PDF page metadata。匿名集計の正本は`DB_V2`です。
+
+
+## バージョン規則
+
+現在版は`0.8.10`です。軽微な更新は`0.8.11`のように末尾を増やします。大きな更新では`0.9.1`へ移り、その次の系列は`0.10.1`とします。詳細は`docs/versioning-policy.md`を参照してください。
 
 ## 現在の状態
 
 - Stage 1〜8.1: 完了
 - Stage 8.2 final hardening: 実装済み
-- 既知71件の監査指摘: 修正済み
+- セキュリティ・UI再監査: `docs/v0.8.10-security-ui-audit.md`
+- 公開判定: CONDITIONAL GO
 - migration: `0001`〜`0017`
 - local機能回帰: 通過
 - Cloudflare remote反映: 未実施

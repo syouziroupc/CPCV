@@ -220,13 +220,20 @@ async function testEdgeLimiter() {
     PUBLIC_RATE_LIMIT_PEPPER: "test-pepper",
     PUBLIC_COMMENT_RATE_LIMITER: { async limit(input) { calls.push(input); return { success: true }; } }
   };
+  const tokenA = "A".repeat(43);
+  const tokenB = "B".repeat(43);
   const request = new Request("https://example.test", { headers: { "cf-connecting-ip": "203.0.113.8" } });
-  await enforcePublicCommentEdgeLimit(request, env, "ABC123");
-  check("edge limiter receives a pseudonymous key", /^[a-f0-9]{64}$/.test(calls[0]?.key || "") && !calls[0].key.includes("203.0.113.8"), calls);
-  await expectAuth("production requires public limiter binding", () => enforcePublicCommentEdgeLimit(request, { APP_ENV: "production", PUBLIC_RATE_LIMIT_PEPPER: "x" }, "ABC123"), "PUBLIC_COMMENT_RATE_LIMITER_NOT_CONFIGURED");
+  const otherIpRequest = new Request("https://example.test", { headers: { "cf-connecting-ip": "203.0.113.99" } });
+  await enforcePublicCommentEdgeLimit(request, env, "ABC123", tokenA);
+  await enforcePublicCommentEdgeLimit(otherIpRequest, env, "ABC123", tokenA);
+  await enforcePublicCommentEdgeLimit(request, env, "ABC123", tokenB);
+  check("edge limiter receives pseudonymous participant keys", calls.every((call) => /^[a-f0-9]{64}$/.test(call?.key || "")), calls);
+  check("shared school IP does not merge participant limits", calls[0]?.key === calls[1]?.key && calls[0]?.key !== calls[2]?.key, calls);
+  await expectAuth("production requires public limiter binding", () => enforcePublicCommentEdgeLimit(request, { APP_ENV: "production", PUBLIC_RATE_LIMIT_PEPPER: "x" }, "ABC123", tokenA), "PUBLIC_COMMENT_RATE_LIMITER_NOT_CONFIGURED");
+  await expectAuth("production requires participant token", () => enforcePublicCommentEdgeLimit(request, env, "ABC123", ""), "PARTICIPANT_TOKEN_REQUIRED");
   await expectAuth("edge limiter rejection returns rate limit", () => enforcePublicCommentEdgeLimit(request, {
     APP_ENV: "production", PUBLIC_RATE_LIMIT_PEPPER: "x", PUBLIC_COMMENT_RATE_LIMITER: { async limit() { return { success: false }; } }
-  }, "ABC123"), "RATE_LIMITED");
+  }, "ABC123", tokenA), "RATE_LIMITED");
 }
 
 async function testHibernationHandlers(h) {

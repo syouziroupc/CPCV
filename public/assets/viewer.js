@@ -40,6 +40,8 @@ const qrCornerImage = document.getElementById('qrCornerImage');
 const joinUrlText = document.getElementById('joinUrlText');
 
 let queue = [];
+const queuedCommentIds = new Set();
+const shownCommentIds = new Set();
 let commentsVisible = true;
 let qrVisible = false;
 let qrCornerVisible = localStorage.getItem('CPCV_QR_CORNER') === '1';
@@ -73,7 +75,7 @@ const LOG_DB_NAME = 'CPCV_LOCAL_LOGS';
 const LOG_DB_VERSION = 1;
 const LOG_STORE_NAME = 'comments';
 const LOG_CHANNEL_NAME = 'CPCV_LOCAL_LOG_UPDATES';
-const MAX_LOCAL_LOG_ENTRIES = 10_000;
+const MAX_LOCAL_LOG_ENTRIES = 2_000;
 let logDatabasePromise = null;
 let localLogCount = 0;
 let commentRetentionDays = 30;
@@ -590,7 +592,7 @@ async function applyRoomSync(payload) {
   const room = payload.room || {};
   applyRoomState(room);
   if (payload.resetRequired) {
-    clearComments();
+    clearComments({ resetSeen: true });
     await replaceSessionLog(Array.isArray(payload.snapshot) ? payload.snapshot : []);
     for (const comment of payload.snapshot || []) enqueueComment(comment);
     commitSequence(Number(payload.currentSequence) || 0);
@@ -613,8 +615,7 @@ async function applyRealtimeEvent(event) {
       console.error('Local log save failed', error);
       setLocalLogState('ログ保存エラー', true);
     });
-    removeDisplayedComment(event.id);
-    enqueueComment(event);
+    enqueueComment(event, { force: event.type === 'message:restore' });
     return;
   }
   if (event.type === 'translation:ready') {
@@ -708,10 +709,34 @@ async function replaceSessionLog(comments) {
   await refreshLocalLogCount();
 }
 
-function enqueueComment(payload) {
-  if (!commentsVisible) return;
+function enqueueComment(payload, options = {}) {
+  if (!commentsVisible || !payload) return;
+  const id = String(payload.id || '');
+  const force = Boolean(options.force);
+
+  if (id) {
+    const queuedIndex = queue.findIndex((item) => String(item?.id || '') === id);
+    if (queuedIndex >= 0) {
+      queue[queuedIndex] = { ...queue[queuedIndex], ...payload };
+      return;
+    }
+    if (!force && (shownCommentIds.has(id) || document.querySelector(`[data-comment-id="${CSS.escape(id)}"]`))) {
+      return;
+    }
+    if (force) {
+      queue = queue.filter((item) => String(item?.id || '') !== id);
+      queuedCommentIds.delete(id);
+      shownCommentIds.delete(id);
+      removeDisplayedComment(id);
+    }
+  }
+
   queue.push(payload);
-  if (queue.length > MAX_QUEUE) queue = queue.slice(queue.length - MAX_QUEUE);
+  if (id) queuedCommentIds.add(id);
+  while (queue.length > MAX_QUEUE) {
+    const removed = queue.shift();
+    if (removed?.id) queuedCommentIds.delete(String(removed.id));
+  }
 }
 
 function openLogDatabase() {
@@ -795,7 +820,9 @@ async function applyTranslation(payload) {
 async function removeModeratedComment(commentId) {
   const id = String(commentId || '');
   if (!id) return;
-  queue = queue.filter((item) => item?.id !== id);
+  queue = queue.filter((item) => String(item?.id || '') !== id);
+  queuedCommentIds.delete(id);
+  shownCommentIds.delete(id);
   removeDisplayedComment(id);
   const database = await openLogDatabase();
   await runLogTransaction(database, 'readwrite', (store) => store.delete(id));
@@ -931,10 +958,21 @@ function showNextComment() {
   if (displayMode === 'scroll') {
     const lane = findAvailableScrollLane();
     if (lane < 0) return;
-    showScrollingComment(queue.shift(), lane);
+    const payload = queue.shift();
+    const id = String(payload?.id || '');
+    if (id) {
+      queuedCommentIds.delete(id);
+      shownCommentIds.add(id);
+    }
+    showScrollingComment(payload, lane);
     return;
   }
   const payload = queue.shift();
+  const id = String(payload?.id || '');
+  if (id) {
+    queuedCommentIds.delete(id);
+    shownCommentIds.add(id);
+  }
   const card = document.createElement('div');
   card.className = 'comment-card';
   card.dataset.commentId = String(payload.id || '');
@@ -959,8 +997,10 @@ function showNextComment() {
   setTimeout(() => card.remove(), displayMs);
 }
 
-function clearComments() {
+function clearComments(options = {}) {
   queue = [];
+  queuedCommentIds.clear();
+  if (options.resetSeen) shownCommentIds.clear();
   commentList.textContent = '';
   scrollCommentLayer.textContent = '';
   scrollLaneBusyUntil.fill(0);

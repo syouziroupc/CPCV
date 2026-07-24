@@ -56,6 +56,9 @@ export default {
       }
 
       if (path === "/" || path === "/index.html") return serveAsset(request, env, "/index.html", false);
+      if (path === "/about") return serveAsset(request, env, "/about/index.html", false);
+      if (path === "/guide") return serveAsset(request, env, "/guide/index.html", false);
+      if (path === "/privacy") return serveAsset(request, env, "/privacy/index.html", false);
       if (path.startsWith("/j/")) return serveAsset(request, env, "/_j_spa.html", false);
       if (path === "/signup") return serveAsset(request, env, "/signup/index.html", true);
       if (path === "/check-email") return serveAsset(request, env, "/check-email/index.html", true);
@@ -229,8 +232,18 @@ async function handleQrApi(request) {
   const url = new URL(request.url);
   const text = url.searchParams.get("text") || "";
   if (!text) return json({ ok: false, error: "TEXT_REQUIRED" }, 400);
-  if (text.length > 500) return json({ ok: false, error: "TEXT_TOO_LONG" }, 400);
-  const svg = await QRCode.toString(text, {
+  if (text.length > 300) return json({ ok: false, error: "TEXT_TOO_LONG" }, 400);
+  let target;
+  try {
+    target = new URL(text, url.origin);
+  } catch {
+    return json({ ok: false, error: "QR_TARGET_INVALID" }, 400);
+  }
+  const allowedPath = /^\/j\/[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{6}$/.test(target.pathname);
+  if (target.origin !== url.origin || target.username || target.password || target.search || target.hash || !allowedPath) {
+    return json({ ok: false, error: "QR_TARGET_FORBIDDEN" }, 400);
+  }
+  const svg = await QRCode.toString(target.href, {
     type: "svg",
     margin: 2,
     width: 320,

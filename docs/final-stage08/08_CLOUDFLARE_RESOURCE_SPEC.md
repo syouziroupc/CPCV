@@ -90,12 +90,13 @@ queue = "cpcv-ai-jobs"
 [[queues.consumers]]
 queue = "cpcv-ai-jobs"
 max_batch_size = 5
-max_batch_timeout = 5
+max_batch_timeout = 1
 max_retries = 3
+max_concurrency = 3
 ```
 
 Queueはat-least-once deliveryである。
-D1 job claimを必須とする。
+D1 job claimを必須とする。batch内のAI実行は`AI_QUEUE_PARALLELISM=2`で制限する。
 DLQは現行Stage 8の必須resourceではない。
 導入する場合は別stageで設計。試験してから追加する。
 

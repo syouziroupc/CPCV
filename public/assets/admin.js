@@ -229,8 +229,8 @@ function showAdminTop() {
   show(notFoundSection, false);
   show(logoutButton, true);
   show(organizationManageLink, ['owner', 'admin'].includes(currentIdentity?.organization?.role));
-  show(organizationAiSection, ['owner', 'admin'].includes(currentIdentity?.organization?.role));
-  show(organizationFilterSection, ['owner', 'admin'].includes(currentIdentity?.organization?.role));
+  show(organizationAiSection, false);
+  show(organizationFilterSection, false);
   setStatus('');
 }
 
@@ -242,7 +242,7 @@ function showSession() {
   show(notFoundSection, false);
   show(logoutButton, true);
   show(organizationManageLink, ['owner', 'admin'].includes(currentIdentity?.organization?.role));
-  show(organizationAiSection, ['owner', 'admin'].includes(currentIdentity?.organization?.role));
+  show(organizationAiSection, false);
   show(organizationFilterSection, false);
 }
 
@@ -297,7 +297,7 @@ loginButton.addEventListener('click', () => withButton(loginButton, 'ログイ�
     else {
       showAdminTop();
       await loadActiveSessions();
-      await Promise.all([loadOrganizationAiSettings(), loadOrganizationFilterSettings()]);
+
     }
   } catch (error) {
     if (error.code === 'ORGANIZATION_SELECTION_REQUIRED') {
@@ -380,7 +380,15 @@ function renderSessionItem(session) {
   item.className = 'teacher-item';
   const summary = document.createElement('div');
   const remaining = formatRemaining(session.endsAt);
-  summary.innerHTML = `<strong>${escapeHtml(session.title)}</strong><br><span class="muted">残り ${escapeHtml(remaining)}</span><br><span class="mono">${escapeHtml(session.joinUrl)}</span>`;
+  const title = document.createElement('strong');
+  title.textContent = session.title;
+  const remainingText = document.createElement('span');
+  remainingText.className = 'muted';
+  remainingText.textContent = `残り ${remaining}`;
+  const joinLinkText = document.createElement('span');
+  joinLinkText.className = 'mono';
+  joinLinkText.textContent = session.joinUrl;
+  summary.append(title, document.createElement('br'), remainingText, document.createElement('br'), joinLinkText);
 
   const actions = document.createElement('div');
   actions.className = 'row wrap';
@@ -429,7 +437,7 @@ async function loadSession() {
   currentSession = data.session;
   renderSession();
   showSession();
-  await Promise.all([loadOrganizationAiSettings(), loadOrganizationFilterSettings(), loadSessionAiSettings(), loadSessionFilterSettings(), loadPdfState(), loadSessionAnalytics(), loadAnalyticsSnapshots()]);
+  await Promise.all([loadSessionAiSettings(), loadSessionFilterSettings(), loadPdfState(), loadSessionAnalytics(), loadAnalyticsSnapshots()]);
 }
 
 function renderSession() {
@@ -451,7 +459,7 @@ function renderSession() {
   moderationMode.value = currentSession.moderationMode === 'pre' ? 'pre' : 'off';
   updateDisplaySettingLabels();
   togglePostingButton.textContent = currentSession.postingEnabled ? '投稿を停止' : '投稿を再開';
-  toggleCommentsButton.textContent = currentSession.commentsVisible ? 'コメント表示OFF' : 'コメント表示ON';
+  toggleCommentsButton.textContent = currentSession.commentsVisible ? 'コメントを隠す' : 'コメントを表示';
   documentInfo.textContent = 'PDFは投影画面で選択します。クラウドには送りません。';
   loadLocalLogs();
   loadModerationComments();
@@ -912,7 +920,11 @@ function filterActionLabel(action) {
 }
 
 function filterCategoryLabel(category) {
-  return organizationFilterData.categories.find((item) => item.id === category)?.label || category || '-';
+  const labels = {
+    sexual: '性的表現', profanity: '暴言', harassment: '嫌がらせ', discrimination: '差別',
+    violence: '暴力', personal_info: '個人情報', spam: '迷惑投稿', illegal: '違法行為', custom: '追加語句'
+  };
+  return organizationFilterData.categories.find((item) => item.id === category)?.label || labels[category] || category || '-';
 }
 
 async function loadOrganizationFilterSettings() {
@@ -1526,7 +1538,18 @@ copyJoinButton.addEventListener('click', async () => {
 });
 
 openViewerButton.addEventListener('click', () => {
-  const opened = window.open(viewerUrlEl.textContent, '_blank');
+  let target;
+  try {
+    target = new URL(viewerUrlEl.textContent, location.origin);
+  } catch {
+    setStatus('投影画面のURLが不正です。', true);
+    return;
+  }
+  if (target.origin !== location.origin || !target.pathname.startsWith('/viewer/')) {
+    setStatus('投影画面のURLが不正です。', true);
+    return;
+  }
+  const opened = window.open(target.href, '_blank', 'noopener,noreferrer');
   if (!opened) setStatus('投影画面を開けませんでした。リンクを手動で開いてください。', true);
 });
 
@@ -1539,7 +1562,7 @@ togglePostingButton.addEventListener('click', () => updateSettings(
 toggleCommentsButton.addEventListener('click', () => updateSettings(
   { commentsVisible: !currentSession.commentsVisible },
   toggleCommentsButton,
-  currentSession.commentsVisible ? 'コメント表示OFF' : 'コメント表示ON'
+  currentSession.commentsVisible ? 'コメントを隠す' : 'コメントを表示'
 ));
 
 commentDisplaySeconds.addEventListener('change', async () => {
@@ -1701,7 +1724,7 @@ async function boot() {
     else {
       showAdminTop();
       await loadActiveSessions();
-      await Promise.all([loadOrganizationAiSettings(), loadOrganizationFilterSettings()]);
+
     }
   } catch (error) {
     if (error.status === 401) showLogin();

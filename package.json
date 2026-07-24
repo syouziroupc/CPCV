@@ -1,6 +1,6 @@
 {
   "name": "class-pdf-comment-viewer-v01",
-  "version": "0.8.2",
+  "version": "0.8.10",
   "private": true,
   "type": "module",
   "scripts": {
@@ -65,7 +65,7 @@
     "check:stage07-8": "node scripts/verify-stage07-8-boundaries.mjs && node scripts/audit-filter-packs.mjs && node --no-warnings scripts/test-filter-pack-upgrade-v2.mjs",
     "visual:stage07-8": "python scripts/render-stage07-8-visuals.py",
     "db:v2:test:stage08": "node --no-warnings scripts/test-pdf-analysis-v2.mjs",
-    "check:stage08": "node scripts/verify-stage08-boundaries.mjs && node scripts/verify-precision-boundaries.mjs && node scripts/test-stage-compatibility.mjs && node scripts/test-deployment-verifiers.mjs && node scripts/test-stage08-all.mjs",
+    "check:stage08": "node scripts/verify-stage08-boundaries.mjs && node scripts/verify-precision-boundaries.mjs && node scripts/test-stage-compatibility.mjs && node scripts/test-deployment-verifiers.mjs && node scripts/test-stage08-all.mjs && npm run check:v0810",
     "visual:stage08": "python scripts/render-stage08-visuals.py",
     "test:owner-bootstrap": "node scripts/test-bootstrap-owner-v2.mjs",
     "test:final-hardening": "node --no-warnings scripts/test-final-hardening.mjs",
@@ -75,7 +75,10 @@
     "verify:staging-evidence": "node scripts/verify-staging-evidence.mjs",
     "staging:materialize-config": "node scripts/materialize-staging-config.mjs",
     "manifest:source": "node scripts/generate-source-manifest.mjs",
-    "verify:source-manifest": "node scripts/verify-source-manifest.mjs"
+    "verify:source-manifest": "node scripts/verify-source-manifest.mjs",
+    "check:v0810": "node scripts/test-v0810-usability.mjs && node scripts/test-v0810-security-ui.mjs",
+    "visual:v0810": "python scripts/render-v0810-visuals.py",
+    "check:security-ui": "node scripts/test-v0810-security-ui.mjs"
   },
   "devDependencies": {
     "wrangler": "4.110.0",

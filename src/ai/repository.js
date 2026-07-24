@@ -473,6 +473,30 @@ export async function retryAiJobsForComment(db, input) {
   return rowsOf(result).map(jobDispatchResponse);
 }
 
+export async function getCompletedTranslationDelivery(db, jobId) {
+  const row = await db.prepare(
+    `SELECT re.organization_id, re.live_session_id, re.sequence
+     FROM ai_jobs j
+     JOIN realtime_events re
+       ON re.organization_id = j.organization_id
+      AND re.live_session_id = j.live_session_id
+      AND re.source_comment_id = j.comment_id
+     WHERE j.id = ?1
+       AND j.job_type = 'translation'
+       AND j.status = 'succeeded'
+       AND re.event_type = 'settings:update'
+       AND re.payload_json LIKE '%"type":"translation:ready"%'
+     ORDER BY re.sequence DESC
+     LIMIT 1`
+  ).bind(jobId).first();
+  if (!row) return null;
+  return {
+    organizationId: row.organization_id,
+    liveSessionId: row.live_session_id,
+    sequence: Number(row.sequence)
+  };
+}
+
 export async function listDueAiJobs(db, input = {}) {
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
   const limit = Math.max(1, Math.min(200, Number(input.limit) || 100));

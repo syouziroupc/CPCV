@@ -10,11 +10,12 @@ const persistentTriggers = [...migration.matchAll(/^CREATE TRIGGER\s+(\S+)/gm)]
   .map((match) => match[1])
   .filter((name) => !name.startsWith("trg_migration_0017_"));
 
-check("package release is 0.8.2", packageJson.version === "0.8.2");
-check("README identifies Stage 8.2", text("README.md").includes("Class PDF Comment Viewer v0.8.2") && text("README.md").includes("0017"));
+check("package release is 0.8.10", packageJson.version === "0.8.10");
+check("README identifies v0.8.10 and Stage 8.2 schema", text("README.md").includes("Class PDF Comment Viewer v0.8.10") && text("README.md").includes("0017"));
 check("README requires bundle clone", text("README.md").includes("CPCV_stage08_2_history.bundle") && text("README.md").includes("source/expanded-source"));
 check("README documents staging materialization", text("README.md").includes("materialize-staging-config") && text("README.md").includes("44項目"));
-check("current system identifies Stage 8.2", text("docs/current-system.md").includes("Stage 8.2") && text("docs/current-system.md").includes("0.8.2"));
+check("current system identifies v0.8.10 on Stage 8.2 schema", text("docs/current-system.md").includes("Stage 8.2") && text("docs/current-system.md").includes("0.8.10"));
+check("v0.8.10 debug release documentation exists", text("docs/v0.8.10-debug-fixes.md").includes("delivery-only") && text("docs/v0.8.10-debug-fixes.md").includes("モバイル"));
 check("canonical index identifies migration 0017", text("docs/final-stage08/00_INDEX.md").includes("`0001`〜`0017`") && text("docs/final-stage08/00_INDEX.md").includes("20_CODEX_DEPLOY_INSTRUCTION_FINAL.md"));
 check("Stage 8.2 migration has 42 persistent triggers", persistentTriggers.length === 42, persistentTriggers.join("\n"));
 const auditMatrix = text("docs/final-stage08/22_AUDIT_FIX_MATRIX.csv").trim().split(/\r?\n/);

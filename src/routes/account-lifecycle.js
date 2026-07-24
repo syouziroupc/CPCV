@@ -171,6 +171,11 @@ async function handleAccountDelete(request, env) {
   if (personalWorkspaceWithMembers) throw new AuthError(409, "ACCOUNT_DELETE_ORGANIZATION_MEMBERS_REMAIN");
 
   const nowIso = new Date().toISOString();
+  const deletionMarker = createToken(32).slice(0, 32).toLowerCase();
+  const deletedLoginId = `deleted_${deletionMarker}`;
+  const deletedEmail = `deleted.${deletionMarker}@invalid.example`;
+  const deletedSalt = createSalt();
+  const deletedHash = await hashPassword(createToken(32), deletedSalt);
   await env.DB_V2.batch([
     env.DB_V2.prepare(`UPDATE auth_sessions SET revoked_at = ?1 WHERE user_id = ?2 AND revoked_at IS NULL`).bind(nowIso, auth.userId),
     env.DB_V2.prepare(`UPDATE password_reset_tokens SET revoked_at = ?1 WHERE user_id = ?2 AND used_at IS NULL AND revoked_at IS NULL`).bind(nowIso, auth.userId),
@@ -197,9 +202,13 @@ async function handleAccountDelete(request, env) {
        WHERE user_id = ?2 AND status <> 'removed'`
     ).bind(nowIso, auth.userId),
     env.DB_V2.prepare(
-      `UPDATE users SET status = 'deleted', deleted_at = ?1, updated_at = ?1
-       WHERE id = ?2 AND status = 'active'`
-    ).bind(nowIso, auth.userId)
+      `UPDATE users
+       SET login_id = ?1, email = ?2, email_verified_at = NULL, email_updated_at = ?3,
+           display_name = 'Deleted user', password_scheme = ?4, password_hash = ?5, password_salt = ?6,
+           password_changed_at = ?3, failed_login_count = 0, locked_until = NULL, require_password_change = 0,
+           status = 'deleted', deleted_at = ?3, updated_at = ?3
+       WHERE id = ?7 AND status = 'active'`
+    ).bind(deletedLoginId, deletedEmail, nowIso, PASSWORD_SCHEME, deletedHash, deletedSalt, auth.userId)
   ]);
 
   const deleted = await env.DB_V2.prepare(

@@ -1,6 +1,8 @@
 # CPCV 現行システム基準
 
-更新基準: Stage 8.2。package version `0.8.2`。
+更新基準: Stage 8.2。package version `0.8.10`。
+
+v0.8.10は操作性とAI安定化のデバッグreleaseである。授業操作は一画面へ統合した。組織辞書とAI上限はアカウント設定で管理する。AI Queueはbatch投入と並行処理を使用する。投影画面はcomment IDで重複表示を防ぐ。
 
 ## 構成
 

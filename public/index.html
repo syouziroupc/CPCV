@@ -3,27 +3,90 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>授業コメント表示</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.9.2">
+  <meta name="description" content="CPCVはPDFを投影しながら学生のコメントをリアルタイムで表示できる授業支援ツールです。">
+  <title>CPCV | 授業の反応をその場で拾う</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10">
 </head>
-<body class="page">
-  <main class="card narrow">
-    <h1>授業コメント表示</h1>
-    <p>先生は授業管理からログインしてください。</p>
-    <div class="home-actions">
-      <a class="button primary" href="/admin">先生用 授業管理</a>
-    </div>
-    <section class="home-join">
-      <h2>学生はこちら</h2>
-      <label class="label" for="homePublicCode">授業の合言葉</label>
-      <div class="row">
-        <input id="homePublicCode" class="input code-input" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="例: ABC123">
-        <button id="homeJoinButton" class="button primary" type="button">授業コメントへ</button>
+<body class="site-page">
+  <a class="skip-link" href="#mainContent">本文へ移動</a>
+  <header class="site-header">
+    <nav class="site-nav" aria-label="メインメニュー">
+      <a class="site-brand" href="/">CPCV</a>
+      <div class="site-links">
+        <a href="/about">CPCVとは</a>
+        <a href="/guide">使い方</a>
+        <a href="/privacy">プライバシー</a>
+        <a class="button primary" href="/admin">授業管理</a>
       </div>
-      <p id="homeJoinStatus" class="status"></p>
+    </nav>
+  </header>
+
+  <main id="mainContent" class="site-main">
+    <section class="site-hero">
+      <div>
+        <p class="eyebrow">CLASS PDF COMMENT VIEWER</p>
+        <h1>授業の反応をその場で拾う</h1>
+        <p class="site-lead">PDFを投影しながら学生のコメントを表示できます。学生はリンクやQRコードから参加します。教員は一つの画面で投稿受付や表示方法を変更し、承認や翻訳も管理できます。</p>
+        <div class="site-actions">
+          <a class="button primary" href="/admin">授業を始める</a>
+          <a class="button" href="/guide">使い方を見る</a>
+        </div>
+      </div>
+
+      <section class="join-card" aria-labelledby="joinHeading">
+        <p class="eyebrow">学生はこちら</p>
+        <h2 id="joinHeading">授業に参加</h2>
+        <p class="muted">先生から案内された6文字の合言葉を入力してください。</p>
+        <label class="label" for="homePublicCode">授業の合言葉</label>
+        <div class="row">
+          <input id="homePublicCode" class="input code-input" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="例: ABC123">
+          <button id="homeJoinButton" class="button primary" type="button">参加</button>
+        </div>
+        <p id="homeJoinStatus" class="status" aria-live="polite"></p>
+      </section>
     </section>
-    <p class="muted">先生から案内された6文字の合言葉、リンク、またはQRコードで参加できます。</p>
+
+    <section class="site-section">
+      <div class="site-section-heading">
+        <p class="eyebrow">できること</p>
+        <h2>授業中の操作を一つにまとめる</h2>
+        <p>授業管理を開いたまま投稿受付や表示方法を切り替えられます。辞書や組織全体の設定はアカウント設定に分けています。</p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card">
+          <h3>リアルタイムコメント</h3>
+          <p>学生の投稿を投影画面へ表示します。3件・5件・7件表示と横流れを選べます。</p>
+        </article>
+        <article class="feature-card">
+          <h3>承認とフィルター</h3>
+          <p>自動表示か承認後表示を選べます。日本語と英語の辞書は組織内で共通管理できます。</p>
+        </article>
+        <article class="feature-card">
+          <h3>AI翻訳</h3>
+          <p>原文を残したまま日本語または英語の翻訳を追加します。AIを使わない運用も可能です。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="site-section">
+      <div class="site-section-heading">
+        <p class="eyebrow">使い始める</p>
+        <h2>3つの手順</h2>
+      </div>
+      <ol class="step-list">
+        <li><h3>授業を作成</h3><p>授業名を入力すると学生用の合言葉とリンクが発行されます。</p></li>
+        <li><h3>学生へ案内</h3><p>リンクかQRコードを共有します。アプリのインストールは不要です。</p></li>
+        <li><h3>投影して操作</h3><p>PDFを選びます。投稿受付や承認と翻訳は授業管理から操作します。</p></li>
+      </ol>
+    </section>
   </main>
-  <script src="/assets/home.js?v=0.8.0" type="module"></script>
+
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <span>© 正二郎商事株式会社</span>
+      <div class="row wrap"><a href="/about">CPCVとは</a><a href="/guide">使い方</a><a href="/privacy">プライバシー</a></div>
+    </div>
+  </footer>
+  <script src="/assets/home.js?v=0.8.10" type="module"></script>
 </body>
 </html>

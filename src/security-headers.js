@@ -3,7 +3,8 @@ export const BASE_SECURITY_HEADERS = Object.freeze({
   "x-frame-options": "DENY",
   "permissions-policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()",
   "cross-origin-resource-policy": "same-origin",
-  "strict-transport-security": "max-age=31536000"
+  "strict-transport-security": "max-age=31536000",
+  "referrer-policy": "no-referrer"
 });
 
 export function applyBaseSecurityHeaders(headers, requestUrl = "") {
