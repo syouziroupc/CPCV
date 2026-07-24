@@ -81,8 +81,18 @@ jobs:
           npm run check
           npm run check:project
           npm run check:pdf-links
-      - name: Run all Stage 8 regression tests
-        run: npm run check:stage08
+      - name: Verify Stage 8 boundaries
+        run: node scripts/verify-stage08-boundaries.mjs
+      - name: Verify precision boundaries
+        run: node scripts/verify-precision-boundaries.mjs
+      - name: Verify stage compatibility
+        run: node scripts/test-stage-compatibility.mjs
+      - name: Verify deployment tests
+        run: node scripts/test-deployment-verifiers.mjs
+      - name: Run aggregate Stage 8 tests
+        run: node scripts/test-stage08-all.mjs
+      - name: Run 0.8.10 usability and security tests
+        run: npm run check:v0810
       - name: Run Owner bootstrap regression
         run: npm run test:owner-bootstrap
       - name: Audit dependencies
