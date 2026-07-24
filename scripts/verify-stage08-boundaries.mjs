@@ -43,7 +43,7 @@ check("student UI exposes anonymous understanding controls", /understandingEnabl
 check("analytics CSV does not export comment text or participant IDs", !/nickname|participant_id|message_text|comment_text/i.test(read("src/pdf-analysis/csv.js")));
 check("no individual ranking or participant analytics API", !/leaderboard|ranking|participant-analytics|participants\/analytics/i.test(`${privateRoutes}\n${publicRoutes}\n${admin}`));
 check("scheduled cleanup is migration-safe", /runPdfAnalyticsRetentionSafely/.test(read("src/index.js")) || /runPdfAnalyticsRetention/.test(read("src/index.js")));
-check("package version is Stage 8.2 final hardening release", pkg.version === "0.8.2", pkg.version);
+check("package version is v0.8.10 debug release", pkg.version === "0.8.10", pkg.version);
 check("Stage 8 test command exists", pkg.scripts?.["db:v2:test:stage08"] === "node --no-warnings scripts/test-pdf-analysis-v2.mjs", pkg.scripts?.["db:v2:test:stage08"]);
 check("Stage 8 aggregate runner exits explicitly", read("scripts/test-stage08-all.mjs").includes("process.exit(0)"));
 check("remote verifier requires Stage 8 migrations", remoteVerifier.includes("0015_pdf_page_analytics") && remoteVerifier.includes("0016_stage08_precision_hardening") && remoteVerifier.includes("0017_final_integrity_hardening"));

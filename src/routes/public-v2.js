@@ -40,7 +40,7 @@ export async function handlePublicV2Api(request, env) {
 
   if (request.method === "POST" && parts[4] === "messages" && parts.length === 5) {
     if (!env?.COMMENT_ROOM) throw new AuthError(500, "COMMENT_ROOM_NOT_CONFIGURED");
-    await enforcePublicCommentEdgeLimit(request, env, publicCode);
+    await enforcePublicCommentEdgeLimit(request, env, publicCode, participant.token);
     const input = await readJsonObject(request, { maxBytes: 4096 });
     assertOnlyFields(input, ["nickname", "message", "idempotencyKey", "clientId"]);
     const normalized = normalizeCommentInput(input);
@@ -64,7 +64,7 @@ export async function handlePublicV2Api(request, env) {
   }
 
   if (request.method === "POST" && parts[4] === "understanding" && parts.length === 5) {
-    await enforcePublicUnderstandingEdgeLimit(request, env, publicCode);
+    await enforcePublicUnderstandingEdgeLimit(request, env, publicCode, participant.token);
     const input = await readJsonObject(request, { maxBytes: 1024 });
     assertOnlyFields(input, ["signal", "bindingId", "pageNumber", "clientVersion"]);
     const normalized = normalizeUnderstandingInput(input);

@@ -3,26 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>授業管理</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.14.0">
+  <title>授業管理 | CPCV</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10">
 </head>
-<body class="page">
-  <main class="card wide">
-    <div class="row between wrap">
+<body class="page admin-page">
+  <a class="skip-link" href="#mainContent">本文へ移動</a>
+  <main id="mainContent" class="card admin-shell">
+    <header class="app-header row between wrap">
       <div>
-        <p class="eyebrow">先生用</p>
+        <p class="eyebrow">CPCV</p>
         <h1>授業管理</h1>
       </div>
-      <div class="row wrap">
-        <a id="organizationManageLink" class="button hidden" href="/master">組織管理</a>
+      <nav class="row wrap" aria-label="管理メニュー">
+        <a id="organizationManageLink" class="button hidden" href="/master">メンバー管理</a>
         <a class="button" href="/account">アカウント設定</a>
-          <button id="logoutButton" class="button hidden">ログアウト</button>
-      </div>
-    </div>
+        <button id="logoutButton" class="button hidden">ログアウト</button>
+      </nav>
+    </header>
 
-    <section id="loginSection" class="section">
+    <section id="loginSection" class="section auth-panel">
       <h2>先生ログイン</h2>
-      <p class="muted">登録済みのメールアドレスとパスワードを入力してください。</p>
+      <p class="muted">登録したメールアドレスとパスワードを入力してください。</p>
       <label class="label" for="teacherLoginId">メールアドレス<span class="muted">（移行前はログインID）</span></label>
       <input id="teacherLoginId" class="input" autocomplete="username">
       <label class="label" for="teacherPassword">パスワード</label>
@@ -31,389 +32,226 @@
         <label class="label" for="teacherOrganization">組織</label>
         <select id="teacherOrganization" class="select"></select>
       </div>
-      <button id="loginButton" class="button primary">ログイン</button>
-      <p id="loginStatus" class="status"></p>
+      <button id="loginButton" class="button primary auth-submit">ログイン</button>
+      <p id="loginStatus" class="status" aria-live="polite"></p>
       <div class="auth-links"><a href="/forgot-password">パスワードを忘れた</a><a href="/signup">組織を登録</a></div>
     </section>
 
-    <section id="createSection" class="section hidden">
-      <h2>新しい授業</h2>
-      <label class="label" for="newTitle">授業名</label>
-      <input id="newTitle" class="input" placeholder="例: 観光文化論 第4回">
-      <button id="createButton" class="button primary">授業を作成</button>
-    </section>
+    <div id="adminHome" class="admin-home-grid">
+      <section id="createSection" class="section hidden admin-create-panel">
+        <p class="eyebrow">新規</p>
+        <h2>授業を始める</h2>
+        <label class="label" for="newTitle">授業名</label>
+        <input id="newTitle" class="input" placeholder="例: 観光文化論 第4回">
+        <button id="createButton" class="button primary full-button">授業を作成</button>
+      </section>
 
-    <section id="activeSessionsSection" class="section hidden">
-      <h2>進行中の授業</h2>
-      <p class="muted">授業は作成から6時間で自動的に閉じます。</p>
-      <div id="activeSessionList" class="teacher-list"></div>
-    </section>
-
-
-    <section id="organizationAiSection" class="section hidden">
-      <h2>組織のAI機能</h2>
-      <p class="muted">AI判定は参考情報です。コメントを自動で非表示にはしません。利用量は組織単位で制限します。</p>
-      <div class="row wrap ai-settings-row">
-        <label class="inline-control" for="organizationAiEnabled">
-          <input id="organizationAiEnabled" type="checkbox">
-          AI機能を許可
-        </label>
-        <label class="inline-control" for="aiModerationDailyLimit">
-          判定上限/日
-          <input id="aiModerationDailyLimit" class="input compact-number" type="number" min="0" max="100000" step="1">
-        </label>
-        <label class="inline-control" for="aiTranslationDailyLimit">
-          翻訳上限/日
-          <input id="aiTranslationDailyLimit" class="input compact-number" type="number" min="0" max="100000" step="1">
-        </label>
-        <button id="saveOrganizationAiButton" class="button primary" type="button">組織AI設定を保存</button>
-      </div>
-      <p id="organizationAiStatus" class="muted"></p>
-    </section>
-
-
-
-    <section id="organizationFilterSection" class="section hidden">
-      <h2>組織の辞書フィルター</h2>
-      <p class="muted">通常は推奨設定を選び。用語。種類。レベルだけを登録します。政治的発言は推奨設定でも無効です。</p>
-
-      <div class="simple-settings-panel">
-        <label class="label" for="organizationFilterPreset">かんたん設定</label>
-        <div class="row wrap">
-          <select id="organizationFilterPreset" class="select">
-            <option value="standard">推奨</option>
-            <option value="strict">厳格</option>
-            <option value="off">すべて無効</option>
-            <option value="custom">現在の詳細設定</option>
-          </select>
-          <button id="applyOrganizationFilterPresetButton" class="button primary" type="button">設定を適用</button>
-        </div>
-        <p class="muted small-text">推奨は一般的な不適切表現を対象にします。厳格は承認待ちと伏字の基準を一段下げます。政治的発言は自動で有効になりません。</p>
-      </div>
-
-      <div class="info-box compact-panel">
-        <h3>日本語・英語の検閲パック</h3>
-        <p id="filterPackStatus" class="muted">導入状態を確認しています。</p>
-        <p class="muted small-text">推奨は高精度の基本パックだけを導入します。厳格は教育・報道では正当な場合もある文脈注意パックも導入し。原則として確認待ちにします。政治的発言は含みません。</p>
-        <details class="advanced-settings">
-          <summary>パックを個別に導入・更新</summary>
-          <div class="row wrap">
-            <button id="installJapaneseFilterPackButton" data-default-label="日本語 基本" class="button" type="button">日本語 基本</button>
-            <button id="installEnglishFilterPackButton" data-default-label="英語 基本" class="button" type="button">英語 基本</button>
-            <button id="installJapaneseContextFilterPackButton" data-default-label="日本語 文脈注意" class="button" type="button">日本語 文脈注意</button>
-            <button id="installEnglishContextFilterPackButton" data-default-label="英語 文脈注意" class="button" type="button">英語 文脈注意</button>
+      <section id="activeSessionsSection" class="section hidden admin-session-list-panel">
+        <div class="row between wrap">
+          <div>
+            <p class="eyebrow">進行中</p>
+            <h2>授業一覧</h2>
           </div>
-          <p class="muted small-text">導入後の用語は変更・無効化・削除できます。手動編集した用語はパック更新で上書きされません。</p>
-        </details>
-      </div>
+          <p class="muted small-text">作成から6時間で自動終了</p>
+        </div>
+        <div id="activeSessionList" class="teacher-list"></div>
+      </section>
+    </div>
 
-      <h3>用語を追加</h3>
-      <div class="filter-term-form">
-        <div class="filter-term-field filter-term-wide"><label class="label" for="filterTermInput">検閲用語</label><input id="filterTermInput" class="input" maxlength="80" placeholder="例: 登録する語句"></div>
-        <div class="filter-term-field"><label class="label" for="filterTermCategory">種類</label><select id="filterTermCategory" class="select"></select></div>
-        <div class="filter-term-field"><label class="label" for="filterTermSeverity">レベル</label><select id="filterTermSeverity" class="select">
-          <option value="1">1 軽微</option><option value="2">2 注意</option><option value="3" selected>3 中程度</option><option value="4">4 強い</option><option value="5">5 最重大</option>
-        </select></div>
-        <button id="addFilterTermButton" class="button primary" type="button">用語を追加</button>
-        <button id="cancelFilterTermEditButton" class="button hidden" type="button">編集を取消</button>
-      </div>
-
-      <details id="filterTermAdvancedDetails" class="advanced-settings">
-        <summary>用語の詳細設定</summary>
-        <div class="filter-advanced-grid">
-          <label class="label" for="filterTermLanguage">言語
-            <select id="filterTermLanguage" class="select"></select>
-          </label>
-          <label class="label" for="filterTermBoundary">一致範囲
-            <select id="filterTermBoundary" class="select">
-              <option value="auto">自動</option>
-              <option value="word">単語全体のみ</option>
-              <option value="substring">文字列の一部でも一致</option>
-            </select>
-          </label>
-          <label class="label" for="filterTermMatchMode">照合方式
-            <select id="filterTermMatchMode" class="select">
-              <option value="normalized">表記ゆれ対応</option>
-              <option value="strict">厳密一致</option>
-            </select>
-          </label>
-          <label class="inline-control filter-fuzzy-control" for="filterTermFuzzy"><input id="filterTermFuzzy" type="checkbox" checked>一文字程度の回避表記も確認</label>
-        </div>
-        <p class="muted small-text">対応言語は日本語と英語です。英語は単語境界を使います。日本語は記号挿入や片仮名表記などを正規化して照合します。</p>
-      </details>
-
-      <p id="organizationFilterStatus" class="muted"></p>
-      <details id="organizationFilterAdvanced" class="advanced-settings">
-        <summary>詳細設定・登録済み用語</summary>
-        <div class="row wrap filter-tools-row">
-          <button id="exportFilterTermsButton" class="button" type="button">CSVを書き出す</button>
-        </div>
-        <div class="filter-table-wrap">
-          <table class="filter-table">
-            <thead><tr><th>用語</th><th>言語</th><th>種類</th><th>レベル</th><th>一致</th><th>表記ゆれ</th><th>有効</th><th>操作</th></tr></thead>
-            <tbody id="filterTermsBody"></tbody>
-          </table>
-        </div>
-        <h3>種類別の処理基準</h3>
-        <p class="muted">各数値以上で処理します。空欄はその処理を使いません。基準は 承認待ち ≤ 伏字 ≤ 投稿拒否 の順にしてください。</p>
-        <div class="filter-table-wrap">
-          <table class="filter-table policy-table">
-            <thead><tr><th>種類</th><th>使用</th><th>承認待ち</th><th>伏字</th><th>投稿拒否</th></tr></thead>
-            <tbody id="filterPoliciesBody"></tbody>
-          </table>
-        </div>
-        <button id="saveFilterPoliciesButton" class="button primary" type="button">種類別基準を保存</button>
-      </details>
-    </section>
-
-    <section id="sessionSection" class="section hidden">
-      <h2 id="sessionTitle">授業</h2>
-      <div class="grid two">
-        <div class="info-box">
-          <h3>学生に配るリンク</h3>
-          <p id="joinUrl" class="mono break selectable"></p>
-          <p id="publicCode" class="mono"></p>
-          <button id="copyJoinButton" class="button">学生リンクをコピー</button>
-        </div>
-        <div class="info-box">
-          <h3>投影画面</h3>
-          <p id="viewerUrl" class="mono break selectable"></p>
-          <button id="openViewerButton" class="button">投影画面を開く</button>
-        </div>
-      </div>
-
-      <div class="grid two">
-        <div class="info-box">
-          <h3>状態</h3>
-          <p id="postingState" class="muted"></p>
-          <p id="commentsState" class="muted"></p>
-          <p id="commentModeState" class="muted"></p>
-          <p id="moderationModeState" class="muted"></p>
-          <p id="commentDisplayState" class="muted"></p>
+    <section id="sessionSection" class="section hidden session-workspace">
+      <div class="session-heading row between wrap">
+        <div>
+          <p class="eyebrow">授業中</p>
+          <h2 id="sessionTitle">授業</h2>
           <p id="sessionState" class="muted"></p>
         </div>
-        <div class="info-box">
-          <h3>PDF</h3>
-          <p id="documentInfo" class="muted"></p>
-        </div>
+        <a class="button" href="/admin">授業一覧へ</a>
       </div>
 
-      <h3>授業操作</h3>
-      <div class="row wrap">
-        <button id="togglePostingButton" class="button">投稿ON/OFF</button>
-        <button id="toggleCommentsButton" class="button">コメント表示ON/OFF</button>
-        <label class="inline-control" for="commentDisplayMode">
-          表示方法
-          <select id="commentDisplayMode" class="select">
-            <option value="stack3">3件</option>
-            <option value="stack5">5件</option>
-            <option value="stack7">7件</option>
-            <option value="scroll">横流れ</option>
-          </select>
-        </label>
-        <label class="inline-control" for="moderationMode">
-          投稿承認
-          <select id="moderationMode" class="select">
-            <option value="off">自動表示</option>
-            <option value="pre">承認後に表示</option>
-          </select>
-        </label>
-        <label id="commentDisplaySecondsControl" class="inline-control" for="commentDisplaySeconds">
-          <span id="commentDisplaySecondsLabel">表示時間</span>
-          <select id="commentDisplaySeconds" class="select">
-            <option value="10" data-time-label="10秒" data-speed-label="最高速">10秒</option>
-            <option value="30" data-time-label="30秒" data-speed-label="速い">30秒</option>
-            <option value="60" data-time-label="1分" data-speed-label="標準">1分</option>
-            <option value="120" data-time-label="2分" data-speed-label="遅い">2分</option>
-            <option value="300" data-time-label="5分" data-speed-label="とても遅い">5分</option>
-          </select>
-        </label>
-        <button id="clearCommentsButton" class="button">表示コメントを消す</button>
-        <button id="endSessionButton" class="button danger">授業終了</button>
-        <button id="deleteSessionButton" class="button danger">一覧から消す</button>
+      <div class="session-command-center">
+        <section class="lesson-live-column" aria-labelledby="liveControlsHeading">
+          <div class="workspace-panel workspace-panel-primary">
+            <h3 id="liveControlsHeading">授業中の操作</h3>
+            <div class="live-state-grid" aria-label="授業の状態">
+              <p id="postingState" class="state-tile"></p>
+              <p id="commentsState" class="state-tile"></p>
+              <p id="commentModeState" class="state-tile"></p>
+              <p id="moderationModeState" class="state-tile"></p>
+              <p id="commentDisplayState" class="state-tile"></p>
+            </div>
+            <div class="primary-actions">
+              <button id="togglePostingButton" class="button primary">投稿を停止</button>
+              <button id="toggleCommentsButton" class="button">コメントを隠す</button>
+              <button id="clearCommentsButton" class="button">投影中のコメントを消す</button>
+            </div>
+          </div>
+
+          <div class="workspace-panel">
+            <h3>学生に案内</h3>
+            <p id="publicCode" class="session-code"></p>
+            <p id="joinUrl" class="mono break selectable small-text"></p>
+            <button id="copyJoinButton" class="button primary full-button">学生リンクをコピー</button>
+          </div>
+
+          <div class="workspace-panel">
+            <h3>投影画面</h3>
+            <p id="viewerUrl" class="mono break selectable small-text"></p>
+            <button id="openViewerButton" class="button full-button">投影画面を開く</button>
+            <p id="documentInfo" class="muted small-text"></p>
+          </div>
+
+          <div class="workspace-panel danger-panel">
+            <h3>授業を閉じる</h3>
+            <div class="row wrap">
+              <button id="endSessionButton" class="button danger">授業を終了</button>
+              <button id="deleteSessionButton" class="button danger">一覧から削除</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="lesson-settings-column" aria-labelledby="lessonSettingsHeading">
+          <div class="workspace-panel settings-panel">
+            <div class="row between wrap">
+              <div>
+                <h3 id="lessonSettingsHeading">授業設定</h3>
+                <p class="muted small-text">変更した項目はその場で反映されます。</p>
+              </div>
+              <a class="text-link" href="/account#organizationSettings">辞書やAI上限を変更</a>
+            </div>
+
+            <div class="settings-group">
+              <h4>投影表示</h4>
+              <div class="settings-grid">
+                <label class="field-control" for="commentDisplayMode">表示方法
+                  <select id="commentDisplayMode" class="select">
+                    <option value="stack3">3件</option>
+                    <option value="stack5">5件</option>
+                    <option value="stack7">7件</option>
+                    <option value="scroll">横流れ</option>
+                  </select>
+                </label>
+                <label class="field-control" for="commentDisplaySeconds">
+                  <span id="commentDisplaySecondsLabel">表示時間</span>
+                  <select id="commentDisplaySeconds" class="select">
+                    <option value="10" data-time-label="10秒" data-speed-label="最高速">10秒</option>
+                    <option value="30" data-time-label="30秒" data-speed-label="速い">30秒</option>
+                    <option value="60" data-time-label="1分" data-speed-label="標準">1分</option>
+                    <option value="120" data-time-label="2分" data-speed-label="遅い">2分</option>
+                    <option value="300" data-time-label="5分" data-speed-label="とても遅い">5分</option>
+                  </select>
+                </label>
+                <label class="field-control" for="moderationMode">投稿承認
+                  <select id="moderationMode" class="select">
+                    <option value="off">自動表示</option>
+                    <option value="pre">承認後に表示</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <section id="sessionFilterSection" class="settings-group">
+              <h4>コメントフィルター</h4>
+              <div class="settings-save-row">
+                <label class="field-control grow" for="sessionFilterSimpleMode">使い方
+                  <select id="sessionFilterSimpleMode" class="select">
+                    <option value="off">使用しない</option>
+                    <option value="recommended">推奨。曖昧な投稿だけAI</option>
+                    <option value="dictionary">辞書のみ。AIなし</option>
+                    <option value="all">全投稿をAIでも確認</option>
+                  </select>
+                </label>
+                <button id="saveSessionFilterSimpleButton" class="button primary" type="button">保存</button>
+              </div>
+              <p id="sessionFilterStatus" class="muted small-text"></p>
+              <details id="sessionFilterAdvanced" class="advanced-settings">
+                <summary>詳細設定</summary>
+                <div class="settings-grid settings-grid-single">
+                  <label class="inline-control" for="sessionFilterEnabled"><input id="sessionFilterEnabled" type="checkbox">辞書フィルターを有効化</label>
+                  <label class="field-control" for="sessionFilterAiRouting">AIへ回す範囲
+                    <select id="sessionFilterAiRouting" class="select"><option value="off">AIを使わない</option><option value="ambiguous">曖昧な場合のみ</option><option value="all">全投稿</option></select>
+                  </label>
+                  <label class="field-control" for="sessionFilterMaskCharacter">伏字
+                    <input id="sessionFilterMaskCharacter" class="input compact-mask" maxlength="4" value="＊">
+                  </label>
+                  <label class="inline-control" for="sessionTranslationFilterEnabled"><input id="sessionTranslationFilterEnabled" type="checkbox" checked>翻訳後も辞書で確認</label>
+                  <label class="field-control" for="sessionUnsupportedLanguageMode">日本語・英語以外
+                    <select id="sessionUnsupportedLanguageMode" class="select"><option value="ai_review">承認待ち＋AI判定</option><option value="review_only">承認待ちのみ</option><option value="allow">そのまま許可</option></select>
+                  </label>
+                </div>
+                <button id="saveSessionFilterButton" class="button" type="button">詳細設定を保存</button>
+              </details>
+            </section>
+
+            <section id="sessionAiSection" class="settings-group">
+              <h4>AI補助</h4>
+              <div class="toggle-list">
+                <label class="toggle-row" for="sessionAiModerationEnabled"><span><strong>AI判定</strong><small>辞書で判断しにくい投稿の参考判定</small></span><input id="sessionAiModerationEnabled" type="checkbox"></label>
+                <label class="toggle-row" for="sessionAiTranslationEnabled"><span><strong>AI翻訳</strong><small>原文を残したまま翻訳を追加</small></span><input id="sessionAiTranslationEnabled" type="checkbox"></label>
+              </div>
+              <div class="settings-save-row">
+                <label class="field-control grow" for="sessionAiTargetLanguage">翻訳先
+                  <select id="sessionAiTargetLanguage" class="select"><option value="ja">日本語</option><option value="en">英語</option></select>
+                </label>
+                <button id="saveSessionAiButton" class="button primary" type="button">保存</button>
+              </div>
+              <p id="sessionAiStatus" class="muted small-text"></p>
+            </section>
+          </div>
+        </section>
       </div>
 
-
-
-
-      <section id="sessionFilterSection" class="ai-settings-panel">
-        <h3>この授業の辞書フィルター</h3>
-        <div class="simple-settings-panel compact-panel">
-          <label class="label" for="sessionFilterSimpleMode">かんたん設定</label>
-          <div class="row wrap">
-            <select id="sessionFilterSimpleMode" class="select">
-              <option value="off">使用しない</option>
-              <option value="recommended">推奨。曖昧な投稿だけAI</option>
-              <option value="dictionary">辞書のみ。AIなし</option>
-              <option value="all">全投稿をAIでも確認</option>
-            </select>
-            <button id="saveSessionFilterSimpleButton" class="button primary" type="button">設定を保存</button>
+      <details id="moderationSection" class="workspace-detail" open>
+        <summary>コメント管理</summary>
+        <div class="detail-body moderation-section">
+          <div class="row between wrap">
+            <p class="muted">承認。非表示。削除。AI結果の確認をここで行います。</p>
+            <div class="row wrap">
+              <label class="inline-control" for="moderationStateFilter">状態
+                <select id="moderationStateFilter" class="select"><option value="">すべて</option><option value="pending">承認待ち</option><option value="visible">表示中</option><option value="hidden">非表示</option><option value="deleted">削除済み</option></select>
+              </label>
+              <button id="refreshModerationButton" class="button" type="button">更新</button>
+            </div>
           </div>
-        </div>
-        <details id="sessionFilterAdvanced" class="advanced-settings">
-          <summary>詳細設定</summary>
-          <p class="muted">日本語と英語は辞書で処理します。日英以外は既定で承認待ちにし。AIへ参考判定を依頼します。翻訳を使う場合は翻訳文にも辞書を再適用します。</p>
-          <div class="row wrap ai-settings-row">
-            <label class="inline-control" for="sessionFilterEnabled"><input id="sessionFilterEnabled" type="checkbox">辞書フィルターを有効化</label>
-            <label class="inline-control" for="sessionFilterAiRouting">AIへ回す範囲
-              <select id="sessionFilterAiRouting" class="select">
-                <option value="off">AIを使わない</option>
-                <option value="ambiguous">曖昧な場合のみ</option>
-                <option value="all">全投稿</option>
-              </select>
-            </label>
-            <label class="inline-control" for="sessionFilterMaskCharacter">伏字
-              <input id="sessionFilterMaskCharacter" class="input compact-mask" maxlength="4" value="＊">
-            </label>
-            <label class="inline-control" for="sessionTranslationFilterEnabled"><input id="sessionTranslationFilterEnabled" type="checkbox" checked>翻訳後も日英辞書で検閲</label>
-            <label class="inline-control" for="sessionUnsupportedLanguageMode">日英以外
-              <select id="sessionUnsupportedLanguageMode" class="select">
-                <option value="ai_review">承認待ち＋AI判定</option>
-                <option value="review_only">承認待ちのみ</option>
-                <option value="allow">そのまま許可</option>
-              </select>
-            </label>
-            <button id="saveSessionFilterButton" class="button" type="button">詳細設定を保存</button>
+          <div class="row wrap moderation-bulk-actions">
+            <button id="bulkApproveButton" class="button" type="button">選択を承認</button>
+            <button id="bulkHideButton" class="button" type="button">選択を非表示</button>
+            <button id="bulkRestoreButton" class="button" type="button">選択を復元</button>
+            <button id="bulkDeleteButton" class="button danger" type="button">選択を削除</button>
           </div>
-        </details>
-        <p id="sessionFilterStatus" class="muted"></p>
-      </section>
+          <p id="moderationStatus" class="muted">コメントを読み込んでいます。</p>
+          <div class="moderation-table-wrap"><table class="moderation-table"><thead><tr><th><span class="sr-only">選択</span></th><th>投稿日時</th><th>名前</th><th>コメント</th><th>状態</th><th>AI判定</th><th>AI翻訳</th><th>操作</th></tr></thead><tbody id="moderationBody"></tbody></table></div>
+        </div>
+      </details>
 
-      <section id="sessionAiSection" class="ai-settings-panel">
-        <h3>この授業のAI補助</h3>
-        <p class="muted">原文を変更しません。AI判定は参考表示だけです。翻訳先は日本語または英語です。翻訳文は表示前に翻訳先言語の辞書で再検閲します。</p>
-        <div class="row wrap ai-settings-row">
-          <label class="inline-control" for="sessionAiModerationEnabled">
-            <input id="sessionAiModerationEnabled" type="checkbox">
-            AI判定
-          </label>
-          <label class="inline-control" for="sessionAiTranslationEnabled">
-            <input id="sessionAiTranslationEnabled" type="checkbox">
-            AI翻訳
-          </label>
-          <label class="inline-control" for="sessionAiTargetLanguage">
-            翻訳先
-            <select id="sessionAiTargetLanguage" class="select">
-              <option value="ja">日本語</option>
-              <option value="en">英語</option>
-            </select>
-          </label>
-          <button id="saveSessionAiButton" class="button primary" type="button">授業AI設定を保存</button>
+      <details id="sessionAnalyticsSection" class="workspace-detail">
+        <summary>PDFページ別の授業分析</summary>
+        <div class="detail-body analytics-section">
+          <div class="row between wrap"><p class="muted">ページ番号。コメント数。匿名の理解度を集計します。PDF本体は送信しません。</p><div class="row wrap"><button id="refreshAnalyticsButton" class="button" type="button">更新</button><button id="createAnalyticsSnapshotButton" class="button primary" type="button">記録を確定</button></div></div>
+          <p id="analyticsStatus" class="muted">投影画面でPDFを選ぶと集計を開始します。</p>
+          <div id="analyticsSummary" class="analytics-summary hidden"></div>
+          <div class="analytics-table-wrap"><table class="analytics-table"><thead><tr><th>ページ</th><th>表示</th><th>滞在</th><th>コメント</th><th>質問</th><th>理解度</th><th>スコア</th></tr></thead><tbody id="analyticsBody"></tbody></table></div>
+          <div class="row wrap analytics-export-row"><label class="inline-control" for="analyticsSnapshotSelect">確定記録<select id="analyticsSnapshotSelect" class="select"><option value="">記録なし</option></select></label><button id="downloadAnalyticsSnapshotButton" class="button" type="button" disabled>CSVを書き出す</button></div>
         </div>
-        <p id="sessionAiStatus" class="muted"></p>
-      </section>
+      </details>
 
-
-      <section id="sessionAnalyticsSection" class="analytics-section">
-        <div class="row between wrap">
-          <div>
-            <h3>PDFページ別の授業分析</h3>
-            <p class="muted">PDF本体やファイル名は送信しません。ページ番号。コメント数。匿名の理解度だけを集計します。3人未満の理解度内訳は非表示です。</p>
-          </div>
-          <div class="row wrap">
-            <button id="refreshAnalyticsButton" class="button" type="button">再読み込み</button>
-            <button id="createAnalyticsSnapshotButton" class="button primary" type="button">記録を確定</button>
-          </div>
+      <details class="workspace-detail local-log-section">
+        <summary>この端末の受信ログ</summary>
+        <div class="detail-body">
+          <div class="row between wrap"><p class="muted">投影画面を開いた同じPCのブラウザに保存されたコメントです。上限は2,000件です。</p><button id="refreshLocalLogButton" class="button" type="button">更新</button></div>
+          <p id="adminLocalLogState" class="muted">ログを確認しています。</p>
+          <div class="local-log-table-wrap"><table class="local-log-table"><thead><tr><th>投稿日時</th><th>名前</th><th>コメント</th></tr></thead><tbody id="adminLocalLogBody"></tbody></table></div>
         </div>
-        <p id="analyticsStatus" class="muted">投影画面でPDFを選ぶと集計を開始します。</p>
-        <div id="analyticsSummary" class="analytics-summary hidden"></div>
-        <div class="analytics-table-wrap">
-          <table class="analytics-table">
-            <thead>
-              <tr><th>ページ</th><th>表示</th><th>滞在</th><th>コメント</th><th>質問</th><th>理解度</th><th>スコア</th></tr>
-            </thead>
-            <tbody id="analyticsBody"></tbody>
-          </table>
-        </div>
-        <div class="row wrap analytics-export-row">
-          <label class="inline-control" for="analyticsSnapshotSelect">確定記録
-            <select id="analyticsSnapshotSelect" class="select"><option value="">記録なし</option></select>
-          </label>
-          <button id="downloadAnalyticsSnapshotButton" class="button" type="button" disabled>CSVを書き出す</button>
-        </div>
-      </section>
-
-      <section id="moderationSection" class="moderation-section">
-        <div class="row between wrap">
-          <div>
-            <h3>保存コメントとモデレーション</h3>
-            <p class="muted">非表示と削除は投影画面から撤回されます。「表示コメントを消す」は保存状態を変更しません。</p>
-          </div>
-          <div class="row wrap">
-            <label class="inline-control" for="moderationStateFilter">
-              状態
-              <select id="moderationStateFilter" class="select">
-                <option value="">すべて</option>
-                <option value="pending">承認待ち</option>
-                <option value="visible">表示中</option>
-                <option value="hidden">非表示</option>
-                <option value="deleted">削除済み</option>
-              </select>
-            </label>
-            <button id="refreshModerationButton" class="button" type="button">再読み込み</button>
-          </div>
-        </div>
-        <div class="row wrap moderation-bulk-actions">
-          <button id="bulkApproveButton" class="button" type="button">選択を承認</button>
-          <button id="bulkHideButton" class="button" type="button">選択を非表示</button>
-          <button id="bulkRestoreButton" class="button" type="button">選択を復元</button>
-          <button id="bulkDeleteButton" class="button danger" type="button">選択を削除</button>
-        </div>
-        <p id="moderationStatus" class="muted">コメントを読み込んでいます。</p>
-        <div class="moderation-table-wrap">
-          <table class="moderation-table">
-            <thead>
-              <tr>
-                <th><span class="sr-only">選択</span></th>
-                <th>投稿日時</th>
-                <th>名前</th>
-                <th>コメント</th>
-                <th>状態</th>
-                <th>AI判定</th>
-                <th>AI翻訳</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="moderationBody"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="local-log-section">
-        <div class="row between wrap">
-          <div>
-            <h3>この端末の受信ログ</h3>
-            <p class="muted">投影画面を開いた同じPC・同じブラウザに保存されたコメントです。</p>
-          </div>
-          <button id="refreshLocalLogButton" class="button" type="button">再読み込み</button>
-        </div>
-        <p id="adminLocalLogState" class="muted">ログを確認しています。</p>
-        <div class="local-log-table-wrap">
-          <table class="local-log-table">
-            <thead>
-              <tr>
-                <th>投稿日時</th>
-                <th>名前</th>
-                <th>コメント</th>
-              </tr>
-            </thead>
-            <tbody id="adminLocalLogBody"></tbody>
-          </table>
-        </div>
-      </section>
+      </details>
     </section>
 
     <section id="notFoundSection" class="section hidden">
       <h2>授業が見つかりません</h2>
-      <p class="muted">授業が終了済みか、作成から6時間を過ぎています。</p>
-      <div class="row wrap">
-        <a class="button" href="/admin">授業管理へ戻る</a>
-        <button id="notFoundCreateButton" class="button primary">新しい授業を作成</button>
-      </div>
+      <p class="muted">授業が終了済みか。作成から6時間を過ぎています。</p>
+      <div class="row wrap"><a class="button" href="/admin">授業管理へ戻る</a><button id="notFoundCreateButton" class="button primary">新しい授業を作成</button></div>
     </section>
 
-    <p id="adminStatus" class="status"></p>
+    <p id="adminStatus" class="status" aria-live="polite"></p>
   </main>
-  <script src="/assets/admin.js?v=0.8.2" type="module"></script>
+  <script src="/assets/admin.js?v=0.8.10" type="module"></script>
 </body>
 </html>

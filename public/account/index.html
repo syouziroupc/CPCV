@@ -3,59 +3,144 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>アカウント設定</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.6.5">
+  <title>アカウント設定 | CPCV</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10">
 </head>
 <body class="page">
-  <main class="card narrow">
-    <div class="row between wrap">
-      <div>
-        <p class="eyebrow">CPCV</p>
-        <h1>アカウント設定</h1>
-      </div>
+  <a class="skip-link" href="#mainContent">本文へ移動</a>
+  <main id="mainContent" class="card wide account-shell">
+    <header class="app-header row between wrap">
+      <div><p class="eyebrow">CPCV</p><h1>アカウント設定</h1></div>
       <a class="button" href="/admin">授業管理へ</a>
-    </div>
+    </header>
+
     <section id="loadingSection" class="section"><p class="status">読み込んでいます。</p></section>
     <section id="accountSection" class="hidden">
-      <div class="info-box">
-        <p><strong id="displayName"></strong></p>
-        <p id="emailState" class="break"></p>
-        <p id="organizationState" class="muted break pre-line"></p>
-      </div>
-      <section class="section">
-        <h2 id="emailHeading">メールアドレスを変更</h2>
-        <p id="emailExplanation" class="muted">新しいメールアドレスへ確認リンクを送ります。確認後は全端末からログアウトします。</p>
-        <form id="emailForm">
-          <label class="label" for="newEmail">新しいメールアドレス</label>
-          <input id="newEmail" class="input" type="email" autocomplete="email" maxlength="254" required>
-          <label class="label" for="currentPassword">現在のパスワード</label>
-          <input id="currentPassword" class="input" type="password" autocomplete="current-password" maxlength="128" required>
-          <button id="emailButton" class="button primary auth-submit" type="submit">確認メールを送る</button>
-        </form>
-        <p id="pendingEmail" class="muted break"></p>
-        <p id="status" class="status" aria-live="polite"></p>
+      <nav class="account-section-nav" aria-label="設定項目">
+        <a href="#organizationSettings">AI・辞書</a>
+        <a href="#emailSettings">メール変更</a>
+        <a href="#loginSettings">ログアウト</a>
+        <a href="#deleteSettings">アカウント削除</a>
+      </nav>
+
+      <section class="section account-summary-grid">
+        <div class="info-box">
+          <p class="eyebrow">利用者</p>
+          <p><strong id="displayName"></strong></p>
+          <p id="emailState" class="break"></p>
+          <p id="organizationState" class="muted break pre-line"></p>
+        </div>
+        <div class="info-box">
+          <p class="eyebrow">設定の場所</p>
+          <p>授業ごとの表示。承認。翻訳は授業管理で設定します。</p>
+          <p class="muted">辞書の語句。組織AIの利用上限はこのページで管理します。</p>
+        </div>
       </section>
-      <section class="section">
-        <button id="logoutButton" class="button danger" type="button">ログアウト</button>
+
+      <section id="organizationSettings" class="section hidden">
+        <div class="row between wrap">
+          <div><p class="eyebrow">組織共通</p><h2>AI・コメント辞書</h2></div>
+          <p id="organizationRoleStatus" class="muted"></p>
+        </div>
+
+        <div class="account-settings-grid">
+          <section id="organizationAiSection" class="workspace-panel">
+            <h3>AI利用設定</h3>
+            <p class="muted small-text">授業でAI判定や翻訳を使えるか。1日の上限を決めます。</p>
+            <label class="toggle-row" for="organizationAiEnabled"><span><strong>AI機能を許可</strong><small>各授業でONにした場合だけ動作</small></span><input id="organizationAiEnabled" type="checkbox"></label>
+            <div class="settings-grid settings-grid-single">
+              <label class="field-control" for="aiModerationDailyLimit">AI判定 上限/日<input id="aiModerationDailyLimit" class="input" type="number" min="0" max="100000" step="1"></label>
+              <label class="field-control" for="aiTranslationDailyLimit">AI翻訳 上限/日<input id="aiTranslationDailyLimit" class="input" type="number" min="0" max="100000" step="1"></label>
+            </div>
+            <button id="saveOrganizationAiButton" class="button primary full-button" type="button">AI設定を保存</button>
+            <p id="organizationAiStatus" class="status" aria-live="polite"></p>
+          </section>
+
+          <section id="organizationFilterSection" class="workspace-panel">
+            <h3>辞書の基本設定</h3>
+            <p class="muted small-text">通常は推奨を選ぶだけで使えます。個別語句は下で追加できます。</p>
+            <label class="field-control" for="organizationFilterPreset">判定の強さ
+              <select id="organizationFilterPreset" class="select"><option value="standard">推奨</option><option value="strict">厳格</option><option value="off">すべて無効</option><option value="custom">現在の詳細設定</option></select>
+            </label>
+            <button id="applyOrganizationFilterPresetButton" class="button primary full-button" type="button">基本設定を適用</button>
+            <p id="filterPackStatus" class="muted small-text">辞書パックを確認しています。</p>
+            <details class="advanced-settings"><summary>辞書パックを個別に導入・更新</summary>
+              <div class="row wrap">
+                <button id="installJapaneseFilterPackButton" data-default-label="日本語 基本" class="button" type="button">日本語 基本</button>
+                <button id="installEnglishFilterPackButton" data-default-label="英語 基本" class="button" type="button">英語 基本</button>
+                <button id="installJapaneseContextFilterPackButton" data-default-label="日本語 文脈注意" class="button" type="button">日本語 文脈注意</button>
+                <button id="installEnglishContextFilterPackButton" data-default-label="英語 文脈注意" class="button" type="button">英語 文脈注意</button>
+              </div>
+            </details>
+            <p id="organizationFilterStatus" class="status" aria-live="polite"></p>
+          </section>
+        </div>
+
+        <section class="workspace-panel filter-editor-panel">
+          <div class="row between wrap">
+            <div><h3>語句を追加</h3><p class="muted small-text">追加した語句は組織内の授業で共通利用できます。</p></div>
+            <button id="exportFilterTermsButton" class="button" type="button">CSVを書き出す</button>
+          </div>
+          <div class="filter-term-form">
+            <div class="filter-term-field filter-term-wide"><label class="label" for="filterTermInput">語句</label><input id="filterTermInput" class="input" maxlength="80" placeholder="例: 登録する語句"></div>
+            <div class="filter-term-field"><label class="label" for="filterTermCategory">種類</label><select id="filterTermCategory" class="select"></select></div>
+            <div class="filter-term-field"><label class="label" for="filterTermSeverity">レベル</label><select id="filterTermSeverity" class="select"><option value="1">1 軽微</option><option value="2">2 注意</option><option value="3" selected>3 中程度</option><option value="4">4 強い</option><option value="5">5 最重大</option></select></div>
+            <button id="addFilterTermButton" class="button primary" type="button">語句を追加</button>
+            <button id="cancelFilterTermEditButton" class="button hidden" type="button">編集を取消</button>
+          </div>
+          <details id="filterTermAdvancedDetails" class="advanced-settings"><summary>語句の詳細設定</summary>
+            <div class="filter-advanced-grid">
+              <label class="field-control" for="filterTermLanguage">言語<select id="filterTermLanguage" class="select"></select></label>
+              <label class="field-control" for="filterTermBoundary">一致範囲<select id="filterTermBoundary" class="select"><option value="auto">自動</option><option value="word">単語全体のみ</option><option value="substring">一部でも一致</option></select></label>
+              <label class="field-control" for="filterTermMatchMode">照合方式<select id="filterTermMatchMode" class="select"><option value="normalized">表記ゆれ対応</option><option value="strict">厳密一致</option></select></label>
+              <label class="inline-control" for="filterTermFuzzy"><input id="filterTermFuzzy" type="checkbox" checked>一文字程度の回避表記も確認</label>
+            </div>
+          </details>
+
+          <details id="organizationFilterAdvanced" class="workspace-detail" open><summary>登録済み語句</summary>
+            <div class="detail-body">
+              <div class="filter-table-wrap"><table class="filter-table"><thead><tr><th>語句</th><th>言語</th><th>種類</th><th>レベル</th><th>一致</th><th>表記ゆれ</th><th>有効</th><th>操作</th></tr></thead><tbody id="filterTermsBody"></tbody></table></div>
+            </div>
+          </details>
+          <details class="workspace-detail"><summary>種類別の処理基準</summary>
+            <div class="detail-body"><p class="muted small-text">通常は変更不要です。空欄はその処理を使いません。</p><div class="filter-table-wrap"><table class="filter-table policy-table"><thead><tr><th>種類</th><th>使用</th><th>承認待ち</th><th>伏字</th><th>投稿拒否</th></tr></thead><tbody id="filterPoliciesBody"></tbody></table></div><button id="saveFilterPoliciesButton" class="button primary" type="button">種類別基準を保存</button></div>
+          </details>
+        </section>
       </section>
-      <section class="section danger-zone">
-        <h2>&#12450;&#12459;&#12454;&#12531;&#12488;&#21066;&#38500;</h2>
-        <p class="muted">&#21066;&#38500;&#24460;&#12399;&#12525;&#12464;&#12452;&#12531;&#12391;&#12365;&#12414;&#12379;&#12435;&#12290;&#25152;&#26377;&#32773;&#12364;&#33258;&#20998;&#12384;&#12369;&#12398;&#20849;&#26377;&#32068;&#32340;&#12364;&#12354;&#12427;&#22580;&#21512;&#12399;&#12289;&#20808;&#12395;&#25152;&#26377;&#27177;&#12434;&#31227;&#31649;&#12375;&#12390;&#12367;&#12384;&#12373;&#12356;&#12290;</p>
+
+      <section class="section account-settings-grid">
+        <section id="emailSettings" class="workspace-panel">
+          <h2 id="emailHeading">メールアドレスを変更</h2>
+          <p id="emailExplanation" class="muted">新しいメールアドレスへ確認リンクを送ります。確認後は全端末からログアウトします。</p>
+          <form id="emailForm">
+            <label class="label" for="newEmail">新しいメールアドレス</label><input id="newEmail" class="input" type="email" autocomplete="email" maxlength="254" required>
+            <label class="label" for="currentPassword">現在のパスワード</label><input id="currentPassword" class="input" type="password" autocomplete="current-password" maxlength="128" required>
+            <button id="emailButton" class="button primary auth-submit" type="submit">確認メールを送る</button>
+          </form>
+          <p id="pendingEmail" class="muted break"></p><p id="status" class="status" aria-live="polite"></p>
+        </section>
+        <section id="loginSettings" class="workspace-panel">
+          <h2>ログイン状態</h2>
+          <p class="muted">この端末からログアウトします。</p>
+          <button id="logoutButton" class="button" type="button">ログアウト</button>
+        </section>
+      </section>
+
+      <section id="deleteSettings" class="section danger-zone workspace-panel">
+        <h2>アカウント削除</h2>
+        <p class="muted">削除後はログインできません。共有組織の所有者は先に所有権を移管してください。</p>
         <form id="deleteAccountForm">
-          <label class="label" for="deletePassword">&#29694;&#22312;&#12398;&#12497;&#12473;&#12527;&#12540;&#12489;</label>
-          <input id="deletePassword" class="input" type="password" autocomplete="current-password" maxlength="128" required>
-          <label class="label" for="deleteConfirmation">&#30906;&#35469;&#12398;&#12383;&#12417; DELETE &#12392;&#20837;&#21147;</label>
-          <input id="deleteConfirmation" class="input" autocomplete="off" pattern="DELETE" required>
-          <button id="deleteAccountButton" class="button danger" type="submit">&#12450;&#12459;&#12454;&#12531;&#12488;&#12434;&#21066;&#38500;</button>
+          <label class="label" for="deletePassword">現在のパスワード</label><input id="deletePassword" class="input" type="password" autocomplete="current-password" maxlength="128" required>
+          <label class="label" for="deleteConfirmation">確認のため DELETE と入力</label><input id="deleteConfirmation" class="input" autocomplete="off" pattern="DELETE" required>
+          <button id="deleteAccountButton" class="button danger" type="submit">アカウントを削除</button>
         </form>
         <p id="deleteStatus" class="status" aria-live="polite"></p>
       </section>
     </section>
-    <section id="loginRequired" class="hidden section">
-      <p>ログインが必要です。</p>
-      <a class="button primary" href="/admin">ログイン画面へ</a>
-    </section>
+
+    <section id="loginRequired" class="hidden section"><p>ログインが必要です。</p><a class="button primary" href="/admin">ログイン画面へ</a></section>
   </main>
-  <script type="module" src="/assets/account.js?v=0.6.5"></script>
+  <script type="module" src="/assets/account.js?v=0.8.10"></script>
+  <script type="module" src="/assets/organization-settings.js?v=0.8.10"></script>
 </body>
 </html>

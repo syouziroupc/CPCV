@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>授業コメント投稿</title>
-  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10">
 </head>
 <body class="page student-page">
-  <main class="card narrow">
+  <a class="skip-link" href="#mainContent">本文へ移動</a>
+  <main id="mainContent" class="card narrow">
     <p class="eyebrow">授業コメント</p>
     <h1 id="classTitle">読み込み中</h1>
     <p id="postingState" class="muted">投稿状態を確認しています。</p>
@@ -25,7 +26,9 @@
       <span id="counter" class="muted">0 / 140</span>
       <button id="sendButton" class="button primary" disabled>送信</button>
     </div>
-    <p id="status" class="status"></p>
+    <p id="status" class="status" aria-live="polite"></p>
+
+    <p class="student-privacy-links small-text"><a href="/privacy">プライバシー</a><span aria-hidden="true">・</span><a href="/guide">使い方</a></p>
 
     <section id="understandingSection" class="understanding-panel hidden" aria-labelledby="understandingTitle">
       <h2 id="understandingTitle">このページの理解度</h2>
@@ -35,9 +38,9 @@
         <button class="button understanding-button" type="button" data-signal="unsure">少し不明</button>
         <button class="button understanding-button" type="button" data-signal="confused">わからない</button>
       </div>
-      <p id="understandingStatus" class="status"></p>
+      <p id="understandingStatus" class="status" aria-live="polite"></p>
     </section>
   </main>
-  <script src="/assets/join.js?v=0.8.2" type="module"></script>
+  <script src="/assets/join.js?v=0.8.10" type="module"></script>
 </body>
 </html>

@@ -174,20 +174,56 @@ function withTimeout(promise, milliseconds) {
 }
 
 function parseStructuredResponse(value) {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    if (value.response && typeof value.response === "object") return value.response;
-    if (typeof value.response === "string") return parseJson(value.response);
-    if (value.result && typeof value.result === "object") return value.result;
-    if (typeof value.result === "string") return parseJson(value.result);
-    if (Object.hasOwn(value, "recommendation") || Object.hasOwn(value, "translation")) return value;
+  const candidate = extractStructuredCandidate(value);
+  if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+    if (Object.hasOwn(candidate, "recommendation") || Object.hasOwn(candidate, "translation")) return candidate;
   }
-  if (typeof value === "string") return parseJson(value);
+  if (typeof candidate === "string") return parseJson(candidate);
   throw codedError("AI_RESPONSE_INVALID", true);
 }
 
+function extractStructuredCandidate(value) {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+
+  if (value.response != null) return value.response;
+  if (value.result != null) return value.result;
+  if (value.output != null) return value.output;
+  if (value.output_text != null) return value.output_text;
+
+  const choice = Array.isArray(value.choices) ? value.choices[0] : null;
+  if (choice && typeof choice === "object") {
+    if (choice.message?.parsed != null) return choice.message.parsed;
+    if (choice.message?.content != null) return textContent(choice.message.content);
+    if (choice.text != null) return choice.text;
+  }
+
+  if (Object.hasOwn(value, "recommendation") || Object.hasOwn(value, "translation")) return value;
+  return null;
+}
+
+function textContent(value) {
+  if (typeof value === "string") return value;
+  if (!Array.isArray(value)) return value;
+  return value.map((part) => {
+    if (typeof part === "string") return part;
+    if (part && typeof part === "object") return String(part.text ?? part.content ?? "");
+    return "";
+  }).join("");
+}
+
 function parseJson(value) {
+  const text = String(value ?? "").replace(/^\uFEFF/, "").trim();
+  const unfenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)?.[1]?.trim() || text;
+  const firstBrace = unfenced.indexOf("{");
+  const lastBrace = unfenced.lastIndexOf("}");
+  const jsonText = firstBrace >= 0 && lastBrace >= firstBrace
+    ? unfenced.slice(firstBrace, lastBrace + 1)
+    : unfenced;
   try {
-    return JSON.parse(value);
+    const parsed = JSON.parse(jsonText);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    return parsed;
   } catch {
     throw codedError("AI_RESPONSE_INVALID", true);
   }

@@ -63,7 +63,7 @@ const workflow = text(".github/workflows/deploy-production.yml");
 check("production workflow requires public limiter pepper", workflow.includes("PUBLIC_RATE_LIMIT_PEPPER"));
 
 const packageJson = JSON.parse(text("package.json"));
-check("package version preserves the Stage 6 lineage", /^0\.(?:6|7|8)(?:\.|$)/.test(packageJson.version));
+check("package version preserves the Stage 6 lineage", /^0\.(?:6|7|8|9)(?:\.|$)/.test(packageJson.version));
 check("Stage 6 test is in full precision suite", packageJson.scripts?.["check:precision"]?.includes("test-realtime-v2.mjs"));
 check("Stage 6 local smoke command exists", packageJson.scripts?.["smoke:local:stage06"] === "node scripts/smoke-local-stage06.mjs");
 check("local development supplies both non-production rate-limit peppers", packageJson.scripts?.dev?.includes("AUTH_RATE_LIMIT_PEPPER:") && packageJson.scripts?.dev?.includes("PUBLIC_RATE_LIMIT_PEPPER:"));

@@ -9,6 +9,7 @@ import {
   completeTranslationJob,
   createAiJobsForComment,
   failOrRetryAiJob,
+  getCompletedTranslationDelivery,
   listDueAiJobs,
   reserveAiUsage,
   skipAiJob
@@ -23,43 +24,90 @@ export async function scheduleAiForComment(env, input) {
 
 export async function dispatchAiJobs(env, jobs) {
   if (!Array.isArray(jobs) || !jobs.length) return 0;
-  if (!env?.AI_JOBS_QUEUE || typeof env.AI_JOBS_QUEUE.send !== "function") return 0;
-  let dispatched = 0;
-  for (const job of jobs) {
+  const queue = env?.AI_JOBS_QUEUE;
+  if (!queue || (typeof queue.send !== "function" && typeof queue.sendBatch !== "function")) return 0;
+
+  const messages = jobs
+    .map((job) => normalizeJobId(job?.id))
+    .filter(Boolean)
+    .map((jobId) => ({ body: { jobId } }));
+  if (!messages.length) return 0;
+
+  if (typeof queue.sendBatch === "function") {
     try {
-      await env.AI_JOBS_QUEUE.send({ jobId: job.id });
-      dispatched += 1;
+      await queue.sendBatch(messages);
+      return messages.length;
     } catch (error) {
-      console.error("AI queue dispatch failed", safeCode(error));
+      console.error("AI queue batch dispatch failed", safeCode(error));
     }
+  }
+
+  if (typeof queue.send !== "function") return 0;
+  const results = await Promise.allSettled(
+    messages.map((message) => queue.send(message.body))
+  );
+  let dispatched = 0;
+  for (const result of results) {
+    if (result.status === "fulfilled") dispatched += 1;
+    else console.error("AI queue dispatch failed", safeCode(result.reason));
   }
   return dispatched;
 }
 
 export async function processAiQueueBatch(batch, env) {
-  for (const message of batch?.messages || []) {
-    let outcome;
-    try {
-      const jobId = normalizeJobId(message?.body?.jobId ?? message?.body);
-      if (!jobId) {
-        message?.ack?.();
-        continue;
-      }
-      outcome = await processAiJob(env, jobId);
-      if (outcome.retry) message?.retry?.({ delaySeconds: outcome.delaySeconds });
-      else message?.ack?.();
-    } catch (error) {
-      console.error("AI queue message failed", safeCode(error));
-      message?.retry?.({ delaySeconds: 60 });
+  const messages = Array.from(batch?.messages || []);
+  if (!messages.length) return;
+  const parallelism = normalizeParallelism(env?.AI_QUEUE_PARALLELISM, messages.length);
+  await runWithConcurrency(messages, parallelism, (message) => processAiQueueMessage(message, env));
+}
+
+async function processAiQueueMessage(message, env) {
+  try {
+    const jobId = normalizeJobId(message?.body?.jobId ?? message?.body);
+    if (!jobId) {
+      message?.ack?.();
+      return;
     }
+    const outcome = await processAiJob(env, jobId);
+    if (outcome.retry) message?.retry?.({ delaySeconds: outcome.delaySeconds });
+    else message?.ack?.();
+  } catch (error) {
+    console.error("AI queue message failed", safeCode(error));
+    message?.retry?.({ delaySeconds: 30 });
   }
+}
+
+async function runWithConcurrency(items, parallelism, worker) {
+  let nextIndex = 0;
+  const runners = Array.from({ length: Math.min(parallelism, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      await worker(items[index]);
+    }
+  });
+  await Promise.all(runners);
+}
+
+function normalizeParallelism(value, batchSize) {
+  const parsed = Number(value);
+  const fallback = Math.min(5, Math.max(1, Number(batchSize) || 1));
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 10
+    ? Math.min(parsed, Math.max(1, batchSize))
+    : fallback;
 }
 
 export async function processAiJob(env, jobId, options = {}) {
   if (!env?.DB_V2) throw new Error("DB_V2_NOT_CONFIGURED");
   const now = options.now ?? Date.now();
   const job = await claimAiJob(env.DB_V2, jobId, now);
-  if (!job) return { retry: false, ignored: true };
+  if (!job) {
+    const delivery = await getCompletedTranslationDelivery(env.DB_V2, jobId);
+    if (!delivery) return { retry: false, ignored: true };
+    const delivered = await dispatchTranslationRealtime(env, delivery.liveSessionId, delivery);
+    return delivered
+      ? { retry: false, ignored: true, redelivered: true, sequence: delivery.sequence }
+      : { retry: true, delaySeconds: 3, deliveryOnly: true, sequence: delivery.sequence };
+  }
   if (Date.parse(job.retained_until || "") <= Number(now)) {
     await skipAiJob(env.DB_V2, job, "COMMENT_EXPIRED", now);
     return { retry: false, skipped: "COMMENT_EXPIRED" };
@@ -154,8 +202,10 @@ export async function processAiJob(env, jobId, options = {}) {
       usageEventId: result.usageEventId,
       now
     });
-    await dispatchTranslationRealtime(env, job.live_session_id, event);
-    return { retry: false, completed: true, sequence: event?.sequence || null };
+    const realtimeDelivered = !event || await dispatchTranslationRealtime(env, job.live_session_id, event);
+    return realtimeDelivered
+      ? { retry: false, completed: true, sequence: event?.sequence || null, realtimeDelivered: true }
+      : { retry: true, delaySeconds: 3, completed: true, deliveryOnly: true, sequence: event?.sequence || null, realtimeDelivered: false };
   } catch (error) {
     if (error instanceof AuthError && error.code === "AI_JOB_STATE_CONFLICT") {
       return { retry: false, ignored: true, conflict: true };

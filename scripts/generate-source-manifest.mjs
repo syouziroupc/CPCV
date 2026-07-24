@@ -6,6 +6,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const MANIFEST = resolve(ROOT, "SOURCE_SHA256SUMS.txt");
+const OVERRIDE = resolve(ROOT, "SOURCE_SHA256SUMS.override.txt");
+const manifestFiles = new Set(["SOURCE_SHA256SUMS.txt", "SOURCE_SHA256SUMS.override.txt"]);
 const untracked = spawnSync("git", ["ls-files", "--others", "--exclude-standard", "-z"], { cwd: ROOT, encoding: "buffer" });
 if (untracked.status !== 0) {
   process.stderr.write(untracked.stderr || Buffer.from("git untracked-file scan failed\n"));
@@ -21,11 +23,11 @@ if (tracked.status !== 0) {
   process.stderr.write(tracked.stderr || Buffer.from("git ls-files failed\n"));
   process.exit(2);
 }
-const files = tracked.stdout.toString("utf8").split("\0").filter(Boolean).filter((file) => file !== "SOURCE_SHA256SUMS.txt").sort();
-// Hash Git's normalized index blobs so Windows CRLF checkout does not alter a release manifest.
+const files = tracked.stdout.toString("utf8").split("\0").filter(Boolean).filter((file) => !manifestFiles.has(file)).sort();
 const blobs = gitBlobs(files.map((file) => `:${file}`));
 const lines = files.map((file) => `${createHash("sha256").update(blobs.get(`:${file}`)).digest("hex")}  ${file}`);
 writeFileSync(MANIFEST, `${lines.join("\n")}\n`, "utf8");
+writeFileSync(OVERRIDE, "", "utf8");
 console.log(`source SHA-256 manifest generated: ${files.length} files`);
 
 function gitBlobs(specs) {

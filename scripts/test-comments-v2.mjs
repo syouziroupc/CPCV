@@ -213,9 +213,9 @@ async function testRetention(h) {
   check("orphan participant is deleted", result.participantsDeleted === 1 && h.count("participants") === 1);
 
   let response = await h.api("/api/private/maintenance/comment-retention", { actor: "adminA", method: "POST", body: {} });
-  check("Admin cannot manually run retention", response.status === 403);
+  check("Admin cannot manually run retention", response.status === 404);
   response = await h.api("/api/private/maintenance/comment-retention", { actor: "ownerA", method: "POST", body: {} });
-  check("Owner can run retention maintenance", response.status === 200 && (await response.json()).ok === true);
+  check("Owner cannot manually run retention", response.status === 404);
 }
 
 async function testBoundedMaintenance(h) {

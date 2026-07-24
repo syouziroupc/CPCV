@@ -36,7 +36,10 @@ async function testAccountDeletion() {
     });
     check("account owner can delete a private personal workspace", response.status === 204);
     check("account deletion clears the session cookie", String(response.headers.get("set-cookie") || "").includes("Max-Age=0"));
-    check("account deletion logically deletes the user", h.row("SELECT status FROM users WHERE id = ?1", owner.data.user.id)?.status === "deleted");
+    const deletedUser = h.row("SELECT status, login_id, email, display_name, password_hash, password_salt FROM users WHERE id = ?1", owner.data.user.id);
+    check("account deletion logically deletes the user", deletedUser?.status === "deleted");
+    check("account deletion anonymizes direct identifiers", deletedUser?.login_id?.startsWith("deleted_") && deletedUser?.email?.endsWith("@invalid.example") && deletedUser?.display_name === "Deleted user");
+    check("account deletion replaces credentials", deletedUser?.password_hash?.length >= 16 && deletedUser?.password_salt?.length >= 8);
     check("account deletion removes all memberships", h.row("SELECT COUNT(*) AS count FROM organization_members WHERE user_id = ?1 AND status <> 'removed'", owner.data.user.id)?.count === 0);
     check("account deletion deletes the personal workspace", h.row("SELECT status FROM organizations WHERE id = ?1", owner.data.organization.id)?.status === "deleted");
     check("account deletion revokes every session", h.row("SELECT COUNT(*) AS count FROM auth_sessions WHERE user_id = ?1 AND revoked_at IS NULL", owner.data.user.id)?.count === 0);

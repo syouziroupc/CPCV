@@ -20,7 +20,7 @@ function serializeParticipantCookie(request, env, name, token, publicCode) {
   const attributes = [
     `${name}=${encodeURIComponent(token)}`,
     "Path=/api/public/sessions/",
-    "Max-Age=2592000",
+    "Max-Age=28800",
     "HttpOnly",
     "SameSite=Lax"
   ];

@@ -7,6 +7,7 @@ const DOMAIN_PATTERN = /(?:^|[^A-Za-z0-9_-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,62}[
 const IPV4_PATTERN = /(?:^|[^0-9])(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}(?=$|[^0-9])/u;
 const CONTROL_PATTERN = /[\u0000-\u001F\u007F-\u009F]/gu;
 const ZERO_WIDTH_PATTERN = /[\u200B-\u200D\u2060\uFEFF]/gu;
+const BIDI_CONTROL_PATTERN = /[\u202A-\u202E\u2066-\u2069]/u;
 
 export function normalizeCommentInput(input) {
   const requestedKey = String(input?.idempotencyKey || "").trim();
@@ -15,13 +16,18 @@ export function normalizeCommentInput(input) {
     throw new AuthError(400, "IDEMPOTENCY_KEY_INVALID");
   }
 
-  const message = normalizeText(input?.message, 140);
+  const rawMessage = String(input?.message ?? "");
+  if (BIDI_CONTROL_PATTERN.test(rawMessage)) throw new AuthError(400, "UNSAFE_TEXT_DIRECTION_CONTROL");
+  const message = normalizeText(rawMessage, 140);
   if (!message) throw new AuthError(400, "EMPTY_MESSAGE");
   if (Array.from(message).length > 140) throw new AuthError(400, "MESSAGE_TOO_LONG");
   if (containsUrlLikeContent(message)) throw new AuthError(400, "URL_NOT_ALLOWED");
 
-  const nickname = normalizeText(input?.nickname, 20);
+  const rawNickname = String(input?.nickname ?? "");
+  if (BIDI_CONTROL_PATTERN.test(rawNickname)) throw new AuthError(400, "UNSAFE_TEXT_DIRECTION_CONTROL");
+  const nickname = normalizeText(rawNickname, 20);
   if (Array.from(nickname).length > 20) throw new AuthError(400, "NICKNAME_TOO_LONG");
+  if (containsUrlLikeContent(nickname)) throw new AuthError(400, "NICKNAME_URL_NOT_ALLOWED");
 
   return {
     idempotencyKey,

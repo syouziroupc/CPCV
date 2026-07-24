@@ -19,12 +19,14 @@ import {
   scheduleAiForComment
 } from "../src/ai/processor.js";
 import { inspectCommentPrivacy } from "../src/ai/privacy.js";
+import { runModerationModel, runTranslationModel } from "../src/ai/provider.js";
 import { normalizeModerationResult, normalizeTranslationResult, requireAiTargetLanguage } from "../src/ai/validation.js";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const results = [];
 
 async function main() {
+  await testProviderResponseShapes();
   const h = createHarness();
   try {
     await testSchemaAndDefaults(h);
@@ -235,6 +237,26 @@ async function testQuotaAndRetries(h) {
   check("disabled organization creates no jobs", disabledJobs.length === 0, disabledJobs);
 }
 
+async function testProviderResponseShapes() {
+  const translation = await runTranslationModel({
+    AI_TRANSLATION_MODEL: "test-model",
+    AI: { async run() { return { choices: [{ message: { content: "```json\n{\"translation\":\"Translated text\"}\n```" } }] }; } }
+  }, { message: "原文", targetLanguage: "en" });
+  check("translation parser accepts OpenAI-compatible choices content", translation.translatedText === "Translated text", translation);
+
+  const moderation = await runModerationModel({
+    AI_MODERATION_MODEL: "test-model",
+    AI: { async run() { return { choices: [{ message: { parsed: { recommendation: "review", confidence: 0.75, categories: ["spam"] } } }] }; } }
+  }, { message: "test", promptInjection: false, dictionaryCandidates: [] });
+  check("moderation parser accepts choices message parsed output", moderation.recommendation === "review" && moderation.confidenceMilli === 750, moderation);
+
+  const arrayContent = await runTranslationModel({
+    AI_TRANSLATION_MODEL: "test-model",
+    AI: { async run() { return { choices: [{ message: { content: [{ type: "text", text: "Result: " }, { type: "text", text: "{\"translation\":\"Array content\"}" }] } }] }; } }
+  }, { message: "原文", targetLanguage: "en" });
+  check("translation parser accepts content arrays with surrounding text", arrayContent.translatedText === "Array content", arrayContent);
+}
+
 async function testQueueBehavior(h) {
   const sent = await dispatchAiJobs({ AI_JOBS_QUEUE: { async send() { throw new Error("queue down"); } } }, [{ id: "aij_1234567890abcdef" }]);
   check("queue dispatch failure does not throw into posting flow", sent === 0, sent);
@@ -248,6 +270,33 @@ async function testQueueBehavior(h) {
     { body: { jobId: "invalid" }, ack() { acked += 1; }, retry() {} }
   ] }, h.env);
   check("invalid queue messages are acknowledged", acked === 1, acked);
+
+  const retryNow = h.now + 510_000;
+  await updateOrganizationAiSettings(h.db, {
+    organizationId: "org_a", enabled: true, moderationDailyLimit: 100,
+    translationDailyLimit: 100, actorUserId: "usr_owner_a", now: retryNow
+  });
+  await updateSessionAiSettings(h.db, {
+    organizationId: "org_a", liveSessionId: h.sessionId,
+    moderationEnabled: false, translationEnabled: true, targetLanguage: "en",
+    actorUserId: "usr_teacher_a", now: retryNow + 100
+  });
+  const comment = await createComment(h, "delivery_retry", "授業内容を確認しました", retryNow + 200);
+  const jobs = await createAiJobsForComment(h.db, {
+    organizationId: "org_a", liveSessionId: h.sessionId, commentId: comment.id, now: retryNow + 300
+  });
+  const translationJob = jobs.find((job) => job.jobType === "translation");
+  h.room.failuresRemaining = 1;
+  const aiCallsBefore = h.ai.calls.length;
+  const firstOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 400 });
+  const callsAfterFirst = h.ai.calls.length;
+  check("translation delivery failure requests a delivery-only retry", firstOutcome.retry === true && firstOutcome.deliveryOnly === true && firstOutcome.realtimeDelivered === false, firstOutcome);
+  check("translation is persisted before realtime delivery retry", h.row("SELECT status FROM ai_jobs WHERE id=?1", translationJob.id)?.status === "succeeded");
+
+  const secondOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 500 });
+  check("completed translation event is redelivered", secondOutcome.redelivered === true && secondOutcome.retry === false, secondOutcome);
+  check("realtime redelivery does not call the AI model twice", callsAfterFirst === aiCallsBefore + 1 && h.ai.calls.length === callsAfterFirst, { aiCallsBefore, callsAfterFirst, finalCalls: h.ai.calls.length });
+
 }
 
 function testValidationAndClientBoundaries() {
@@ -303,7 +352,11 @@ function createHarness() {
   const db = new D1DatabaseAdapter(sqlite);
   const ai = new FakeAi();
   const queue = { sent: [], async send(body) { this.sent.push(structuredClone(body)); } };
-  const room = { requests: [], get() { return { fetch: async (url, init) => { room.requests.push({ url, init }); return new Response(null, { status: 204 }); } }; } };
+  const room = { failuresRemaining: 0, requests: [], get() { return { fetch: async (url, init) => {
+    room.requests.push({ url, init });
+    if (room.failuresRemaining > 0) { room.failuresRemaining -= 1; return new Response(null, { status: 503 }); }
+    return new Response(null, { status: 204 });
+  } }; } };
   const env = {
     DB_V2: db, AI: ai, AI_JOBS_QUEUE: queue, COMMENT_ROOM: { idFromName: (id) => id, ...room },
     AI_MODERATION_MODEL: "@cf/zai-org/glm-4.7-flash",

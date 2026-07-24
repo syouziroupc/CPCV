@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>投影画面</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.12.0">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10">
 </head>
 <body class="viewer-body">
-  <div id="viewerStage" class="viewer-stage">
+  <a class="skip-link" href="#viewerStage">投影画面へ移動</a>
+  <main id="viewerStage" class="viewer-stage" tabindex="-1">
     <div id="pdfStage" class="pdf-stage hidden">
       <div id="pdfPageContainer" class="pdf-page-container">
         <canvas id="pdfCanvas" class="pdf-canvas" aria-label="PDF資料。リンク以外をクリックすると次のページへ移動します。"></canvas>
@@ -19,14 +20,16 @@
       <div>
         <h1>先生ログイン</h1>
         <p>発行された先生IDとパスワードを入力してください。</p>
+        <label class="sr-only" for="viewerLoginId">メールアドレス</label>
         <input id="viewerLoginId" class="input" autocomplete="username" placeholder="メールアドレス">
+        <label class="sr-only" for="viewerPassword">パスワード</label>
         <input id="viewerPassword" class="input" type="password" autocomplete="current-password" placeholder="パスワード">
         <div id="viewerOrganizationGroup" class="hidden">
           <label class="label" for="viewerOrganization">組織</label>
           <select id="viewerOrganization" class="select"></select>
         </div>
         <button id="viewerLoginButton" class="button primary file-button">ログイン</button>
-        <p id="viewerLoginStatus" class="status"></p>
+        <p id="viewerLoginStatus" class="status" aria-live="polite"></p>
       </div>
     </div>
 
@@ -53,10 +56,10 @@
         <button id="nextPageButton" class="viewer-file-button" type="button" aria-label="次のページ">›</button>
       </div>
       <button id="downloadLogButton" class="viewer-file-button" type="button" title="サーバー保存コメントをCSVでダウンロード">CSV</button>
-      <button id="clearLogButton" class="viewer-file-button" type="button" title="この端末の表示用cacheを削除">ログ消去</button>
+      <button id="clearLogButton" class="viewer-file-button" type="button" title="この端末に保存したコメントを削除">ログ消去</button>
       <span id="localLogState" class="local-log-state">ログ準備中</span>
       <button id="viewerLogoutButton" class="viewer-file-button" type="button" title="先生アカウントからログアウト">退出</button>
-      <span id="connectionState">接続中</span>
+      <span id="connectionState" role="status" aria-live="polite">接続中</span>
     </div>
 
     <div id="commentPanel" class="comment-panel hidden">
@@ -75,7 +78,7 @@
     <button id="qrCorner" class="qr-corner hidden" type="button" aria-label="学生投稿リンクのQRコードを拡大表示">
       <img id="qrCornerImage" alt="学生投稿リンクの小型QRコード">
     </button>
-  </div>
-  <script src="/assets/viewer.js?v=0.8.2" type="module"></script>
+  </main>
+  <script src="/assets/viewer.js?v=0.8.10" type="module"></script>
 </body>
 </html>
