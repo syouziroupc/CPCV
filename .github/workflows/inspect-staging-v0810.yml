@@ -6,6 +6,11 @@ on:
       - agent/deploy-v0.8.10-staging
     paths:
       - ".github/workflows/inspect-staging-v0810.yml"
+  pull_request:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/inspect-staging-v0810.yml"
 
 permissions:
   contents: read
