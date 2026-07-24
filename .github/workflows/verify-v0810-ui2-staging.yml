@@ -1,0 +1,97 @@
+name: Verify CPCV 0.8.10 restored staging UI
+
+on:
+  pull_request:
+    branches:
+      - master
+    paths:
+      - ".github/workflows/verify-v0810-ui2-staging.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify deployed pages, assets, and deployment identity
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require Cloudflare credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Verify valid public routes and deployed assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          query="deploy=b8909a2b66850b8754eee90a4da6872ac59650df"
+          fetch() { curl --fail-with-body -sS --retry 5 --retry-delay 2 --retry-all-errors -H 'Cache-Control: no-cache' "$1"; }
+
+          fetch "${origin}/?${query}" > /tmp/home.html
+          fetch "${origin}/about?${query}" > /tmp/about.html
+          fetch "${origin}/guide?${query}" > /tmp/guide.html
+          fetch "${origin}/privacy?${query}" > /tmp/privacy.html
+          fetch "${origin}/admin?${query}" > /tmp/admin.html
+          fetch "${origin}/account?${query}" > /tmp/account.html
+          fetch "${origin}/assets/app.css?v=0.8.10-ui2&${query}" > /tmp/app.css
+          fetch "${origin}/assets/join.js?v=0.8.10-ui2&${query}" > /tmp/join.js
+          fetch "${origin}/assets/viewer.js?v=0.8.10-ui2&${query}" > /tmp/viewer.js
+
+          grep -F 'app.css?v=0.8.10-ui2' /tmp/home.html
+          grep -F '画面は<br>二つだけ。' /tmp/home.html
+          grep -F 'signal-demo' /tmp/home.html
+          grep -F 'CPCVとは' /tmp/about.html
+          grep -F '「アカウント設定」' /tmp/guide.html
+          grep -F '標準保持期間は30日' /tmp/privacy.html
+          grep -F 'Cloudflare Workers AI' /tmp/privacy.html
+          grep -F '2,000件' /tmp/privacy.html
+          grep -F '授業中の操作' /tmp/admin.html
+          grep -F '授業設定' /tmp/admin.html
+          grep -F 'session-command-center' /tmp/admin.html
+          grep -F 'organization-settings.js' /tmp/account.html
+          grep -F '#0f3d2e' /tmp/app.css
+          grep -F 'box-shadow' /tmp/app.css
+          grep -F 'normalizePublicCode' /tmp/join.js
+          grep -F 'MAX_LOCAL_LOG_ENTRIES = 2_000' /tmp/viewer.js
+
+      - name: Record current deployment identity
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p deployment-evidence
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/class-pdf-comment-viewer-v01-staging"
+          curl --fail-with-body -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${api}/deployments" > deployment-evidence/deployments.json
+          deployment_id="$(jq -r '.result.deployments[0].id // .result[0].id // empty' deployment-evidence/deployments.json)"
+          version_id="$(jq -r '.result.deployments[0].versions[0].version_id // .result[0].versions[0].version_id // empty' deployment-evidence/deployments.json)"
+          percentage="$(jq -r '.result.deployments[0].versions[0].percentage // .result[0].versions[0].percentage // empty' deployment-evidence/deployments.json)"
+          test -n "$deployment_id"
+          test -n "$version_id"
+          {
+            echo "source_commit=b8909a2b66850b8754eee90a4da6872ac59650df"
+            echo "worker=class-pdf-comment-viewer-v01-staging"
+            echo "url=https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+            echo "deployment_id=$deployment_id"
+            echo "version_id=$version_id"
+            echo "traffic_percentage=$percentage"
+            echo "verified_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "d1_migrations_applied=false"
+          } > deployment-evidence/deployment-record.txt
+          cat deployment-evidence/deployment-record.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-v0810-ui2-staging-verification
+          path: deployment-evidence
+          if-no-files-found: error
+          retention-days: 30
