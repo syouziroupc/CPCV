@@ -56,8 +56,8 @@ jobs:
           grep -F '授業設定' /tmp/admin.html
           grep -F 'session-command-center' /tmp/admin.html
           grep -F 'organization-settings.js' /tmp/account.html
-          grep -F '#0f3d2e' /tmp/app.css
-          grep -F 'box-shadow' /tmp/app.css
+          grep -F -- '--primary: #1f5b4f' /tmp/app.css
+          grep -F 'box-shadow: 14px 14px 0 var(--text)' /tmp/app.css
           grep -F 'normalizePublicCode' /tmp/join.js
           grep -F 'MAX_LOCAL_LOG_ENTRIES = 2_000' /tmp/viewer.js
 
