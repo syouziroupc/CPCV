@@ -26,18 +26,15 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
       - name: Install dependencies
         run: |
           npm install --global npm@11.18.0
           npm ci
-
       - name: Reassemble and verify signed patch
         shell: bash
         run: |
@@ -50,7 +47,6 @@ jobs:
           git apply --check /tmp/cpcv-ui-restore.patch
           git apply /tmp/cpcv-ui-restore.patch
           grep -RIl '0.8.10-ui2-ui2' public | xargs -r sed -i 's/0\.8\.10-ui2-ui2/0.8.10-ui2/g'
-
       - name: Confirm functional system remains intact
         shell: bash
         run: |
@@ -65,7 +61,6 @@ jobs:
           test "$(sha256sum src/ai/processor.js | cut -d' ' -f1)" = "$(git show HEAD:src/ai/processor.js | sha256sum | cut -d' ' -f1)"
           test "$(sha256sum src/comments/validation.js | cut -d' ' -f1)" = "$(git show HEAD:src/comments/validation.js | sha256sum | cut -d' ' -f1)"
           test "$(sha256sum src/security-headers.js | cut -d' ' -f1)" = "$(git show HEAD:src/security-headers.js | sha256sum | cut -d' ' -f1)"
-
       - name: Finalize tree and source manifest
         shell: bash
         run: |
@@ -77,19 +72,19 @@ jobs:
           git config user.name "ChatGPT Codex Connector"
           git config user.email "noreply@openai.com"
           git commit -m "Restore CPCV 0.8.8 visual quality"
-
-      - name: Run full validation on finalized commit
+      - name: Verify finalized source manifest
+        run: npm run verify:source-manifest
+      - name: Run static project checks
         run: |
-          npm run verify:source-manifest
           npm run check
           npm run check:project
           npm run check:pdf-links
-          npm run check:stage08
-          npm run test:owner-bootstrap
-          npm audit
-
+      - name: Run all Stage 8 regression tests
+        run: npm run check:stage08
+      - name: Run Owner bootstrap regression
+        run: npm run test:owner-bootstrap
+      - name: Audit dependencies
+        run: npm audit
       - name: Push finalized UI restoration
         shell: bash
-        run: |
-          set -euo pipefail
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+        run: git push origin HEAD:${{ github.event.pull_request.head.ref }}
