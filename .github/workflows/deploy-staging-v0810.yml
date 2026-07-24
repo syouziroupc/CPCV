@@ -1,0 +1,217 @@
+name: Deploy CPCV 0.8.10 to staging
+
+on:
+  push:
+    branches:
+      - agent/deploy-v0.8.10-staging
+    paths:
+      - ".deploy/staging-v0810-ready"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpcv-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Validate and deploy exact 0.8.10 source
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 60
+    steps:
+      - name: Checkout exact merged source
+        uses: actions/checkout@v4
+        with:
+          ref: 5fc7624d6c769531120c5574e816b32eee548692
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Pin npm and install dependencies
+        run: |
+          npm install --global npm@11.18.0
+          npm ci
+
+      - name: Require canonical Cloudflare credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Write verified staging configuration
+        shell: bash
+        run: |
+          cat > .cpcv-staging.wrangler.toml <<'TOML'
+          #:schema node_modules/wrangler/config-schema.json
+          name = "class-pdf-comment-viewer-v01-staging"
+          main = "src/index.js"
+          compatibility_date = "2026-06-17"
+          workers_dev = true
+
+          assets = { directory = "./public", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "class_comment_db_staging"
+          database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"
+
+          [[d1_databases]]
+          binding = "DB_V2"
+          database_name = "class_comment_db_v2_staging"
+          database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"
+          migrations_dir = "migrations-v2"
+
+          [[send_email]]
+          name = "EMAIL"
+          allowed_sender_addresses = [ "noreply@szworld.uk" ]
+
+          [ai]
+          binding = "AI"
+
+          [[queues.producers]]
+          binding = "AI_JOBS_QUEUE"
+          queue = "cpcv-ai-jobs-staging"
+
+          [[queues.consumers]]
+          queue = "cpcv-ai-jobs-staging"
+          max_batch_size = 5
+          max_batch_timeout = 1
+          max_retries = 3
+          max_concurrency = 3
+
+          [[durable_objects.bindings]]
+          name = "COMMENT_ROOM"
+          class_name = "CommentRoom"
+
+          [[migrations]]
+          tag = "v1"
+          new_sqlite_classes = [ "CommentRoom" ]
+
+          [[ratelimits]]
+          name = "AUTH_LOGIN_IP_LIMITER"
+          namespace_id = "826071801"
+          simple = { limit = 20, period = 60 }
+
+          [[ratelimits]]
+          name = "AUTH_LOGIN_ACCOUNT_LIMITER"
+          namespace_id = "826071802"
+          simple = { limit = 10, period = 60 }
+
+          [[ratelimits]]
+          name = "PUBLIC_COMMENT_RATE_LIMITER"
+          namespace_id = "826071803"
+          simple = { limit = 30, period = 60 }
+
+          [[ratelimits]]
+          name = "AUTH_PUBLIC_EMAIL_LIMITER"
+          namespace_id = "826071804"
+          simple = { limit = 30, period = 60 }
+
+          [vars]
+          APP_ENV = "production"
+          AUTH_V2_ENABLED = "1"
+          EMAIL_AUTH_REQUIRED = "0"
+          AI_MODERATION_MODEL = "@cf/zai-org/glm-4.7-flash"
+          AI_MODERATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+          AI_TRANSLATION_MODEL = "@cf/zai-org/glm-4.7-flash"
+          AI_TRANSLATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+          AI_TIMEOUT_MS = "12000"
+          AI_QUEUE_PARALLELISM = "2"
+          AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          AUTH_EMAIL_FROM = "noreply@szworld.uk"
+          AUTH_EMAIL_REPLY_TO = "noreply@szworld.uk"
+          TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
+
+          [triggers]
+          crons = [ "*/5 * * * *", "17 3 * * *" ]
+          TOML
+
+      - name: Validate source and deployment bundle
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npm run verify:source-manifest
+          npm run check:v0810
+          node --no-warnings scripts/test-ai-v2.mjs
+          node --no-warnings scripts/test-realtime-v2.mjs
+          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+          npx wrangler deploy --dry-run --config .cpcv-staging.wrangler.toml
+          npm audit
+
+      - name: Record current staging deployment
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p deployment-records
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/class-pdf-comment-viewer-v01-staging"
+          curl --fail-with-body -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${api}/deployments" > deployment-records/deployments-before.json
+
+      - name: Deploy Worker and static assets to staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config .cpcv-staging.wrangler.toml --keep-vars
+
+      - name: Verify deployed public pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          origin="https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          query="deploy=5fc7624d6c769531120c5574e816b32eee548692"
+          fetch() { curl --fail-with-body -sS --retry 12 --retry-delay 3 --retry-all-errors "$1"; }
+
+          fetch "${origin}/?${query}" > /tmp/home.html
+          fetch "${origin}/about?${query}" > /tmp/about.html
+          fetch "${origin}/guide?${query}" > /tmp/guide.html
+          fetch "${origin}/privacy?${query}" > /tmp/privacy.html
+          fetch "${origin}/admin?${query}" > /tmp/admin.html
+
+          grep -F 'app.css?v=0.8.10' /tmp/home.html
+          grep -F '授業中の操作を一つにまとめる' /tmp/home.html
+          grep -F '<title>授業管理 | CPCV</title>' /tmp/admin.html
+          grep -F '授業中の操作' /tmp/admin.html
+          grep -F '授業設定' /tmp/admin.html
+          grep -F 'CPCVとは' /tmp/about.html
+          grep -F '使い方' /tmp/guide.html
+          grep -F 'プライバシー' /tmp/privacy.html
+
+      - name: Record new staging deployment
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/class-pdf-comment-viewer-v01-staging"
+          curl --fail-with-body -sS -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${api}/deployments" > deployment-records/deployments-after.json
+          {
+            echo "source_commit=5fc7624d6c769531120c5574e816b32eee548692"
+            echo "worker=class-pdf-comment-viewer-v01-staging"
+            echo "url=https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+            echo "deployed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "d1_migrations_applied=false"
+          } > deployment-records/deployment-record.txt
+          rm -f .cpcv-staging.wrangler.toml
+
+      - name: Upload staging deployment evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-v0810-staging-deployment
+          path: deployment-records
+          if-no-files-found: error
+          retention-days: 30
