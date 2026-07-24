@@ -1,0 +1,58 @@
+name: Finalize CPCV 0.8.10 cleanup
+
+on:
+  push:
+    branches:
+      - agent/cpcv-v0.8.10-final
+    paths:
+      - ".cpcv-finalize"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-cpcv-v0810-cleanup
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify expected source state
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "const p=require('./package.json'); if(p.version!=='0.8.10') process.exit(1)"
+          grep -q 'delivery-only' docs/v0.8.10-debug-fixes.md
+          grep -q 'モバイル' docs/v0.8.10-debug-fixes.md
+          test -f SOURCE_SHA256SUMS.override.txt
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate clean final commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/finalize-v0810-cleanup.yml .cpcv-finalize SOURCE_SHA256SUMS.override.txt
+          npm run manifest:source
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "fix: remove temporary manifest override"
+
+      - name: Validate clean final commit
+        run: |
+          npm run verify:source-manifest
+          npm run verify:final-docs
+          npm run check:v0810
+          node --no-warnings scripts/test-ai-v2.mjs
+          node --no-warnings scripts/test-realtime-v2.mjs
+
+      - name: Push clean final commit
+        run: git push origin HEAD:agent/cpcv-v0.8.10-final
