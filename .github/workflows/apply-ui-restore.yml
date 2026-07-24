@@ -73,7 +73,29 @@ jobs:
           git config user.email "noreply@openai.com"
           git commit -m "Restore CPCV 0.8.8 visual quality"
       - name: Verify finalized source manifest
-        run: npm run verify:source-manifest
+        shell: bash
+        run: |
+          set +e
+          npm run verify:source-manifest > /tmp/manifest-verify.log 2>&1
+          status=$?
+          {
+            echo
+            echo '--- git status ---'
+            git status --porcelain --untracked-files=all
+            echo '--- commit ---'
+            git rev-parse HEAD
+            echo '--- manifest count ---'
+            wc -l SOURCE_SHA256SUMS.txt
+          } >> /tmp/manifest-verify.log
+          cat /tmp/manifest-verify.log
+          exit "$status"
+      - name: Upload manifest diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-ui-manifest-diagnostic
+          path: /tmp/manifest-verify.log
+          retention-days: 1
       - name: Run static project checks
         run: |
           npm run check
