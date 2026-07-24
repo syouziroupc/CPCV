@@ -1,0 +1,71 @@
+name: Apply CPCV 0.8.10 update
+
+on:
+  push:
+    branches:
+      - agent/cpcv-v0.8.10
+    paths:
+      - ".cpcv-patch/**"
+      - ".github/workflows/apply-cpcv-v0810.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-cpcv-v0810
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify immutable base
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = "01b611d144c0e61c88572985312365867e0879e4"
+
+      - name: Reconstruct and verify patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .cpcv-patch/part-* > "$RUNNER_TEMP/cpcv.patch.gz.b64"
+          test "$(sha256sum "$RUNNER_TEMP/cpcv.patch.gz.b64" | cut -d' ' -f1)" = "d400ef96524219aeaabdbd88f0a9c81789ec3f81d953fe9e002435b36fe4bbce"
+          base64 --decode "$RUNNER_TEMP/cpcv.patch.gz.b64" > "$RUNNER_TEMP/cpcv.patch.gz"
+          test "$(sha256sum "$RUNNER_TEMP/cpcv.patch.gz" | cut -d' ' -f1)" = "6b83194194604203dc17da0aae93bccb124352c3d961a565753f8c99e55744d1"
+          gzip -dc "$RUNNER_TEMP/cpcv.patch.gz" > "$RUNNER_TEMP/cpcv.patch"
+          test "$(sha256sum "$RUNNER_TEMP/cpcv.patch" | cut -d' ' -f1)" = "45f03a30389c0c0bf84168c10aab6832565ee56b6074f8022944bacc9c43eac2"
+          git apply --check "$RUNNER_TEMP/cpcv.patch"
+
+      - name: Apply update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply "$RUNNER_TEMP/cpcv.patch"
+          rm -rf .cpcv-patch
+          rm -f .github/workflows/apply-cpcv-v0810.yml
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "CPCV 0.8.10 usability and security hardening"
+
+      - name: Install dependencies and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci || {
+            npm cache clean --force
+            npm ci
+          }
+          npm run verify:source-manifest
+          npm run check:v0810
+          node --no-warnings scripts/test-ai-v2.mjs
+          node --no-warnings scripts/test-realtime-v2.mjs
+
+      - name: Push final commit
+        run: git push origin HEAD:agent/cpcv-v0.8.10
