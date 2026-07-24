@@ -1,4 +1,4 @@
-name: Finalize CPCV 0.8.10 manifest transfer
+name: Finalize CPCV 0.8.10 source manifest
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: finalize-cpcv-v0810-manifest-transfer
+  group: finalize-cpcv-v0810-source-manifest
   cancel-in-progress: false
 
 jobs:
@@ -23,19 +23,29 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Rebuild transferred manifest
+      - name: Verify expected source state
         shell: bash
         run: |
           set -euo pipefail
-          cat .manifest-transfer/chunk-*.txt > SOURCE_SHA256SUMS.txt
-          test "$(sha256sum SOURCE_SHA256SUMS.txt | cut -d' ' -f1)" = "b586c6ddf2a0d4c99255f77ab86ffc19089f11454d62902b5373184dac6fb058"
-          rm -rf .manifest-transfer
-          rm .github/workflows/finalize-manifest-transfer.yml
+          node -e "const p=require('./package.json'); if(p.version!=='0.8.10') process.exit(1)"
+          grep -q 'delivery-only' docs/v0.8.10-debug-fixes.md
+          grep -q 'モバイル' docs/v0.8.10-debug-fixes.md
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate final source
+      - name: Generate final manifest commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/finalize-manifest-transfer.yml .manifest-transfer/trigger
+          npm run manifest:source
+          git config user.name "ChatGPT Codex Connector"
+          git config user.email "noreply@openai.com"
+          git add -A
+          git commit -m "fix: finalize 0.8.10 source manifest"
+
+      - name: Validate final commit
         run: |
           npm run verify:source-manifest
           npm run verify:final-docs
@@ -43,12 +53,5 @@ jobs:
           node --no-warnings scripts/test-ai-v2.mjs
           node --no-warnings scripts/test-realtime-v2.mjs
 
-      - name: Commit final tree
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "ChatGPT Codex Connector"
-          git config user.email "noreply@openai.com"
-          git add -A
-          git commit -m "fix: finalize 0.8.10 source manifest"
-          git push origin HEAD:agent/cpcv-v0.8.10-final
+      - name: Push final commit
+        run: git push origin HEAD:agent/cpcv-v0.8.10-final
