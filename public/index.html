@@ -3,90 +3,134 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CPCVはPDFを投影しながら学生のコメントをリアルタイムで表示できる授業支援ツールです。">
+  <meta name="description" content="CPCVは匿名コメントを授業中のPDF投影へリアルタイム表示する授業参加ツールです。">
   <title>CPCV | 授業の反応をその場で拾う</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui2">
 </head>
 <body class="site-page">
-  <a class="skip-link" href="#mainContent">本文へ移動</a>
   <header class="site-header">
+    <a class="brand" href="/"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業の反応</small></span></a>
     <nav class="site-nav" aria-label="メインメニュー">
-      <a class="site-brand" href="/">CPCV</a>
-      <div class="site-links">
-        <a href="/about">CPCVとは</a>
-        <a href="/guide">使い方</a>
-        <a href="/privacy">プライバシー</a>
-        <a class="button primary" href="/admin">授業管理</a>
-      </div>
+      <a href="/about">CPCVとは</a>
+      <a href="/guide">使い方</a>
+      <a href="/privacy">プライバシー</a>
+      <a class="nav-cta" href="/admin">先生用</a>
     </nav>
   </header>
 
-  <main id="mainContent" class="site-main">
-    <section class="site-hero">
+  <main>
+    <section class="hero-section">
+      <div class="hero-copy">
+        <p class="eyebrow">授業の反応をリアルタイム表示</p>
+        <h1>授業の反応を<br>その場で拾う。</h1>
+        <p class="hero-lead">学生はアカウント登録なしで匿名コメントを送信できます。先生はコメントを投影し 次の説明へすぐ反映できます。</p>
+        <div class="hero-actions">
+          <a class="button primary large" href="/admin">先生用コンソール</a>
+          <a class="text-link" href="/guide">3分で分かる使い方 →</a>
+        </div>
+        <ul class="hero-facts" aria-label="CPCVの基本仕様">
+          <li>学生登録不要</li>
+          <li>PDF本体を送信しない</li>
+          <li>追加機能は必要な授業だけ</li>
+        </ul>
+      </div>
+      <div class="signal-demo" aria-label="CPCVの投影イメージ">
+        <div class="signal-demo-head"><span>LIVE / 観光文化論</span><span class="live-dot">COMMENT ON</span></div>
+        <div class="signal-screen">
+          <div class="screen-meta"><span>PDF / 08ページ</span><span>コメント 3件</span></div>
+          <p class="signal-comment c1"><strong>匿名</strong> この図の関係をもう一度見たいです</p>
+          <p class="signal-comment c2"><strong>匿名</strong> 具体例があると分かりやすい</p>
+          <p class="signal-comment c3"><strong>匿名</strong> ここまでは理解できました</p>
+          <div class="optional-chip">OPTION / 承認制・分析・AI</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="join-band" aria-labelledby="joinHeading">
       <div>
-        <p class="eyebrow">CLASS PDF COMMENT VIEWER</p>
-        <h1>授業の反応をその場で拾う</h1>
-        <p class="site-lead">PDFを投影しながら学生のコメントを表示できます。学生はリンクやQRコードから参加します。教員は一つの画面で投稿受付や表示方法を変更し、承認や翻訳も管理できます。</p>
-        <div class="site-actions">
-          <a class="button primary" href="/admin">授業を始める</a>
-          <a class="button" href="/guide">使い方を見る</a>
-        </div>
+        <p class="section-kicker">授業に参加</p>
+        <h2 id="joinHeading">授業に参加する</h2>
+        <p>先生から案内された6文字の合言葉を入力してください。</p>
       </div>
-
-      <section class="join-card" aria-labelledby="joinHeading">
-        <p class="eyebrow">学生はこちら</p>
-        <h2 id="joinHeading">授業に参加</h2>
-        <p class="muted">先生から案内された6文字の合言葉を入力してください。</p>
-        <label class="label" for="homePublicCode">授業の合言葉</label>
-        <div class="row">
-          <input id="homePublicCode" class="input code-input" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="例: ABC123">
-          <button id="homeJoinButton" class="button primary" type="button">参加</button>
-        </div>
+      <div class="join-form">
+        <label class="sr-only" for="homePublicCode">授業の合言葉</label>
+        <input id="homePublicCode" class="input code-input" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="ABC123">
+        <button id="homeJoinButton" class="button primary" type="button">参加する</button>
         <p id="homeJoinStatus" class="status" aria-live="polite"></p>
-      </section>
-    </section>
-
-    <section class="site-section">
-      <div class="site-section-heading">
-        <p class="eyebrow">できること</p>
-        <h2>授業中の操作を一つにまとめる</h2>
-        <p>授業管理を開いたまま投稿受付や表示方法を切り替えられます。辞書や組織全体の設定はアカウント設定に分けています。</p>
-      </div>
-      <div class="feature-grid">
-        <article class="feature-card">
-          <h3>リアルタイムコメント</h3>
-          <p>学生の投稿を投影画面へ表示します。3件・5件・7件表示と横流れを選べます。</p>
-        </article>
-        <article class="feature-card">
-          <h3>承認とフィルター</h3>
-          <p>自動表示か承認後表示を選べます。日本語と英語の辞書は組織内で共通管理できます。</p>
-        </article>
-        <article class="feature-card">
-          <h3>AI翻訳</h3>
-          <p>原文を残したまま日本語または英語の翻訳を追加します。AIを使わない運用も可能です。</p>
-        </article>
       </div>
     </section>
 
-    <section class="site-section">
-      <div class="site-section-heading">
-        <p class="eyebrow">使い始める</p>
-        <h2>3つの手順</h2>
+    <section class="role-section" aria-labelledby="roleHeading">
+      <div class="section-intro compact-intro">
+        <p class="section-kicker">1つの授業 / 2つの画面</p>
+        <h2 id="roleHeading">画面は<br>二つだけ。</h2>
       </div>
-      <ol class="step-list">
-        <li><h3>授業を作成</h3><p>授業名を入力すると学生用の合言葉とリンクが発行されます。</p></li>
-        <li><h3>学生へ案内</h3><p>リンクかQRコードを共有します。アプリのインストールは不要です。</p></li>
-        <li><h3>投影して操作</h3><p>PDFを選びます。投稿受付や承認と翻訳は授業管理から操作します。</p></li>
+      <div class="role-grid">
+        <article>
+          <span class="role-number">先生 / 01</span>
+          <h3>授業を作る</h3>
+          <p>授業名を入力すると参加用リンクと合言葉が発行されます。普段使う操作は授業操作画面へ集約しています。</p>
+          <a class="text-link" href="/guide#teacher">先生の操作を見る →</a>
+        </article>
+        <article>
+          <span class="role-number">学生 / 02</span>
+          <h3>合言葉で入る</h3>
+          <p>学生はアカウント登録をせずに参加できます。コメント送信以外の機能は授業側で有効になった場合だけ表示されます。</p>
+          <a class="text-link" href="/guide#student">学生の操作を見る →</a>
+        </article>
+      </div>
+    </section>
+
+    <section class="workflow-preview" aria-labelledby="flowHeading">
+      <div class="section-intro">
+        <p class="section-kicker">基本の流れ</p>
+        <h2 id="flowHeading">基本は3段階。</h2>
+        <p class="lead muted">複雑な装置を先に覚える必要はありません。授業作成。参加。コメント表示の順で使えます。</p>
+      </div>
+      <ol class="workflow-cards">
+        <li><span>01</span><strong>授業を作成</strong><p>名前を決めて開始します。</p></li>
+        <li><span>02</span><strong>合言葉を共有</strong><p>QRコードか6文字コードを学生へ提示します。</p></li>
+        <li><span>03</span><strong>反応を投影</strong><p>受付と表示を必要な時だけ切り替えます。</p></li>
       </ol>
+      <a class="button quiet" href="/guide">詳しい動作説明</a>
+    </section>
+
+    <section class="optional-section" aria-labelledby="optionalHeading">
+      <div>
+        <p class="section-kicker">追加機能</p>
+        <h2 id="optionalHeading">必要な授業だけ<br>機能を足す。</h2>
+      </div>
+      <div class="optional-list">
+        <article><span>01</span><h3>承認制</h3><p>投稿を確認してから投影します。</p></article>
+        <article><span>02</span><h3>参加度確認</h3><p>匿名アンケートを授業単位で有効化します。</p></article>
+        <article><span>03</span><h3>ページ別分析</h3><p>必要な場合だけPDFページと反応を集計します。</p></article>
+        <article><span>04</span><h3>辞書・AI補助</h3><p>コメント判定と翻訳を補助機能として使えます。</p></article>
+      </div>
+    </section>
+
+    <section class="privacy-preview">
+      <div>
+        <p class="section-kicker">プライバシー境界</p>
+        <h2>PDFはブラウザ内。</h2>
+      </div>
+      <div>
+        <p>PDF本体。ファイル名。ページ本文はサーバーへ送信しません。クラウドへ送る情報を限定した設計です。</p>
+        <a class="text-link" href="/privacy">保存される情報を確認する →</a>
+      </div>
+    </section>
+
+    <section class="statement-section">
+      <p class="statement-number">CPCV / 授業の反応</p>
+      <blockquote>発言できた人だけで<br>授業を判断しない。</blockquote>
+      <div class="statement-actions">
+        <a class="button inverted" href="/about">CPCVについて</a>
+        <a class="text-link light-link" href="/guide">動作説明を見る →</a>
+      </div>
     </section>
   </main>
 
-  <footer class="site-footer">
-    <div class="site-footer-inner">
-      <span>© 正二郎商事株式会社</span>
-      <div class="row wrap"><a href="/about">CPCVとは</a><a href="/guide">使い方</a><a href="/privacy">プライバシー</a></div>
-    </div>
-  </footer>
-  <script src="/assets/home.js?v=0.8.10" type="module"></script>
+  <footer class="site-footer"><span>CPCV</span><span>授業コメントビューアー</span><nav aria-label="フッター"><a href="/about">CPCVとは</a><a href="/guide">使い方</a><a href="/privacy">プライバシー</a><a href="/admin">先生用</a></nav></footer>
+  <script src="/assets/home.js?v=0.8.10-ui2" type="module"></script>
 </body>
 </html>
+

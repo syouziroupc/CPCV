@@ -3,40 +3,77 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CPCVで授業を作成し学生のコメントを表示する手順を説明します。">
+  <meta name="description" content="CPCVの授業作成からコメント投影までの操作を説明します。">
   <title>使い方 | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui2">
 </head>
-<body class="site-page">
-  <a class="skip-link" href="#mainContent">本文へ移動</a>
+<body class="site-page guide-page">
   <header class="site-header">
+    <a class="brand" href="/"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業の反応</small></span></a>
     <nav class="site-nav" aria-label="メインメニュー">
-      <a class="site-brand" href="/">CPCV</a>
-      <div class="site-links"><a href="/about">CPCVとは</a><a href="/guide">使い方</a><a href="/privacy">プライバシー</a><a class="button primary" href="/admin">授業管理</a></div>
+      <a href="/about">CPCVとは</a>
+      <a aria-current="page" href="/guide">使い方</a>
+      <a href="/privacy">プライバシー</a>
+      <a class="nav-cta" href="/admin">先生用</a>
     </nav>
   </header>
-  <main id="mainContent" class="site-main content-page">
-    <p class="eyebrow">GUIDE</p>
-    <h1>使い方</h1>
 
-    <h2>1. 授業を作成</h2>
-    <p>授業管理へログインします。授業名を入力して「授業を作成」を押します。</p>
+  <main>
+    <section class="public-hero guide-hero">
+      <p class="eyebrow">使い方</p>
+      <h1>授業を作る。<br>合言葉を出す。<br>反応を映す。</h1>
+      <p class="hero-lead">基本操作はこの3段階です。追加機能を使わなければ コメント受付と投影だけで授業を始められます。</p>
+      <div class="hero-actions"><a class="button primary large" href="/admin">先生用コンソール</a><a class="text-link" href="#quickstart">手順へ移動 →</a></div>
+    </section>
 
-    <h2>2. 学生へ案内</h2>
-    <p>授業画面に表示された学生用リンクをコピーします。リンクや合言葉かQRコードを学生へ案内します。</p>
+    <section id="quickstart" class="quickstart-section">
+      <div class="section-intro"><p class="section-kicker">最短手順</p><h2>最短の使い方</h2></div>
+      <ol class="guide-steps">
+        <li><div class="step-index">01</div><div><h3>授業を作成する</h3><p>先生用コンソールで授業名を入力し 「授業を作成」を押します。新規授業は基本機能だけで開始します。</p></div></li>
+        <li><div class="step-index">02</div><div><h3>参加方法を共有する</h3><p>発行されたQRコード。参加URL。6文字の合言葉のいずれかを学生へ提示します。</p></div></li>
+        <li><div class="step-index">03</div><div><h3>投影画面を開く</h3><p>授業操作から投影画面を開きます。投稿受付とコメント表示を必要な時にONにします。</p></div></li>
+      </ol>
+    </section>
 
-    <h2>3. 投影画面を開く</h2>
-    <p>「投影画面を開く」を押します。投影画面でPDFを選びます。PDF本体はCPCVへ送信されません。</p>
+    <section id="teacher" class="audience-guide teacher-guide">
+      <div class="guide-side"><p class="section-kicker">先生</p><h2>先生の操作</h2><p>普段使う操作は授業操作にまとめています。</p></div>
+      <div class="timeline-list">
+        <article><span>BEFORE</span><h3>授業前</h3><ul><li>授業を作成</li><li>PDFを投影画面で開く</li><li>合言葉かQRコードを提示</li></ul></article>
+        <article><span>LIVE</span><h3>授業中</h3><ul><li>投稿受付を切り替える</li><li>コメント表示を切り替える</li><li>必要なら表示中コメントを消去</li></ul></article>
+        <article><span>AFTER</span><h3>授業後</h3><ul><li>授業を終了</li><li>追加分析を有効にした場合だけ結果を確認</li><li>不要な授業を削除</li></ul></article>
+      </div>
+    </section>
 
-    <h2>4. 授業中に操作</h2>
-    <p>左側では投稿受付とコメント表示を操作します。右側では表示件数や承認方法とAI翻訳を変更します。</p>
+    <section id="student" class="audience-guide student-guide">
+      <div class="guide-side"><p class="section-kicker">学生</p><h2>学生の操作</h2><p>アカウント登録は不要です。</p></div>
+      <div class="student-flow">
+        <article><span>01</span><h3>授業へ入る</h3><p>QRコードを読み取るか トップページで合言葉を入力します。</p></article>
+        <article><span>02</span><h3>表示名を決める</h3><p>匿名のままでも参加できます。授業側の設定に応じて表示名を入力できます。</p></article>
+        <article><span>03</span><h3>コメントする</h3><p>質問や反応を送信します。追加アンケートは有効な授業だけ表示されます。</p></article>
+      </div>
+    </section>
 
-    <h2>5. コメントを確認</h2>
-    <p>画面下の「コメント管理」を開きます。承認待ちの確認や表示中コメントの非表示と削除を行えます。</p>
+    <section class="feature-mode-section">
+      <div class="section-intro"><p class="section-kicker">基本 / 追加</p><h2>基本機能と<br>追加機能</h2></div>
+      <div class="feature-mode-grid">
+        <article class="mode-basic"><span>BASIC</span><h3>基本機能</h3><ul><li>匿名コメント</li><li>投影画面</li><li>投稿受付の切替</li><li>コメント表示の切替</li></ul></article>
+        <article><span>OPTION</span><h3>追加機能</h3><ul><li>承認制</li><li>参加度確認</li><li>ページ別分析</li><li>辞書判定</li><li>AI判定と翻訳</li></ul><p>辞書や組織全体のAI上限は、授業管理上部の「アカウント設定」から変更します。</p></article>
+      </div>
+    </section>
 
-    <h2>辞書へ語句を追加</h2>
-    <p>授業管理の上部から「アカウント設定」を開きます。追加した語句は組織内の授業で共通利用できます。</p>
+    <section class="trouble-section">
+      <div class="section-intro"><p class="section-kicker">困ったとき</p><h2>困った時の確認</h2></div>
+      <dl class="faq-list">
+        <div><dt>学生が投稿できない</dt><dd>授業操作で「投稿受付」がONか確認します。授業が終了していないかも確認してください。</dd></div>
+        <div><dt>コメントが投影されない</dt><dd>「コメント表示」がONか確認します。承認制を使っている場合はコメント画面で承認します。</dd></div>
+        <div><dt>分析が見つからない</dt><dd>分析は追加機能です。授業設定でページ別分析を有効にした授業だけ表示されます。</dd></div>
+        <div><dt>PDFをアップロードする場所がない</dt><dd>PDFは投影画面のブラウザで開きます。サーバーへアップロードする方式ではありません。</dd></div>
+      </dl>
+    </section>
+
+    <section class="about-cta"><p>説明を確認したら<br>授業を作成する。</p><a class="button primary large" href="/admin">先生用コンソール</a></section>
   </main>
-  <footer class="site-footer"><div class="site-footer-inner"><span>© 正二郎商事株式会社</span><a href="/privacy">プライバシー</a></div></footer>
+  <footer class="site-footer"><span>CPCV</span><span>授業コメントビューアー</span><nav aria-label="フッター"><a href="/">ホーム</a><a href="/about">CPCVとは</a><a href="/privacy">プライバシー</a></nav></footer>
 </body>
 </html>
+
