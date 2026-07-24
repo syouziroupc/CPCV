@@ -58,7 +58,7 @@ jobs:
           grep -F 'organization-settings.js' /tmp/account.html
           grep -F -- '--primary: #1f5b4f' /tmp/app.css
           grep -F 'box-shadow: 14px 14px 0 var(--text)' /tmp/app.css
-          grep -F 'normalizePublicCode' /tmp/join.js
+          grep -F 'crypto.randomUUID()' /tmp/join.js
           grep -F 'MAX_LOCAL_LOG_ENTRIES = 2_000' /tmp/viewer.js
 
       - name: Record current deployment identity
