@@ -46,7 +46,12 @@ check('organization admins can manage individual terms', organizationSettings.in
 check('pack installation reloads state after button cleanup', organizationSettings.indexOf('await withButton(button') < organizationSettings.indexOf('if (installed)') && organizationSettings.includes('await loadFilterSettings()'));
 const appCss = text('public/assets/app.css');
 check('mobile moderation table remains readable', appCss.includes('v0.8.10 compact table and header fixes') && appCss.includes('.moderation-table td:nth-child(8)::before'));
-check('flat hierarchy removes rounded surfaces', appCss.includes('v0.8.10 flat hierarchy and tactile controls') && !/border-radius:\s*(?!0(?:px|rem|em|%|;))/i.test(appCss));
+const radiusDeclarations = [...appCss.matchAll(/border-radius:\s*([^;]+);/gi)].map((match) => match[1].trim());
+const allRadiusValuesAreZero = radiusDeclarations.length > 0 && radiusDeclarations.every((value) => {
+  const tokens = value.split(/\s+/).filter(Boolean);
+  return tokens.length > 0 && tokens.every((token) => /^0(?:px|rem|em|%|vh|vw)?$/i.test(token));
+});
+check('flat hierarchy removes rounded surfaces', appCss.includes('v0.8.10 flat hierarchy and tactile controls') && allRadiusValuesAreZero, radiusDeclarations.filter((value) => !value.split(/\s+/).every((token) => /^0(?:px|rem|em|%|vh|vw)?$/i.test(token))));
 check('mobile dictionary tables become cards', appCss.includes('.filter-table:not(.policy-table) td:nth-child(8)::before') && appCss.includes('.policy-table td:nth-child(5)::before'));
 const sourceRecord = text('SOURCE_GIT_RECORD.txt');
 check('source record identifies v0.8.10', sourceRecord.includes('Version: 0.8.10') && !sourceRecord.includes('Version: 0.8.2'));
