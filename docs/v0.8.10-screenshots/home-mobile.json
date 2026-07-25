@@ -1,0 +1,16 @@
+{
+  "viewportWidth": 390,
+  "viewportHeight": 844,
+  "documentWidth": 390,
+  "bodyWidth": 390,
+  "outside": [],
+  "clipped": [
+    {
+      "tag": "LABEL",
+      "text": "授業の合言葉",
+      "clientWidth": 1,
+      "scrollWidth": 96
+    }
+  ],
+  "controls": 16
+}

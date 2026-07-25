@@ -1,0 +1,182 @@
+{
+  "ok": true,
+  "screenshots": 15,
+  "outputDir": "/home/runner/work/CPCV/CPCV/docs/v0.8.10-screenshots",
+  "results": {
+    "admin-desktop": {
+      "viewportWidth": 1440,
+      "viewportHeight": 1000,
+      "documentWidth": 1440,
+      "bodyWidth": 1320,
+      "outside": [],
+      "clipped": [],
+      "controls": 44
+    },
+    "admin-tablet": {
+      "viewportWidth": 768,
+      "viewportHeight": 1024,
+      "documentWidth": 768,
+      "bodyWidth": 768,
+      "outside": [],
+      "clipped": [],
+      "controls": 44
+    },
+    "admin-mobile": {
+      "viewportWidth": 390,
+      "viewportHeight": 844,
+      "documentWidth": 390,
+      "bodyWidth": 390,
+      "outside": [],
+      "clipped": [],
+      "controls": 44
+    },
+    "account-desktop": {
+      "viewportWidth": 1440,
+      "viewportHeight": 1000,
+      "documentWidth": 1440,
+      "bodyWidth": 1440,
+      "outside": [],
+      "clipped": [],
+      "controls": 44
+    },
+    "account-tablet": {
+      "viewportWidth": 768,
+      "viewportHeight": 1024,
+      "documentWidth": 768,
+      "bodyWidth": 768,
+      "outside": [],
+      "clipped": [],
+      "controls": 44
+    },
+    "account-mobile": {
+      "viewportWidth": 390,
+      "viewportHeight": 844,
+      "documentWidth": 390,
+      "bodyWidth": 390,
+      "outside": [],
+      "clipped": [],
+      "controls": 44
+    },
+    "home-desktop": {
+      "viewportWidth": 1440,
+      "viewportHeight": 1000,
+      "documentWidth": 1440,
+      "bodyWidth": 1440,
+      "outside": [],
+      "clipped": [
+        {
+          "tag": "LABEL",
+          "text": "授業の合言葉",
+          "clientWidth": 1,
+          "scrollWidth": 96
+        }
+      ],
+      "controls": 19
+    },
+    "home-mobile": {
+      "viewportWidth": 390,
+      "viewportHeight": 844,
+      "documentWidth": 390,
+      "bodyWidth": 390,
+      "outside": [],
+      "clipped": [
+        {
+          "tag": "LABEL",
+          "text": "授業の合言葉",
+          "clientWidth": 1,
+          "scrollWidth": 96
+        }
+      ],
+      "controls": 16
+    },
+    "about-desktop": {
+      "viewportWidth": 1440,
+      "viewportHeight": 1000,
+      "documentWidth": 1440,
+      "bodyWidth": 1440,
+      "outside": [],
+      "clipped": [],
+      "controls": 9
+    },
+    "about-mobile": {
+      "viewportWidth": 390,
+      "viewportHeight": 844,
+      "documentWidth": 390,
+      "bodyWidth": 390,
+      "outside": [],
+      "clipped": [],
+      "controls": 6
+    },
+    "guide-mobile": {
+      "viewportWidth": 390,
+      "viewportHeight": 844,
+      "documentWidth": 390,
+      "bodyWidth": 390,
+      "outside": [],
+      "clipped": [],
+      "controls": 8
+    },
+    "privacy-mobile": {
+      "viewportWidth": 390,
+      "viewportHeight": 844,
+      "documentWidth": 390,
+      "bodyWidth": 390,
+      "outside": [],
+      "clipped": [],
+      "controls": 6
+    },
+    "join-mobile": {
+      "viewportWidth": 390,
+      "viewportHeight": 844,
+      "documentWidth": 390,
+      "bodyWidth": 390,
+      "outside": [],
+      "clipped": [],
+      "controls": 6
+    },
+    "viewer-desktop": {
+      "viewportWidth": 1440,
+      "viewportHeight": 1000,
+      "documentWidth": 1440,
+      "bodyWidth": 1440,
+      "outside": [],
+      "clipped": [
+        {
+          "tag": "LABEL",
+          "text": "メールアドレス",
+          "clientWidth": 1,
+          "scrollWidth": 114
+        },
+        {
+          "tag": "LABEL",
+          "text": "パスワード",
+          "clientWidth": 1,
+          "scrollWidth": 82
+        }
+      ],
+      "controls": 4
+    },
+    "viewer-mobile": {
+      "viewportWidth": 390,
+      "viewportHeight": 844,
+      "documentWidth": 390,
+      "bodyWidth": 390,
+      "outside": [],
+      "clipped": [
+        {
+          "tag": "LABEL",
+          "text": "メールアドレス",
+          "clientWidth": 1,
+          "scrollWidth": 114
+        },
+        {
+          "tag": "LABEL",
+          "text": "パスワード",
+          "clientWidth": 1,
+          "scrollWidth": 82
+        }
+      ],
+      "controls": 4
+    }
+  }
+}
