@@ -78,7 +78,9 @@ for (const name of ["join-desktop", "join-mobile", "admin-desktop", "admin-mobil
 
 const wrangler = text("wrangler.toml");
 check("retention and AI recovery Crons are configured", /\[triggers\][\s\S]*crons\s*=\s*\[[^\]]*"\*\/5 \* \* \* \*"[^\]]*"17 3 \* \* \*"[^\]]*\]/.test(wrangler));
-check("no invented Rate Limiting namespace is committed", !/^namespace_id\s*=/m.test(wrangler));
+const productionRateLimitNamespaces = [...wrangler.matchAll(/^namespace_id\s*=\s*"([1-9][0-9]*)"\s*$/gm)].map((match) => match[1]);
+const stagingRateLimitNamespaces = new Set(["826071801", "826071802", "826071803", "826071804"]);
+check("production Rate Limiting namespaces are concrete, distinct, and separated from staging", productionRateLimitNamespaces.length === 4 && new Set(productionRateLimitNamespaces).size === 4 && productionRateLimitNamespaces.every((value) => !stagingRateLimitNamespaces.has(value)));
 
 const ci = text(".github/workflows/ci.yml");
 check("CI runs all implemented-stage tests", ci.includes("npm run check:stage08") && ci.includes("npm run test:owner-bootstrap") && ci.includes("timeout-minutes: 120"));
