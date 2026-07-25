@@ -1,0 +1,42 @@
+name: Temporary manifest diagnostic
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/temporary-manifest-diagnostic.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install --global npm@11.18.0 && npm ci
+      - name: Capture manifest generation
+        shell: bash
+        run: |
+          mkdir -p manifest-logs
+          rm -f .github/workflows/temporary-manifest-diagnostic.yml
+          git add -A
+          set +e
+          npm run manifest:source > manifest-logs/generate.log 2>&1
+          echo $? > manifest-logs/generate.exit
+          rm -f SOURCE_SHA256SUMS.override.txt
+          git add -A
+          npm run verify:source-manifest > manifest-logs/verify.log 2>&1
+          echo $? > manifest-logs/verify.exit
+          git status --short > manifest-logs/status.log
+          git diff --cached --name-status > manifest-logs/index.log
+          set -e
+      - uses: actions/upload-artifact@v4
+        with:
+          name: manifest-diagnostic-logs
+          path: manifest-logs
+          retention-days: 3
+      - run: exit 1
