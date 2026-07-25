@@ -1,0 +1,89 @@
+name: CPCV Cloudflare diagnostic
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/cpcv-cloudflare-diagnostic.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ce93380d617672e086b9971fe82bb4f8ffccf861
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Resolve credentials
+        shell: bash
+        env:
+          TOKEN_1: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TOKEN_2: ${{ secrets.CF_API_TOKEN }}
+          TOKEN_3: ${{ secrets.CLOUDFLARE_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_4: ${{ vars.CF_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          token=""; account=""
+          for item in TOKEN_1 TOKEN_2 TOKEN_3; do value="${!item:-}"; if [ -n "$value" ]; then token="$value"; break; fi; done
+          for item in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3 ACCOUNT_4; do value="${!item:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
+          test -n "$token"; test -n "$account"
+          echo "::add-mask::$token"; echo "::add-mask::$account"
+          echo "CLOUDFLARE_API_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "CLOUDFLARE_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+      - name: Inspect resources
+        shell: bash
+        run: |
+          set +e
+          mkdir -p diagnostic
+          npx wrangler whoami > diagnostic/whoami.txt 2>&1; echo $? > diagnostic/whoami.exit
+          npx wrangler d1 list --json > diagnostic/d1-list.json 2> diagnostic/d1-list.err; echo $? > diagnostic/d1-list.exit
+          npx wrangler queues list --json > diagnostic/queues-cli.json 2> diagnostic/queues-cli.err; echo $? > diagnostic/queues-cli.exit
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
+          curl -sS -w '\nHTTP_STATUS=%{http_code}\n' "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/queues" > diagnostic/queues-api.txt; echo $? > diagnostic/queues-api.exit
+          curl -sS -w '\nHTTP_STATUS=%{http_code}\n' "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/challenges/widgets" > diagnostic/turnstile-api.raw.txt; echo $? > diagnostic/turnstile-api.exit
+          python - <<'PY'
+          from pathlib import Path
+          import json,re
+          p=Path('diagnostic/turnstile-api.raw.txt')
+          text=p.read_text(encoding='utf-8',errors='replace')
+          body=text.split('\nHTTP_STATUS=',1)[0]
+          try:
+              data=json.loads(body)
+              for row in data.get('result') or []:
+                  if isinstance(row,dict):
+                      row.pop('secret',None)
+              p.with_name('turnstile-api.txt').write_text(json.dumps(data,ensure_ascii=False,indent=2)+text[len(body):],encoding='utf-8')
+          except Exception:
+              p.with_name('turnstile-api.txt').write_text(re.sub(r'"secret"\s*:\s*"[^"]*"','"secret":"<redacted>"',text),encoding='utf-8')
+          p.unlink(missing_ok=True)
+          PY
+          exit 0
+      - name: Upload diagnostic
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-cloudflare-diagnostic
+          path: diagnostic
+          retention-days: 3
+      - name: Remove workflow and record run
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          git checkout -B cleanup origin/master
+          git rm .github/workflows/cpcv-cloudflare-diagnostic.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "CPCV diagnostic run ${GITHUB_RUN_ID}"
+          git push origin HEAD:master
