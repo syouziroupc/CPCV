@@ -2,6 +2,7 @@
 name = "class-pdf-comment-viewer-v01"
 main = "src/index.js"
 compatibility_date = "2026-06-17"
+workers_dev = true
 
 assets = { directory = "./public", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
 
@@ -10,17 +11,15 @@ binding = "DB"
 database_name = "class_comment_db"
 database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"
 
-# DB_V2 is the application source of truth. Its production database_id remains
-# intentionally absent because no verified Cloudflare UUID is present in this
-# handoff. Do not invent one. Deployment is blocked until the real UUID is set.
 [[d1_databases]]
 binding = "DB_V2"
 database_name = "class_comment_db_v2"
+database_id = "8315a076-67ad-44e6-8286-11887af52ad3"
 migrations_dir = "migrations-v2"
-
 
 [[send_email]]
 name = "EMAIL"
+allowed_sender_addresses = [ "noreply@szworld.uk" ]
 
 [ai]
 binding = "AI"
@@ -42,7 +41,27 @@ class_name = "CommentRoom"
 
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["CommentRoom"]
+new_sqlite_classes = [ "CommentRoom" ]
+
+[[ratelimits]]
+name = "AUTH_LOGIN_IP_LIMITER"
+namespace_id = "826071901"
+simple = { limit = 20, period = 60 }
+
+[[ratelimits]]
+name = "AUTH_LOGIN_ACCOUNT_LIMITER"
+namespace_id = "826071902"
+simple = { limit = 10, period = 60 }
+
+[[ratelimits]]
+name = "PUBLIC_COMMENT_RATE_LIMITER"
+namespace_id = "826071903"
+simple = { limit = 30, period = 60 }
+
+[[ratelimits]]
+name = "AUTH_PUBLIC_EMAIL_LIMITER"
+namespace_id = "826071904"
+simple = { limit = 30, period = 60 }
 
 [vars]
 APP_ENV = "production"
@@ -57,13 +76,10 @@ AI_TRANSLATION_TIMEOUT_MS = "5000"
 AI_TRANSLATION_FALLBACK_TIMEOUT_MS = "5000"
 AI_QUEUE_PARALLELISM = "5"
 AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
-# Public origin used in admin to show the student URL.
 PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
+AUTH_EMAIL_FROM = "noreply@szworld.uk"
+AUTH_EMAIL_REPLY_TO = "noreply@szworld.uk"
+TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"
 
-# Daily retention and expired security-token cleanup. Cron uses UTC.
 [triggers]
 crons = [ "*/5 * * * *", "17 3 * * *" ]
-
-# Production deployment requires four distinct Rate Limiting bindings.
-# It also requires final email and Turnstile values plus a restricted EMAIL sender.
-# Do not invent external IDs or secrets. See docs/final-stage08/17_CLOUDFLARE_PENDING_VALUES.md.
