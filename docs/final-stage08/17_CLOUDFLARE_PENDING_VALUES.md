@@ -1,6 +1,6 @@
 # Cloudflare production設定状態
 
-2026-07-25のproduction release候補で外部値を確定した。
+2026-07-25のproduction releaseで外部値を確定した。
 
 ## 設定済み
 
@@ -11,10 +11,8 @@
 - TURNSTILE_SITE_KEY: 0x4AAAAAAD9zOVz8FBcawf0n
 - EMAIL.allowed_sender_addresses: noreply@szworld.uk
 - Queue: cpcv-ai-jobs
-- AUTH_RATE_LIMIT_PEPPER: Worker secretとしてrelease時に設定
-- PUBLIC_RATE_LIMIT_PEPPER: Worker secretとしてrelease時に設定
-- TURNSTILE_SECRET_KEY: Worker secretとしてrelease時に設定
-
-## release gate
+- AUTH_RATE_LIMIT_PEPPER: Worker secret
+- PUBLIC_RATE_LIMIT_PEPPER: Worker secret
+- TURNSTILE_SECRET_KEY: Worker secret
 
 このcommitは全回帰。D1 migration。remote schema検査。production deploy。外部smoke testが合格した場合だけmasterへ反映する。
