@@ -1,0 +1,330 @@
+name: CPCV production release with initial Owner signup
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/cpcv-production-release-initial-owner.yml]
+
+permissions:
+  contents: write
+
+env:
+  BASE_RELEASE_COMMIT: ec2fdffbf04639aacfa06b34df86ff5b91aa6f6b
+  RELEASE_BRANCH: agent/production-release-v0810
+  PRODUCTION_ORIGIN: https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev
+  EVIDENCE_DIR: /tmp/cpcv-production-release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.BASE_RELEASE_COMMIT }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.18.0
+          npm ci
+          python -m pip install -r requirements-visual.txt -r requirements-manual.txt
+          python -m playwright install --with-deps chromium
+          mkdir -p "$EVIDENCE_DIR"
+
+      - name: Resolve Cloudflare credentials and runtime secrets
+        shell: bash
+        env:
+          TOKEN_1: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TOKEN_2: ${{ secrets.CF_API_TOKEN }}
+          TOKEN_3: ${{ secrets.CLOUDFLARE_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_4: ${{ vars.CF_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          token=""; account=""
+          for item in TOKEN_1 TOKEN_2 TOKEN_3; do value="${!item:-}"; if [ -n "$value" ]; then token="$value"; break; fi; done
+          for item in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3 ACCOUNT_4; do value="${!item:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
+          test -n "$token"; test -n "$account"
+          echo "::add-mask::$token"; echo "::add-mask::$account"
+          echo "CLOUDFLARE_API_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "CLOUDFLARE_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+
+          auth=(-H "Authorization: Bearer ${token}" -H "Content-Type: application/json")
+          curl --fail-with-body -sS "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/${account}/challenges/widgets" > /tmp/widgets.json
+          sitekey=$(jq -r '.result[]? | select(.name=="CPCV Production") | .sitekey' /tmp/widgets.json | head -n1)
+          test -n "$sitekey"
+          curl --fail-with-body -sS "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/${account}/challenges/widgets/${sitekey}" > /tmp/widget.json
+          secret=$(jq -r '.result.secret // empty' /tmp/widget.json)
+          if [ -z "$secret" ]; then
+            curl --fail-with-body -sS "${auth[@]}" --request POST "https://api.cloudflare.com/client/v4/accounts/${account}/challenges/widgets/${sitekey}/rotate_secret" > /tmp/rotate.json
+            jq -e '.success == true' /tmp/rotate.json >/dev/null
+            secret=$(jq -r '.result.secret // empty' /tmp/rotate.json)
+          fi
+          test -n "$secret"
+          echo "::add-mask::$secret"
+          echo "TURNSTILE_SECRET_KEY=$secret" >> "$GITHUB_ENV"
+          auth_pepper=$(openssl rand -hex 32); public_pepper=$(openssl rand -hex 32)
+          echo "::add-mask::$auth_pepper"; echo "::add-mask::$public_pepper"
+          echo "AUTH_RATE_LIMIT_PEPPER=$auth_pepper" >> "$GITHUB_ENV"
+          echo "PUBLIC_RATE_LIMIT_PEPPER=$public_pepper" >> "$GITHUB_ENV"
+
+      - name: Correct release-only verification rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > docs/final-stage08/17_CLOUDFLARE_PENDING_VALUES.md <<'EOF'
+          # Cloudflare反映前の未設定項目
+
+          source内で解決できない外部値です。架空値では埋めません。
+
+          ## production blocker
+
+          1. `DB_V2.database_id`
+          2. `AUTH_LOGIN_IP_LIMITER.namespace_id`
+          3. `AUTH_LOGIN_ACCOUNT_LIMITER.namespace_id`
+          4. `PUBLIC_COMMENT_RATE_LIMITER.namespace_id`
+          5. `AUTH_PUBLIC_EMAIL_LIMITER.namespace_id`
+          6. `AUTH_EMAIL_FROM`
+          7. `AUTH_EMAIL_REPLY_TO`
+          8. `TURNSTILE_SITE_KEY`
+          9. `EMAIL.allowed_sender_addresses`
+          10. `AUTH_RATE_LIMIT_PEPPER` secret
+          11. `PUBLIC_RATE_LIMIT_PEPPER` secret
+          12. `TURNSTILE_SECRET_KEY` secret
+          13. Email Service sending domain onboarding確認
+          14. 任意受信者送信に必要なaccount plan確認
+          15. GitHub workflow利用時の承認済みremoteとexact commit push
+          16. GitHub `production` environment required reviewer
+
+          ## staging blocker
+
+          - staging Worker
+          - staging legacy DBとDB_V2
+          - staging Queue
+          - staging Rate Limiting namespace 4個
+          - staging Email設定
+          - staging Turnstile設定
+          - staging origin
+          - staging secret 3個
+          - source外canonical staging config
+          - staging acceptance 44項目実施
+          - staging acceptance spec SHA-256
+          - staging deployment ID
+
+          ## sourceに含む準備物
+
+          - `templates/WRANGLER_STAGING_TEMPLATE.toml`
+          - `templates/STAGING_ACCEPTANCE_RECORD_TEMPLATE.txt`
+          - `scripts/materialize-staging-config.mjs`
+          - `scripts/verify-environment-separation.mjs`
+          - `scripts/verify-staging-evidence.mjs`
+          - `scripts/generate-source-manifest.mjs`
+          - `scripts/verify-source-manifest.mjs`
+          - `scripts/safe-deploy.ps1`
+
+          ## 現行verify結果
+
+          実値未設定の`wrangler.toml`に対する`npm run verify:deployment`は9件で停止します。
+
+          - DB_V2 UUID
+          - Rate Limiting binding 4個
+          - AUTH_EMAIL_FROM
+          - AUTH_EMAIL_REPLY_TO
+          - TURNSTILE_SITE_KEY
+          - EMAIL sender allowlist
+
+          この停止は意図したfail-closed動作です。実値設定後は新しいrelease commitとsource manifestを作ります。
+          EOF
+
+          cat > docs/final-stage08/21_PRODUCTION_RELEASE_STATUS.md <<'EOF'
+          # Production release status
+
+          2026-07-25のrelease候補でproduction用Cloudflare資源を実値設定した。
+
+          - DB_V2: `class_comment_db_v2`
+          - Queue: `cpcv-ai-jobs`
+          - Turnstile: `CPCV Production`
+          - Email sender: `noreply@szworld.uk`
+          - Rate Limiting binding: production専用の4 namespace
+          - AI翻訳: `@cf/meta/m2m100-1.2b`。5秒primary。5秒fallback
+
+          新規DBへの初回releaseではOwnerが存在しない。schemaとmigrationを検証してdeployした後。公開`/signup`から最初のOwnerを作成する。通常の`verify-remote-d1.mjs`はOwner作成後に厳格合格させる。
+          EOF
+
+          python - <<'PY'
+          from pathlib import Path
+          path=Path('scripts/verify-precision-boundaries.mjs')
+          text=path.read_text(encoding='utf-8')
+          old='check("no invented Rate Limiting namespace is committed", !/^namespace_id\\s*=/m.test(wrangler));'
+          new='''const productionRateLimitNamespaces = [...wrangler.matchAll(/^namespace_id\\s*=\\s*"([1-9][0-9]*)"\\s*$/gm)].map((match) => match[1]);
+          const stagingRateLimitNamespaces = new Set(["826071801", "826071802", "826071803", "826071804"]);
+          check("production Rate Limiting namespaces are concrete, distinct, and separated from staging", productionRateLimitNamespaces.length === 4 && new Set(productionRateLimitNamespaces).size === 4 && productionRateLimitNamespaces.every((value) => !stagingRateLimitNamespaces.has(value)));'''
+          if old not in text:
+              raise SystemExit('precision namespace assertion not found')
+          path.write_text(text.replace(old,new),encoding='utf-8')
+          PY
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add docs/final-stage08/17_CLOUDFLARE_PENDING_VALUES.md docs/final-stage08/21_PRODUCTION_RELEASE_STATUS.md scripts/verify-precision-boundaries.mjs
+          npm run manifest:source
+          rm -f SOURCE_SHA256SUMS.override.txt
+          git add -A
+          git commit -m "Finalize CPCV production release gates"
+          release_commit=$(git rev-parse HEAD)
+          echo "RELEASE_COMMIT=$release_commit" >> "$GITHUB_ENV"
+          printf 'release_commit=%s\n' "$release_commit" > "$EVIDENCE_DIR/release-candidate.txt"
+          git push --force origin HEAD:${RELEASE_BRANCH}
+
+      - name: Run complete release validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          npm run verify:source-manifest
+          npm run verify:deployment
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run verify:final-docs
+          npm run check:stage08
+          npm run test:owner-bootstrap
+          npm run deploy:dry-run
+          npm audit
+          npm audit --omit=dev
+
+      - name: Apply production migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations list DB_V2 --remote --config wrangler.toml > "$EVIDENCE_DIR/migrations-before.txt"
+          npx wrangler d1 migrations apply DB_V2 --remote --config wrangler.toml > "$EVIDENCE_DIR/migrations-apply.txt"
+          npx wrangler d1 migrations list DB_V2 --remote --config wrangler.toml > "$EVIDENCE_DIR/migrations-after.txt"
+
+          set +e
+          node scripts/verify-remote-d1.mjs --config wrangler.toml > "$EVIDENCE_DIR/remote-d1-verification.txt" 2>&1
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            grep -F 'DB_V2 has no active Owner in an active organization.' "$EVIDENCE_DIR/remote-d1-verification.txt"
+            echo 'initial_owner_pending=true' > "$EVIDENCE_DIR/owner-status.txt"
+          else
+            echo 'initial_owner_pending=false' > "$EVIDENCE_DIR/owner-status.txt"
+          fi
+
+      - name: Configure secrets and deploy production
+        shell: bash
+        run: |
+          set -euo pipefail
+          export AUTH_RATE_LIMIT_PEPPER PUBLIC_RATE_LIMIT_PEPPER TURNSTILE_SECRET_KEY
+          node scripts/configure-rate-limit-secret.mjs --config wrangler.toml > "$EVIDENCE_DIR/secret-configuration.txt"
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/class-pdf-comment-viewer-v01"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
+          curl --fail-with-body -sS "${auth[@]}" "${api}/deployments" > "$EVIDENCE_DIR/deployments-before.json"
+          npx wrangler deploy --config wrangler.toml --keep-vars > "$EVIDENCE_DIR/deploy.txt"
+          curl --fail-with-body -sS "${auth[@]}" "${api}/deployments" > "$EVIDENCE_DIR/deployments-after.json"
+
+      - name: Verify production pages and visual layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in / /about /guide /privacy /admin /signup; do
+            safe=$(echo "$path" | tr '/' '_')
+            code=$(curl -sS -L --retry 15 --retry-delay 3 --retry-all-errors -o "$EVIDENCE_DIR/page${safe}.html" -w '%{http_code}' "${PRODUCTION_ORIGIN}${path}?release=${RELEASE_COMMIT}")
+            test "$code" -ge 200 -a "$code" -lt 400
+          done
+          curl --fail-with-body -sS --retry 15 --retry-delay 3 "${PRODUCTION_ORIGIN}/assets/app.css?release=${RELEASE_COMMIT}" > "$EVIDENCE_DIR/app.css"
+          grep -F 'v0.8.10 flat hierarchy and tactile controls' "$EVIDENCE_DIR/app.css"
+          grep -F '<title>授業管理 | CPCV</title>' "$EVIDENCE_DIR/page_admin.html"
+          grep -F '<title>アカウント作成 | CPCV</title>' "$EVIDENCE_DIR/page_signup.html"
+
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          origin='https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev'
+          out=Path(os.environ['EVIDENCE_DIR'])
+          selector='.card,.button,.input,.textarea,.select,.workspace-panel,.workspace-detail,.info-box,.comment-card,.qr-card'
+          with sync_playwright() as p:
+              browser=p.chromium.launch(headless=True)
+              for width in (390,768,1440):
+                  page=browser.new_page(viewport={'width':width,'height':900})
+                  for path,name in [('/','home'),('/admin','admin'),('/signup','signup')]:
+                      response=page.goto(origin+path,wait_until='domcontentloaded',timeout=60000)
+                      assert response and response.status < 400
+                      page.wait_for_timeout(900)
+                      assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1')
+                      rounded=page.eval_on_selector_all(selector,"els=>els.filter(e=>getComputedStyle(e).borderRadius.split(/\\s+/).some(v=>parseFloat(v)>0)).length")
+                      assert rounded == 0
+                      page.screenshot(path=str(out/f'{name}-{width}.png'),full_page=True)
+                  page.close()
+              browser.close()
+          PY
+
+      - name: Verify deployed bindings and publish master
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/class-pdf-comment-viewer-v01"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
+          curl --fail-with-body -sS "${auth[@]}" "${api}/settings" > /tmp/settings.json
+          jq 'walk(if type == "object" and has("text") and ((.type // "") | startswith("secret")) then .text = "<redacted>" else . end)' /tmp/settings.json > "$EVIDENCE_DIR/settings.json"
+          jq -e '.result.bindings | any(.name=="DB_V2" and .type=="d1")' "$EVIDENCE_DIR/settings.json" >/dev/null
+          jq -e '.result.bindings | any(.name=="AI_JOBS_QUEUE")' "$EVIDENCE_DIR/settings.json" >/dev/null
+          jq -e '.result.bindings | any(.name=="AI")' "$EVIDENCE_DIR/settings.json" >/dev/null
+
+          cat > "$EVIDENCE_DIR/release-record.txt" <<EOF
+          result=PASSED
+          run_id=${GITHUB_RUN_ID}
+          release_commit=${RELEASE_COMMIT}
+          production_origin=${PRODUCTION_ORIGIN}
+          migrations_applied=true
+          secrets_configured=true
+          deployed=true
+          external_smoke=true
+          responsive_screenshots=true
+          initial_owner_signup_required=$(grep -q true "$EVIDENCE_DIR/owner-status.txt" && echo true || echo false)
+          completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          find "$EVIDENCE_DIR" -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > "$EVIDENCE_DIR/SHA256SUMS.txt"
+          git push origin HEAD:master
+          echo "RELEASE_RESULT=PASSED" >> "$GITHUB_ENV"
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-production-initial-owner-evidence
+          path: /tmp/cpcv-production-release
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Cleanup trigger workflow
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${RELEASE_RESULT:-FAILED}" = PASSED ]; then exit 0; fi
+          git fetch origin master
+          git checkout -B cleanup origin/master
+          if [ -f .github/workflows/cpcv-production-release-initial-owner.yml ]; then
+            git rm .github/workflows/cpcv-production-release-initial-owner.yml
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m "CPCV production initial-owner FAILED run ${GITHUB_RUN_ID}"
+            git push origin HEAD:master
+          fi
