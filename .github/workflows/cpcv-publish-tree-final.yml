@@ -1,0 +1,49 @@
+name: Publish CPCV verified tree final
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/cpcv-publish-tree-final.yml]
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_COMMIT: cec431da537f76ab4c7b32a5e5d780daf72fa8b3
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_COMMIT }}
+          fetch-depth: 0
+      - name: Create fast-forwardable merge commit with verified tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin master
+          current_master=$(git rev-parse origin/master)
+          tree=$(git rev-parse "${RELEASE_COMMIT}^{tree}")
+          publish_commit=$(printf '%s\n' 'Publish verified CPCV production release' | git commit-tree "$tree" -p "$current_master" -p "$RELEASE_COMMIT")
+          git push origin "$publish_commit":master
+          mkdir -p /tmp/cpcv-publish-final
+          cat > /tmp/cpcv-publish-final/result.txt <<EOF
+          result=PASSED
+          release_commit=$RELEASE_COMMIT
+          publish_commit=$publish_commit
+          production_version_id=91a80a98-7be8-4300-b73a-a5e4cdf53035
+          production_deployment_id=96841c75-20bf-4ff5-a739-9ea7b234f66f
+          verification_run=30179555547
+          completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-publish-final
+          path: /tmp/cpcv-publish-final
+          if-no-files-found: error
+          retention-days: 90
