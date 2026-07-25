@@ -21,9 +21,11 @@ check('queue batch contains job IDs only', batch.every((message) => Object.keys(
 
 const wrangler = text('wrangler.toml');
 check('AI queue waits at most one second for a batch', wrangler.includes('max_batch_timeout = 1'));
-check('AI queue consumer concurrency is bounded', wrangler.includes('max_concurrency = 3'));
-check('AI queue worker parallelism is bounded', wrangler.includes('AI_QUEUE_PARALLELISM = "2"'));
+check('AI queue consumer concurrency is bounded', wrangler.includes('max_concurrency = 10'));
+check('AI queue worker parallelism is bounded', wrangler.includes('AI_QUEUE_PARALLELISM = "5"'));
 check('AI queue batch size is bounded', wrangler.includes('max_batch_size = 5'));
+check('translation uses the dedicated Workers AI model', wrangler.includes('AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"'));
+check('translation has a short dedicated timeout', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = "5000"'));
 
 const processor = text('src/ai/processor.js');
 check('AI queue batch is processed with bounded concurrency', processor.includes('runWithConcurrency(messages, parallelism'));
@@ -43,7 +45,8 @@ check('organization owners retain policy and pack controls', organizationSetting
 check('organization admins can manage individual terms', organizationSettings.includes('function termEditable()') && organizationSettings.includes('active.disabled = !termEditable()') && organizationSettings.includes('edit.disabled = !termEditable()'));
 check('pack installation reloads state after button cleanup', organizationSettings.indexOf('await withButton(button') < organizationSettings.indexOf('if (installed)') && organizationSettings.includes('await loadFilterSettings()'));
 const appCss = text('public/assets/app.css');
-check('mobile moderation table becomes cards', appCss.includes('v0.8.10 compact table and header fixes') && appCss.includes('.moderation-table td:nth-child(8)::before'));
+check('mobile moderation table remains readable', appCss.includes('v0.8.10 compact table and header fixes') && appCss.includes('.moderation-table td:nth-child(8)::before'));
+check('flat hierarchy removes rounded surfaces', appCss.includes('v0.8.10 flat hierarchy and tactile controls') && !/border-radius:\s*(?!0(?:px|rem|em|%|;))/i.test(appCss));
 check('mobile dictionary tables become cards', appCss.includes('.filter-table:not(.policy-table) td:nth-child(8)::before') && appCss.includes('.policy-table td:nth-child(5)::before'));
 const sourceRecord = text('SOURCE_GIT_RECORD.txt');
 check('source record identifies v0.8.10', sourceRecord.includes('Version: 0.8.10') && !sourceRecord.includes('Version: 0.8.2'));

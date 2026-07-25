@@ -244,6 +244,13 @@ async function testProviderResponseShapes() {
   }, { message: "原文", targetLanguage: "en" });
   check("translation parser accepts OpenAI-compatible choices content", translation.translatedText === "Translated text", translation);
 
+  const dedicatedCalls = [];
+  const dedicated = await runTranslationModel({
+    AI_TRANSLATION_MODEL: "@cf/meta/m2m100-1.2b",
+    AI: { async run(model, request) { dedicatedCalls.push({ model, request }); return { translated_text: "Dedicated translation" }; } }
+  }, { message: "原文", sourceLanguage: "ja", targetLanguage: "en" });
+  check("dedicated translation model receives direct translation input", dedicated.translatedText === "Dedicated translation" && dedicatedCalls[0]?.request?.text === "原文" && dedicatedCalls[0]?.request?.source_lang === "ja" && dedicatedCalls[0]?.request?.target_lang === "en" && !dedicatedCalls[0]?.request?.messages, dedicatedCalls);
+
   const moderation = await runModerationModel({
     AI_MODERATION_MODEL: "test-model",
     AI: { async run() { return { choices: [{ message: { parsed: { recommendation: "review", confidence: 0.75, categories: ["spam"] } } }] }; } }
@@ -361,9 +368,10 @@ function createHarness() {
     DB_V2: db, AI: ai, AI_JOBS_QUEUE: queue, COMMENT_ROOM: { idFromName: (id) => id, ...room },
     AI_MODERATION_MODEL: "@cf/zai-org/glm-4.7-flash",
     AI_MODERATION_FALLBACK_MODEL: "@cf/qwen/qwen3-30b-a3b-fp8",
-    AI_TRANSLATION_MODEL: "@cf/zai-org/glm-4.7-flash",
-    AI_TRANSLATION_FALLBACK_MODEL: "@cf/qwen/qwen3-30b-a3b-fp8",
-    AI_GATEWAY_ID: "cpcv-stage7", AI_TIMEOUT_MS: "12000"
+    AI_TRANSLATION_MODEL: "@cf/meta/m2m100-1.2b",
+    AI_TRANSLATION_FALLBACK_MODEL: "@cf/zai-org/glm-4.7-flash",
+    AI_GATEWAY_ID: "cpcv-stage7", AI_TIMEOUT_MS: "12000",
+    AI_TRANSLATION_TIMEOUT_MS: "5000", AI_TRANSLATION_FALLBACK_TIMEOUT_MS: "5000"
   };
   return {
     sqlite, db, ai, queue, room, env, now, createdAt, sessionId: "sess_ai",
@@ -384,6 +392,9 @@ class FakeAi {
     }
     if (request.response_format?.json_schema?.properties?.recommendation) {
       return { response: { recommendation: "allow", confidence: 0.92, categories: [] } };
+    }
+    if (model === "@cf/meta/m2m100-1.2b") {
+      return { translated_text: "The class was easy to understand." };
     }
     return { response: { translation: "The class was easy to understand." } };
   }
