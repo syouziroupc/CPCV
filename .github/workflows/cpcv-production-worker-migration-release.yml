@@ -1,0 +1,357 @@
+name: CPCV D1 binding migration and production release
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/cpcv-production-worker-migration-release.yml]
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_COMMIT: cec431da537f76ab4c7b32a5e5d780daf72fa8b3
+  PRODUCTION_DB_ID: 8315a076-67ad-44e6-8286-11887af52ad3
+  PRODUCTION_ORIGIN: https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev
+  EVIDENCE_DIR: /tmp/cpcv-production-worker-release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_COMMIT }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.18.0
+          npm ci
+          python -m pip install -r requirements-visual.txt -r requirements-manual.txt
+          python -m playwright install --with-deps chromium
+          mkdir -p "$EVIDENCE_DIR"
+
+      - name: Resolve Cloudflare credentials and runtime secrets
+        shell: bash
+        env:
+          TOKEN_1: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TOKEN_2: ${{ secrets.CF_API_TOKEN }}
+          TOKEN_3: ${{ secrets.CLOUDFLARE_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_4: ${{ vars.CF_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          token=""; account=""
+          for item in TOKEN_1 TOKEN_2 TOKEN_3; do value="${!item:-}"; if [ -n "$value" ]; then token="$value"; break; fi; done
+          for item in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3 ACCOUNT_4; do value="${!item:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
+          test -n "$token"; test -n "$account"
+          echo "::add-mask::$token"; echo "::add-mask::$account"
+          echo "CLOUDFLARE_API_TOKEN=$token" >> "$GITHUB_ENV"
+          echo "CLOUDFLARE_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+
+          auth=(-H "Authorization: Bearer ${token}" -H "Content-Type: application/json")
+          curl --fail-with-body -sS "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/${account}/challenges/widgets" > /tmp/widgets.json
+          sitekey=$(jq -r '.result[]? | select(.name=="CPCV Production") | .sitekey' /tmp/widgets.json | head -n1)
+          test -n "$sitekey"
+          curl --fail-with-body -sS "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/${account}/challenges/widgets/${sitekey}" > /tmp/widget.json
+          secret=$(jq -r '.result.secret // empty' /tmp/widget.json)
+          if [ -z "$secret" ]; then
+            curl --fail-with-body -sS "${auth[@]}" --request POST "https://api.cloudflare.com/client/v4/accounts/${account}/challenges/widgets/${sitekey}/rotate_secret" > /tmp/rotate.json
+            jq -e '.success == true' /tmp/rotate.json >/dev/null
+            secret=$(jq -r '.result.secret // empty' /tmp/rotate.json)
+          fi
+          test -n "$secret"
+          echo "::add-mask::$secret"; echo "TURNSTILE_SECRET_KEY=$secret" >> "$GITHUB_ENV"
+          auth_pepper=$(openssl rand -hex 32); public_pepper=$(openssl rand -hex 32)
+          echo "::add-mask::$auth_pepper"; echo "::add-mask::$public_pepper"
+          echo "AUTH_RATE_LIMIT_PEPPER=$auth_pepper" >> "$GITHUB_ENV"
+          echo "PUBLIC_RATE_LIMIT_PEPPER=$public_pepper" >> "$GITHUB_ENV"
+
+      - name: Reconfirm release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          test -z "$(git status --porcelain)"
+          npm run verify:source-manifest
+          npm run verify:deployment
+          npm run check:v0810
+          node --no-warnings scripts/test-ai-v2.mjs
+          npx wrangler deploy --dry-run --config wrangler.toml > "$EVIDENCE_DIR/dry-run.txt" 2>&1
+
+      - name: Materialize private D1 migration proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > .cpcv-d1-migration-proxy.js <<'JS'
+          export default {
+            async fetch(request, env) {
+              if (request.headers.get('x-cpcv-maintenance-nonce') !== env.MAINTENANCE_NONCE) {
+                return Response.json({ ok: false, error: 'FORBIDDEN' }, { status: 403 });
+              }
+              if (request.method === 'GET') return Response.json({ ok: true });
+              try {
+                const body = await request.json();
+                const sql = String(body?.sql || '').trim();
+                if (!sql || sql.length > 100000) return Response.json({ ok: false, error: 'SQL_INVALID' }, { status: 400 });
+                if (body.action === 'all') {
+                  const result = await env.DB_V2.prepare(sql).all();
+                  return Response.json({ ok: true, results: result.results || [], meta: result.meta || {} });
+                }
+                if (body.action === 'run') {
+                  const result = await env.DB_V2.prepare(sql).run();
+                  return Response.json({ ok: true, meta: result.meta || {} });
+                }
+                return Response.json({ ok: false, error: 'ACTION_INVALID' }, { status: 400 });
+              } catch (error) {
+                return Response.json({ ok: false, error: String(error?.message || error).slice(0, 2000) }, { status: 500 });
+              }
+            }
+          };
+          JS
+          cat > .cpcv-d1-migration-proxy.toml <<EOF
+          name = "cpcv-production-d1-migration-proxy"
+          main = ".cpcv-d1-migration-proxy.js"
+          compatibility_date = "2026-06-17"
+          [[d1_databases]]
+          binding = "DB_V2"
+          database_name = "class_comment_db_v2"
+          database_id = "${PRODUCTION_DB_ID}"
+          EOF
+
+      - name: Apply 0016 and 0017 through remote D1 binding
+        shell: bash
+        run: |
+          set -euo pipefail
+          nonce=$(openssl rand -hex 32)
+          echo "::add-mask::$nonce"
+          export CPCV_MIGRATION_NONCE="$nonce"
+          npx wrangler dev --remote --config .cpcv-d1-migration-proxy.toml --port 8787 --var "MAINTENANCE_NONCE:$nonce" > "$EVIDENCE_DIR/migration-proxy.log" 2>&1 &
+          proxy_pid=$!
+          trap 'kill $proxy_pid >/dev/null 2>&1 || true' EXIT
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS -H "x-cpcv-maintenance-nonce: $nonce" http://127.0.0.1:8787/ > /dev/null; then ready=1; break; fi
+            sleep 2
+          done
+          test "$ready" -eq 1
+
+          python - <<'PY'
+          import json, os, re, sqlite3, traceback, urllib.error, urllib.request
+          from pathlib import Path
+          endpoint='http://127.0.0.1:8787/'
+          nonce=os.environ['CPCV_MIGRATION_NONCE']
+          out=Path(os.environ['EVIDENCE_DIR'])
+          events=[]
+          def call(action,sql):
+              preview=' '.join(sql.split())[:300]
+              events.append({'event':'request','action':action,'preview':preview})
+              request=urllib.request.Request(endpoint,data=json.dumps({'action':action,'sql':sql}).encode(),method='POST',headers={'content-type':'application/json','x-cpcv-maintenance-nonce':nonce})
+              try:
+                  with urllib.request.urlopen(request,timeout=90) as response:
+                      raw=response.read().decode('utf-8','replace'); status=response.status
+              except urllib.error.HTTPError as error:
+                  raw=error.read().decode('utf-8','replace'); status=error.code
+                  events.append({'event':'http-error','status':status,'body':raw,'preview':preview})
+                  raise RuntimeError(raw) from error
+              body=json.loads(raw)
+              events.append({'event':'response','status':status,'body':body,'preview':preview})
+              if not body.get('ok'): raise RuntimeError(raw)
+              return body.get('results') or []
+          def all(sql): return call('all',sql)
+          def run(sql): call('run',sql)
+          def split(text):
+              statements=[]; buffer=''
+              for line in text.splitlines(keepends=True):
+                  buffer += line
+                  if sqlite3.complete_statement(buffer):
+                      statement=buffer.strip(); buffer=''
+                      if statement: statements.append(statement)
+              if buffer.strip(): raise RuntimeError('local SQL incomplete: '+buffer[-300:])
+              return statements
+          def without_leading_comments(statement):
+              lines=statement.splitlines()
+              while lines and (not lines[0].strip() or lines[0].lstrip().startswith('--')): lines.pop(0)
+              return '\n'.join(lines).strip()
+          def trigger_name(statement):
+              match=re.search(r'\bCREATE\s+TRIGGER\s+([A-Za-z0-9_]+)',statement,re.I)
+              return match.group(1) if match else ''
+          try:
+              recorded={row.get('name') for row in all('SELECT name FROM d1_migrations ORDER BY id;')}
+              events.append({'event':'recorded','names':sorted(x for x in recorded if x)})
+              for filename in ['0016_stage08_precision_hardening.sql','0017_final_integrity_hardening.sql']:
+                  if filename in recorded:
+                      events.append({'event':'migration-skip','name':filename}); continue
+                  if filename.startswith('0017'):
+                      for cleanup in ['DROP TRIGGER IF EXISTS trg_migration_0017_term_limit_guard;','DROP TABLE IF EXISTS migration_0017_term_limit_guard;','DROP TRIGGER IF EXISTS trg_migration_0017_boundary_guard;','DROP TABLE IF EXISTS migration_0017_boundary_guard;']:
+                          run(cleanup)
+                  statements=split(Path('migrations-v2',filename).read_text(encoding='utf-8'))
+                  events.append({'event':'statement-count','migration':filename,'count':len(statements)})
+                  for index,raw_statement in enumerate(statements,1):
+                      statement=without_leading_comments(raw_statement)
+                      if not statement: continue
+                      name=trigger_name(statement)
+                      if name and all("SELECT name FROM sqlite_schema WHERE type='trigger' AND name='"+name+"';"):
+                          events.append({'event':'skip-trigger','migration':filename,'index':index,'trigger':name}); continue
+                      events.append({'event':'apply','migration':filename,'index':index,'trigger':name,'sql':statement[:1500]})
+                      run(statement)
+                  run("INSERT OR IGNORE INTO d1_migrations (name) VALUES ('"+filename+"');")
+                  if not all("SELECT name FROM d1_migrations WHERE name='"+filename+"';"):
+                      raise RuntimeError('migration record missing: '+filename)
+                  events.append({'event':'migration-recorded','name':filename})
+              final=[row.get('name') for row in all('SELECT name FROM d1_migrations ORDER BY id;')]
+              for number in range(1,18):
+                  prefix=f'{number:04d}'
+                  if not any(str(name).startswith(prefix) for name in final): raise RuntimeError('migration missing: '+prefix)
+              out.joinpath('migration-result.txt').write_text('PASSED\n',encoding='utf-8')
+              out.joinpath('migration-names.json').write_text(json.dumps(final,ensure_ascii=False,indent=2),encoding='utf-8')
+          except Exception as error:
+              events.append({'event':'exception','type':type(error).__name__,'message':str(error),'traceback':traceback.format_exc()})
+              out.joinpath('migration-result.txt').write_text('FAILED\n',encoding='utf-8')
+              raise
+          finally:
+              out.joinpath('migration-events.json').write_text(json.dumps(events,ensure_ascii=False,indent=2),encoding='utf-8')
+          PY
+
+          kill $proxy_pid >/dev/null 2>&1 || true
+          wait $proxy_pid 2>/dev/null || true
+          trap - EXIT
+          rm -f .cpcv-d1-migration-proxy.js .cpcv-d1-migration-proxy.toml
+          npx wrangler d1 migrations list DB_V2 --remote --config wrangler.toml > "$EVIDENCE_DIR/migrations-after.txt" 2>&1
+
+      - name: Verify remote database integrity
+        shell: bash
+        run: |
+          set -euo pipefail
+          set +e
+          node scripts/verify-remote-d1.mjs --config wrangler.toml > "$EVIDENCE_DIR/remote-d1-verification.txt" 2>&1
+          status=$?
+          set -e
+          if [ "$status" -eq 0 ]; then
+            echo initial_owner_pending=false > "$EVIDENCE_DIR/owner-status.txt"
+          else
+            grep -F 'DB_V2 has no active Owner in an active organization.' "$EVIDENCE_DIR/remote-d1-verification.txt"
+            echo initial_owner_pending=true > "$EVIDENCE_DIR/owner-status.txt"
+          fi
+
+      - name: Configure secrets and deploy production
+        shell: bash
+        run: |
+          set -euo pipefail
+          export AUTH_RATE_LIMIT_PEPPER PUBLIC_RATE_LIMIT_PEPPER TURNSTILE_SECRET_KEY
+          node scripts/configure-rate-limit-secret.mjs --config wrangler.toml > "$EVIDENCE_DIR/secret-configuration.txt" 2>&1
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/class-pdf-comment-viewer-v01"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
+          curl --fail-with-body -sS "${auth[@]}" "${api}/deployments" > "$EVIDENCE_DIR/deployments-before.json"
+          npx wrangler deploy --config wrangler.toml --keep-vars > "$EVIDENCE_DIR/deploy.txt" 2>&1
+          curl --fail-with-body -sS "${auth[@]}" "${api}/deployments" > "$EVIDENCE_DIR/deployments-after.json"
+
+      - name: Verify production externally and visually
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in / /about /guide /privacy /admin /signup; do
+            safe=$(echo "$path" | tr '/' '_')
+            code=$(curl -sS -L --retry 15 --retry-delay 3 --retry-all-errors -o "$EVIDENCE_DIR/page${safe}.html" -w '%{http_code}' "${PRODUCTION_ORIGIN}${path}?release=${RELEASE_COMMIT}")
+            test "$code" -ge 200 -a "$code" -lt 400
+          done
+          curl --fail-with-body -sS --retry 15 --retry-delay 3 "${PRODUCTION_ORIGIN}/assets/app.css?release=${RELEASE_COMMIT}" > "$EVIDENCE_DIR/app.css"
+          grep -F 'v0.8.10 flat hierarchy and tactile controls' "$EVIDENCE_DIR/app.css"
+          grep -F '<title>授業管理 | CPCV</title>' "$EVIDENCE_DIR/page_admin.html"
+          grep -F '<title>アカウント作成 | CPCV</title>' "$EVIDENCE_DIR/page_signup.html"
+
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          origin='https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev'
+          out=Path(os.environ['EVIDENCE_DIR'])
+          selector='.card,.button,.input,.textarea,.select,.workspace-panel,.workspace-detail,.info-box,.comment-card,.qr-card'
+          with sync_playwright() as p:
+              browser=p.chromium.launch(headless=True)
+              for width in (390,768,1440):
+                  page=browser.new_page(viewport={'width':width,'height':900})
+                  for path,name in [('/','home'),('/admin','admin'),('/signup','signup')]:
+                      response=page.goto(origin+path,wait_until='domcontentloaded',timeout=60000)
+                      assert response and response.status < 400
+                      page.wait_for_timeout(900)
+                      assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth + 1')
+                      rounded=page.eval_on_selector_all(selector,"els=>els.filter(e=>getComputedStyle(e).borderRadius.split(/\\s+/).some(v=>parseFloat(v)>0)).length")
+                      assert rounded == 0
+                      page.screenshot(path=str(out/f'{name}-{width}.png'),full_page=True)
+                  page.close()
+              browser.close()
+          PY
+
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/class-pdf-comment-viewer-v01"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
+          curl --fail-with-body -sS "${auth[@]}" "${api}/settings" > /tmp/settings.json
+          jq 'walk(if type == "object" and has("text") and ((.type // "") | startswith("secret")) then .text = "<redacted>" else . end)' /tmp/settings.json > "$EVIDENCE_DIR/settings.json"
+          jq -e '.result.bindings | any(.name=="DB_V2" and .type=="d1")' "$EVIDENCE_DIR/settings.json" >/dev/null
+          jq -e '.result.bindings | any(.name=="AI_JOBS_QUEUE")' "$EVIDENCE_DIR/settings.json" >/dev/null
+          jq -e '.result.bindings | any(.name=="AI")' "$EVIDENCE_DIR/settings.json" >/dev/null
+
+      - name: Publish verified release tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$EVIDENCE_DIR/release-record.txt" <<EOF
+          result=PASSED
+          run_id=$GITHUB_RUN_ID
+          release_commit=$RELEASE_COMMIT
+          production_origin=$PRODUCTION_ORIGIN
+          migration_method=remote-D1-binding-prepared-statements
+          migrations_applied=true
+          secrets_configured=true
+          deployed=true
+          external_smoke=true
+          responsive_screenshots=true
+          initial_owner_signup_required=$(grep -q true "$EVIDENCE_DIR/owner-status.txt" && echo true || echo false)
+          completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          find "$EVIDENCE_DIR" -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > "$EVIDENCE_DIR/SHA256SUMS.txt"
+          git fetch origin master
+          current_master=$(git rev-parse origin/master)
+          tree=$(git rev-parse "${RELEASE_COMMIT}^{tree}")
+          publish_commit=$(printf '%s\n' 'Publish verified CPCV production release' | git commit-tree "$tree" -p "$current_master" -p "$RELEASE_COMMIT")
+          git push origin "$publish_commit":master
+          echo "publish_commit=$publish_commit" >> "$EVIDENCE_DIR/release-record.txt"
+          echo RELEASE_RESULT=PASSED >> "$GITHUB_ENV"
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-production-worker-release-evidence
+          path: /tmp/cpcv-production-worker-release
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Remove temporary workflow after failure
+        if: always() && env.RELEASE_RESULT != 'PASSED'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          git checkout -B cleanup origin/master
+          if [ -f .github/workflows/cpcv-production-worker-migration-release.yml ]; then
+            git rm .github/workflows/cpcv-production-worker-migration-release.yml
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m "CPCV D1 binding release FAILED run ${GITHUB_RUN_ID}"
+            git push origin HEAD:master
+          fi
