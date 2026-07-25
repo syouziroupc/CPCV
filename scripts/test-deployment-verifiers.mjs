@@ -16,22 +16,12 @@ const acceptanceSpecSha = createHash("sha256").update(Buffer.from(acceptanceSpec
 const acceptanceItemCount = acceptanceSpecText.split(/\r?\n/).filter((line) => /^- /.test(line)).length;
 try {
   const current = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
-  const validConfig = current
-    .replace(
-      /(\[\[send_email\]\]\s*\n\s*name = "EMAIL"\s*\n)/m,
-      '$1allowed_sender_addresses = [ "noreply@auth.real-domain.jp" ]\n'
-    )
-    .replace(
-      /(\[\[d1_databases\]\]\s*\n\s*binding = "DB_V2"\s*\n\s*database_name = "class_comment_db_v2"\s*\n)(?=migrations_dir\s*=)/m,
-      '$1database_id = "123e4567-e89b-42d3-a456-426614174000"\n'
-    )
-    .replace(
-      /PUBLIC_ORIGIN = "https:\/\/class-pdf-comment-viewer-v01\.syouziroupc\.workers\.dev"/,
-      'PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"\nAUTH_EMAIL_FROM = "noreply@auth.real-domain.jp"\nAUTH_EMAIL_REPLY_TO = "support@auth.real-domain.jp"\nTURNSTILE_SITE_KEY = "0x4AAAAA-real-site-key"'
-    )
-    + `\n[[ratelimits]]\nname = "AUTH_LOGIN_IP_LIMITER"\nnamespace_id = "1001"\n[ratelimits.simple]\nlimit = 20\nperiod = 60\n\n[[ratelimits]]\nname = "AUTH_LOGIN_ACCOUNT_LIMITER"\nnamespace_id = "1002"\n[ratelimits.simple]\nlimit = 10\nperiod = 60\n\n[[ratelimits]]\nname = "PUBLIC_COMMENT_RATE_LIMITER"\nnamespace_id = "1003"\n[ratelimits.simple]\nlimit = 30\nperiod = 60\n\n[[ratelimits]]\nname = "AUTH_PUBLIC_EMAIL_LIMITER"\nnamespace_id = "1004"\n[ratelimits.simple]\nlimit = 30\nperiod = 60\n`;
+const validConfig = current;
+const incompleteConfig = current
+  .replace(/(\[\[d1_databases\]\][\s\S]*?binding = "DB_V2"[\s\S]*?database_name = "class_comment_db_v2"\s*\n)\s*database_id = "[^"]+"\s*\n/, "$1")
+  .replace(/\n\[\[ratelimits\]\][\s\S]*?(?=\n\[\[ratelimits\]\]|\n\[vars\])/g, "");
   const incompletePath = join(temp, "incomplete.toml");
-  writeFileSync(incompletePath, current);
+  writeFileSync(incompletePath, incompleteConfig);
   const incomplete = run("scripts/verify-deployment-config.mjs", [incompletePath]);
   check("incomplete remote deployment configuration is rejected", incomplete.status === 1 && incomplete.stderr.includes("DB_V2 requires its real remote UUID") && incomplete.stderr.includes("AUTH_LOGIN_IP_LIMITER binding is missing"), incomplete);
 
@@ -41,7 +31,7 @@ try {
   check("complete deployment configuration is accepted", valid.status === 0 && valid.stdout.includes("verified"), valid);
 
   const unrestrictedEmailPath = join(temp, "unrestricted-email.toml");
-  writeFileSync(unrestrictedEmailPath, validConfig.replace('allowed_sender_addresses = [ "noreply@auth.real-domain.jp" ]\n', ""));
+  writeFileSync(unrestrictedEmailPath, validConfig.replace('allowed_sender_addresses = [ "noreply@szworld.uk" ]\n', ""));
   const unrestrictedEmail = run("scripts/verify-deployment-config.mjs", [unrestrictedEmailPath]);
   check("unrestricted Email sender binding is rejected", unrestrictedEmail.status === 1 && unrestrictedEmail.stderr.includes("allowed_sender_addresses"), unrestrictedEmail);
 
@@ -51,7 +41,7 @@ try {
   check("non-HTTPS production origin is rejected", invalidOrigin.status === 1 && invalidOrigin.stderr.includes("AUTH_ORIGIN"), invalidOrigin);
 
   const duplicateLimiterPath = join(temp, "duplicate-limiter.toml");
-  writeFileSync(duplicateLimiterPath, validConfig.replace('namespace_id = "1002"', 'namespace_id = "1001"'));
+  writeFileSync(duplicateLimiterPath, validConfig.replace('namespace_id = "826071902"', 'namespace_id = "826071901"'));
   const duplicateLimiter = run("scripts/verify-deployment-config.mjs", [duplicateLimiterPath]);
   check("duplicate Rate Limiting namespaces are rejected", duplicateLimiter.status === 1 && duplicateLimiter.stderr.includes("different namespace_id"), duplicateLimiter);
 
@@ -62,16 +52,16 @@ try {
       'database_name = "class_comment_db_staging"\ndatabase_id = "223e4567-e89b-42d3-a456-426614174001"'
     )
     .replace(
-      /database_name = "class_comment_db_v2"\s*\ndatabase_id = "123e4567-e89b-42d3-a456-426614174000"/,
-      'database_name = "class_comment_db_v2_staging"\ndatabase_id = "323e4567-e89b-42d3-a456-426614174002"'
+      /database_name = "class_comment_db_v2"\s*\ndatabase_id = "8315a076-67ad-44e6-8286-11887af52ad3"/,
+      'database_name = "class_comment_db_v2_staging"\ndatabase_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"'
     )
     .replaceAll('queue = "cpcv-ai-jobs"', 'queue = "cpcv-ai-jobs-staging"')
     .replaceAll('https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev', 'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev')
-    .replace('TURNSTILE_SITE_KEY = "0x4AAAAA-real-site-key"', 'TURNSTILE_SITE_KEY = "0x4AAAAA-staging-site-key"')
-    .replace('namespace_id = "1001"', 'namespace_id = "2001"')
-    .replace('namespace_id = "1002"', 'namespace_id = "2002"')
-    .replace('namespace_id = "1003"', 'namespace_id = "2003"')
-    .replace('namespace_id = "1004"', 'namespace_id = "2004"');
+    .replace(/TURNSTILE_SITE_KEY = "[^"]+"/, 'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"')
+    .replace('namespace_id = "826071901"', 'namespace_id = "826071801"')
+    .replace('namespace_id = "826071902"', 'namespace_id = "826071802"')
+    .replace('namespace_id = "826071903"', 'namespace_id = "826071803"')
+    .replace('namespace_id = "826071904"', 'namespace_id = "826071804"');
   const stagingPath = join(temp, "staging.toml");
   writeFileSync(stagingPath, stagingConfig);
   const runtimeStagingPath = resolve(ROOT, ".cpcv-staging.wrangler.toml");
@@ -85,12 +75,12 @@ try {
   check("separate production and staging resources are accepted", separated.status === 0 && separated.stdout.includes("separation verified"), separated);
 
   const sharedDbPath = join(temp, "shared-db.toml");
-  writeFileSync(sharedDbPath, stagingConfig.replace('database_id = "323e4567-e89b-42d3-a456-426614174002"', 'database_id = "123e4567-e89b-42d3-a456-426614174000"'));
+  writeFileSync(sharedDbPath, stagingConfig.replace('database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"', 'database_id = "8315a076-67ad-44e6-8286-11887af52ad3"'));
   const sharedDb = run("scripts/verify-environment-separation.mjs", [validPath, sharedDbPath]);
   check("shared production and staging D1 is rejected", sharedDb.status === 1 && sharedDb.stderr.includes("DB_V2 database_id"), sharedDb);
 
   const sharedRatePath = join(temp, "shared-rate.toml");
-  writeFileSync(sharedRatePath, stagingConfig.replace('namespace_id = "2001"', 'namespace_id = "1001"'));
+  writeFileSync(sharedRatePath, stagingConfig.replace('namespace_id = "826071801"', 'namespace_id = "826071901"'));
   const sharedRate = run("scripts/verify-environment-separation.mjs", [validPath, sharedRatePath]);
   check("shared production and staging Rate Limiting namespace is rejected", sharedRate.status === 1 && sharedRate.stderr.includes("share Rate Limiting namespace_id"), sharedRate);
 
