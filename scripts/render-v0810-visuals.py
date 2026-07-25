@@ -172,7 +172,8 @@ async def main() -> None:
     ]
     results={}
     async with async_playwright() as p:
-      browser=await p.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+      chromium_path = '/usr/bin/chromium' if Path('/usr/bin/chromium').exists() else p.chromium.executable_path
+      browser=await p.chromium.launch(executable_path=chromium_path,headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
       page=await browser.new_page()
       for name,path,prep,width,height in targets:
         results[name]=await capture(page,path,prep,name,width,height)
