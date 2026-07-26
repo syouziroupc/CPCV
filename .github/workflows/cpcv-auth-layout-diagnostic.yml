@@ -1,0 +1,59 @@
+name: CPCV auth layout patch diagnostic
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/cpcv-auth-layout-diagnostic.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Inspect expected fragments
+        run: |
+          mkdir -p /tmp/auth-diagnostic
+          python - <<'PY'
+          from pathlib import Path
+          import json, re
+          checks = {}
+          admin = Path('public/admin/index.html').read_text(encoding='utf-8')
+          account = Path('public/account/index.html').read_text(encoding='utf-8')
+          js = Path('public/assets/admin.js').read_text(encoding='utf-8')
+          checks['admin_body'] = '<body class="page admin-page">' in admin
+          checks['admin_main'] = '<main id="mainContent" class="card admin-shell">' in admin
+          checks['login_start'] = '<section id="loginSection" class="section auth-panel">' in admin
+          checks['login_end'] = '<div class="auth-links"><a href="/forgot-password">パスワードを忘れた</a><a href="/signup">組織を登録</a></div>' in admin
+          checks['account_body'] = '<body class="page">' in account
+          checks['account_main'] = '<main id="mainContent" class="card wide account-shell">' in account
+          checks['status_block'] = "adminStatus.style.color = error ? '#dc2626' : '#2563eb';" in js and "loginStatus.style.color = error ? '#dc2626' : '#2563eb';" in js
+          checks['login_event_start'] = "loginButton.addEventListener('click'" in js
+          checks['login_event_regex'] = bool(re.search(r"loginButton\.addEventListener\('click',[\s\S]*?teacherLoginId\.addEventListener\('keydown',[\s\S]*?\n\}\);", js))
+          for path in ['public/signup/index.html','public/forgot-password/index.html','public/reset-password/index.html']:
+              text=Path(path).read_text(encoding='utf-8')
+              checks[path+'_body']='<body class="page">' in text
+              checks[path+'_main']='<main class="card narrow">' in text
+          Path('/tmp/auth-diagnostic/checks.json').write_text(json.dumps(checks, ensure_ascii=False, indent=2), encoding='utf-8')
+          Path('/tmp/auth-diagnostic/login-block.txt').write_text(admin[admin.index('<section id="loginSection"'):admin.index('<div id="adminHome"')], encoding='utf-8')
+          Path('/tmp/auth-diagnostic/status-block.txt').write_text(js[js.index('function setStatus'):js.index('async function api')], encoding='utf-8')
+          Path('/tmp/auth-diagnostic/login-event.txt').write_text(js[js.index("loginButton.addEventListener"):js.index("logoutButton.addEventListener")], encoding='utf-8')
+          print(json.dumps(checks, ensure_ascii=False, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-auth-layout-patch-diagnostic
+          path: /tmp/auth-diagnostic
+          retention-days: 7
+      - name: Cleanup
+        if: always()
+        run: |
+          git fetch origin master
+          git checkout -B cleanup origin/master
+          git rm .github/workflows/cpcv-auth-layout-diagnostic.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "CPCV auth layout diagnostic run ${GITHUB_RUN_ID}"
+          git push origin HEAD:master
