@@ -1,0 +1,142 @@
+name: Publish verified CPCV auth layout source
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/cpcv-auth-layout-publish.yml]
+
+permissions:
+  contents: write
+
+env:
+  PRODUCTION_ORIGIN: https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev
+  PATCH_SOURCE_COMMIT: 62883b4ff5c146274819426a1b52fc68cb08c434
+  DEPLOYED_CANDIDATE: dcc264abb21b28bc2042f33980a68c1fc8c4f71d
+  EVIDENCE_DIR: /tmp/cpcv-auth-source-publish
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Recreate deployed source tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          git show "$PATCH_SOURCE_COMMIT:.github/workflows/cpcv-auth-layout-debug-v3.yml" > /tmp/v3-workflow.yml
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          source = Path('/tmp/v3-workflow.yml').read_text(encoding='utf-8').splitlines()
+          start = source.index("          python - <<'PY'") + 1
+          end = source.index('          PY', start)
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in source[start:end]) + '\n'
+          script = script.replace('/tmp/cpcv-auth-layout-v3-evidence', os.environ['EVIDENCE_DIR'])
+          Path('/tmp/apply-auth-layout.py').write_text(script, encoding='utf-8')
+          PY
+          python /tmp/apply-auth-layout.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/test-v0810-security-ui.mjs')
+          text = path.read_text(encoding='utf-8')
+          old = "htmlAssetVersions.every((value) => value === '0.8.10' || value === '0.8.10-ui2')"
+          new = "htmlAssetVersions.every((value) => ['0.8.10', '0.8.10-ui2', '0.8.10-ui3'].includes(value))"
+          if old not in text:
+              raise SystemExit('asset version assertion not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/cpcv-auth-layout-publish.yml
+          git add -A
+          node scripts/generate-source-manifest.mjs
+          rm -f SOURCE_SHA256SUMS.override.txt
+          git add -A
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Flatten authentication layouts and fix form behavior"
+          echo "PUBLISH_COMMIT=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+
+      - name: Verify recreated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain)"
+          node --check public/assets/admin.js
+          node --check public/assets/auth-public.js
+          npm run verify:source-manifest | tee "$EVIDENCE_DIR/source-manifest.txt"
+          npm run check:v0810 | tee "$EVIDENCE_DIR/check-v0810.txt"
+          npm run check:project | tee "$EVIDENCE_DIR/check-project.txt"
+
+      - name: Match critical source files to production
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR/live"
+          while IFS='|' read -r local_path remote_path output_name; do
+            curl --fail-with-body --silent --show-error --retry 20 --retry-delay 2 --retry-all-errors \
+              "$PRODUCTION_ORIGIN$remote_path?source=$DEPLOYED_CANDIDATE" > "$EVIDENCE_DIR/live/$output_name"
+            cmp "$local_path" "$EVIDENCE_DIR/live/$output_name"
+            printf '%s  %s\n' "$(sha256sum "$local_path" | cut -d' ' -f1)" "$local_path" >> "$EVIDENCE_DIR/production-file-hashes.txt"
+          done <<'EOF'
+          public/assets/app.css|/assets/app.css|app.css
+          public/assets/admin.js|/assets/admin.js|admin.js
+          public/assets/auth-public.js|/assets/auth-public.js|auth-public.js
+          public/admin/index.html|/admin|admin.html
+          public/signup/index.html|/signup|signup.html
+          public/forgot-password/index.html|/forgot-password|forgot-password.html
+          public/reset-password/index.html|/reset-password|reset-password.html
+          public/account/index.html|/account|account.html
+          EOF
+          grep -F 'id="teacherLoginForm"' "$EVIDENCE_DIR/live/admin.html"
+          grep -F 'class="auth-shell"' "$EVIDENCE_DIR/live/signup.html"
+          grep -F 'v0.8.10 auth hierarchy and form debug' "$EVIDENCE_DIR/live/app.css"
+          grep -F 'size: "flexible"' "$EVIDENCE_DIR/live/auth-public.js"
+
+      - name: Publish master
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$EVIDENCE_DIR/release-record.txt" <<EOF
+          result=PASSED
+          deployed_candidate=$DEPLOYED_CANDIDATE
+          published_commit=$PUBLISH_COMMIT
+          source_matches_production=true
+          completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+          find "$EVIDENCE_DIR" -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > "$EVIDENCE_DIR/SHA256SUMS.txt"
+          git push origin HEAD:master
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-auth-layout-source-publish-evidence
+          path: /tmp/cpcv-auth-source-publish
+          if-no-files-found: ignore
+          retention-days: 90
+
+      - name: Cleanup after failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin master
+          git checkout -B cleanup origin/master
+          if [ -f .github/workflows/cpcv-auth-layout-publish.yml ]; then
+            git rm .github/workflows/cpcv-auth-layout-publish.yml
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git commit -m "CPCV auth source publish failed run ${GITHUB_RUN_ID}"
+            git push origin HEAD:master
+          fi
