@@ -1,0 +1,79 @@
+name: CPCV auth staging visual diagnostic
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/cpcv-auth-staging-visual-diagnostic.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          npm ci
+          python -m pip install -r requirements-visual.txt
+          python -m playwright install --with-deps chromium
+      - name: Capture staging auth state
+        run: |
+          mkdir -p /tmp/cpcv-auth-staging-diagnostic
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from playwright.sync_api import sync_playwright
+          origin='https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
+          result={}
+          with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True)
+            for width in (320,390,768,1440):
+              page=browser.new_page(viewport={'width':width,'height':900})
+              response=page.goto(origin+'/admin?diagnostic=auth-layout',wait_until='domcontentloaded',timeout=90000)
+              page.wait_for_timeout(1500)
+              result[str(width)]={
+                'httpStatus': response.status if response else None,
+                'url': page.url,
+                'title': page.title(),
+                'bodyClass': page.locator('body').get_attribute('class'),
+                'scrollWidth': page.evaluate('document.documentElement.scrollWidth'),
+                'innerWidth': page.evaluate('window.innerWidth'),
+                'loginCount': page.locator('#loginSection').count(),
+                'formCount': page.locator('#teacherLoginForm').count(),
+                'submitCount': page.locator('#loginButton[type="submit"]').count(),
+                'headerCount': page.locator('.admin-shell > .app-header').count(),
+                'adminShell': page.locator('.admin-shell').evaluate("e=>{const s=getComputedStyle(e);return {display:s.display,borderTopWidth:s.borderTopWidth,boxShadow:s.boxShadow,width:s.width,maxWidth:s.maxWidth,overflow:s.overflow,marginLeft:s.marginLeft,marginRight:s.marginRight}}") if page.locator('.admin-shell').count() else None,
+                'loginShell': page.locator('#loginSection').evaluate("e=>{const s=getComputedStyle(e);const r=e.getBoundingClientRect();return {display:s.display,borderTopWidth:s.borderTopWidth,boxShadow:s.boxShadow,width:s.width,left:r.left,right:r.right,top:r.top,bottom:r.bottom}}") if page.locator('#loginSection').count() else None,
+                'appHeader': page.locator('.admin-shell > .app-header').evaluate("e=>{const s=getComputedStyle(e);return {display:s.display,visibility:s.visibility}}") if page.locator('.admin-shell > .app-header').count() else None,
+                'bodyText': page.locator('body').inner_text()[:1000],
+              }
+              page.screenshot(path=f'/tmp/cpcv-auth-staging-diagnostic/login-{width}.png',full_page=True)
+              page.close()
+            browser.close()
+          Path('/tmp/cpcv-auth-staging-diagnostic/result.json').write_text(json.dumps(result,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(result,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-auth-staging-visual-diagnostic
+          path: /tmp/cpcv-auth-staging-diagnostic
+          retention-days: 7
+      - name: Cleanup
+        if: always()
+        run: |
+          git fetch origin master
+          git checkout -B cleanup origin/master
+          git rm .github/workflows/cpcv-auth-staging-visual-diagnostic.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "CPCV auth staging diagnostic run ${GITHUB_RUN_ID}"
+          git push origin HEAD:master
