@@ -4,13 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>新しいパスワード</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui2">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui3">
 </head>
-<body class="page">
-  <main class="card narrow">
-    <p class="eyebrow">CPCV</p>
-    <h1>新しいパスワード</h1>
-    <form id="resetForm">
+<body class="page auth-page">
+  <main class="auth-shell">
+    <header class="auth-header">
+      <p class="eyebrow">CPCV</p>
+      <h1>新しいパスワード</h1>
+    </header>
+    <form id="resetForm" class="auth-form">
       <label class="label" for="password">新しいパスワード</label>
       <input id="password" class="input" type="password" autocomplete="new-password" minlength="8" maxlength="128" required>
       <label class="label" for="confirmation">新しいパスワードを再入力</label>

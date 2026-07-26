@@ -4,24 +4,26 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>パスワード再設定</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui2">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui3">
   <link rel="preconnect" href="https://challenges.cloudflare.com">
   <script src="/assets/turnstile-bootstrap.js?v=0.8.10"></script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=cpcvTurnstileReady&amp;render=explicit" defer></script>
 </head>
-<body class="page">
-  <main class="card narrow">
-    <p class="eyebrow">CPCV</p>
-    <h1>パスワード再設定</h1>
-    <p class="muted">登録済みの場合に限り再設定メールを送信します。</p>
-    <form id="forgotForm">
+<body class="page auth-page">
+  <main class="auth-shell">
+    <header class="auth-header">
+      <p class="eyebrow">CPCV</p>
+      <h1>パスワード再設定</h1>
+      <p class="muted">登録済みの場合に限り再設定メールを送信します。</p>
+    </header>
+    <form id="forgotForm" class="auth-form">
       <label class="label" for="email">メールアドレス</label>
       <input id="email" class="input" type="email" autocomplete="email" maxlength="254" required>
       <div id="turnstileWidget" class="auth-challenge"></div>
       <button id="submitButton" class="button primary auth-submit" type="submit" disabled>再設定メールを送る</button>
     </form>
     <p id="status" class="status" aria-live="polite"></p>
-    <p><a href="/admin">ログインへ戻る</a></p>
+    <p class="auth-footer"><a href="/admin">ログインへ戻る</a></p>
   </main>
   <script type="module" src="/assets/forgot-password.js?v=0.8.10"></script>
 </body>

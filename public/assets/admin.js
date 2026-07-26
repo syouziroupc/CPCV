@@ -2,6 +2,7 @@ const pathParts = location.pathname.split('/').filter(Boolean);
 const sessionId = pathParts[1] || '';
 
 const loginSection = document.getElementById('loginSection');
+const teacherLoginForm = document.getElementById('teacherLoginForm');
 const createSection = document.getElementById('createSection');
 const activeSessionsSection = document.getElementById('activeSessionsSection');
 const activeSessionList = document.getElementById('activeSessionList');
@@ -143,14 +144,24 @@ function show(el, visible) {
   el?.classList.toggle('hidden', !visible);
 }
 
+function setStatusElement(element, text, error = false) {
+  if (!element) return;
+  element.textContent = text;
+  element.classList.toggle('error-status', Boolean(error));
+}
+
 function setStatus(text, error = false) {
-  adminStatus.textContent = text;
-  adminStatus.style.color = error ? '#dc2626' : '#2563eb';
+  setStatusElement(adminStatus, text, error);
 }
 
 function setLoginStatus(text, error = false) {
-  loginStatus.textContent = text;
-  loginStatus.style.color = error ? '#dc2626' : '#2563eb';
+  setStatusElement(loginStatus, text, error);
+}
+
+function setViewMode(mode) {
+  const authView = mode === 'auth';
+  document.body.classList.toggle('auth-view', authView);
+  document.body.dataset.view = authView ? 'auth' : 'application';
 }
 
 async function api(path, options = {}) {
@@ -205,6 +216,7 @@ function showLogin(message = '', error = false) {
   stopAnalyticsRefresh();
   currentSession = null;
   moderationComments = [];
+  setViewMode('auth');
   show(loginSection, true);
   show(createSection, false);
   show(activeSessionsSection, false);
@@ -222,6 +234,7 @@ function showLogin(message = '', error = false) {
 function showAdminTop() {
   stopModerationRefresh();
   stopAnalyticsRefresh();
+  setViewMode('application');
   show(loginSection, false);
   show(createSection, true);
   show(activeSessionsSection, true);
@@ -235,6 +248,7 @@ function showAdminTop() {
 }
 
 function showSession() {
+  setViewMode('application');
   show(loginSection, false);
   show(createSection, false);
   show(activeSessionsSection, false);
@@ -249,6 +263,7 @@ function showSession() {
 function showNotFound() {
   stopModerationRefresh();
   stopAnalyticsRefresh();
+  setViewMode('application');
   show(loginSection, false);
   show(createSection, false);
   show(activeSessionsSection, false);
@@ -264,16 +279,20 @@ function showNotFound() {
 async function withButton(button, label, fn) {
   const original = button.textContent;
   button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
   button.textContent = '処理中...';
   try {
     await fn();
   } finally {
     button.disabled = false;
+    button.removeAttribute('aria-busy');
     button.textContent = label || original;
   }
 }
 
-loginButton.addEventListener('click', () => withButton(loginButton, 'ログイン', async () => {
+teacherLoginForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  return withButton(loginButton, 'ログイン', async () => {
   const account = teacherLoginId.value.trim();
   const password = teacherPassword.value;
   if (!account || !password) return setLoginStatus('メールアドレスとパスワードを入力してください。', true);
@@ -314,13 +333,7 @@ loginButton.addEventListener('click', () => withButton(loginButton, 'ログイ�
     }
     setLoginStatus('メールアドレスまたはパスワードを確認してください。', true);
   }
-}));
-
-teacherPassword.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') loginButton.click();
-});
-teacherLoginId.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') teacherPassword.focus();
+  });
 });
 
 logoutButton.addEventListener('click', async () => {

@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>授業管理 | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui2">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui3">
 </head>
-<body class="page admin-page">
+<body class="page admin-page auth-view">
   <a class="skip-link" href="#mainContent">本文へ移動</a>
-  <main id="mainContent" class="card admin-shell">
+  <main id="mainContent" class="admin-shell">
     <header class="app-header row between wrap">
       <div>
         <p class="eyebrow">CPCV</p>
@@ -21,21 +21,29 @@
       </nav>
     </header>
 
-    <section id="loginSection" class="section auth-panel">
-      <h2>先生ログイン</h2>
+    <section id="loginSection" class="auth-shell admin-login-shell" aria-labelledby="teacherLoginHeading">
+    <header class="auth-header">
+      <p class="eyebrow">CPCV</p>
+      <h1 id="teacherLoginHeading">授業管理へログイン</h1>
       <p class="muted">登録したメールアドレスとパスワードを入力してください。</p>
+    </header>
+    <form id="teacherLoginForm" class="auth-form">
       <label class="label" for="teacherLoginId">メールアドレス<span class="muted">（移行前はログインID）</span></label>
-      <input id="teacherLoginId" class="input" autocomplete="username">
+      <input id="teacherLoginId" class="input" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" required>
       <label class="label" for="teacherPassword">パスワード</label>
-      <input id="teacherPassword" class="input" type="password" autocomplete="current-password">
+      <input id="teacherPassword" class="input" type="password" autocomplete="current-password" required>
       <div id="teacherOrganizationGroup" class="hidden">
         <label class="label" for="teacherOrganization">組織</label>
         <select id="teacherOrganization" class="select"></select>
       </div>
-      <button id="loginButton" class="button primary auth-submit">ログイン</button>
-      <p id="loginStatus" class="status" aria-live="polite"></p>
-      <div class="auth-links"><a href="/forgot-password">パスワードを忘れた</a><a href="/signup">組織を登録</a></div>
-    </section>
+      <button id="loginButton" class="button primary auth-submit" type="submit">ログイン</button>
+    </form>
+    <p id="loginStatus" class="status" aria-live="polite"></p>
+    <nav class="auth-links auth-footer" aria-label="ログイン補助">
+      <a href="/forgot-password">パスワードを忘れた</a>
+      <a href="/signup">組織を登録</a>
+    </nav>
+  </section>
 
     <div id="adminHome" class="admin-home-grid">
       <section id="createSection" class="section hidden admin-create-panel">
@@ -252,6 +260,6 @@
 
     <p id="adminStatus" class="status" aria-live="polite"></p>
   </main>
-  <script src="/assets/admin.js?v=0.8.10" type="module"></script>
+  <script src="/assets/admin.js?v=0.8.10-auth-layout" type="module"></script>
 </body>
 </html>

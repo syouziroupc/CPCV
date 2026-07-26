@@ -57,6 +57,13 @@ const sourceRecord = text('SOURCE_GIT_RECORD.txt');
 check('source record identifies v0.8.10', sourceRecord.includes('Version: 0.8.10') && !sourceRecord.includes('Version: 0.8.2'));
 check('account shortcut label is concise', admin.includes('>アカウント設定<') && !admin.includes('アカウント・辞書設定'));
 check('initial lesson buttons describe their action', admin.includes('>投稿を停止<') && admin.includes('>コメントを隠す<'));
+check('login uses one standalone auth shell', admin.includes('class="auth-shell admin-login-shell"') && !admin.includes('class="section auth-panel"') && !admin.includes('class="card admin-shell"'));
+check('login uses semantic form submission', admin.includes('id="teacherLoginForm"') && admin.includes('type="submit">ログイン') && text('public/assets/admin.js').includes("teacherLoginForm.addEventListener('submit'"));
+check('login state removes application shell framing', appCss.includes('.admin-page.auth-view .admin-shell') && appCss.includes('v0.8.10 auth hierarchy and form debug'));
+check('account settings avoid nested card framing', !account.includes('class="card wide account-shell"') && appCss.includes('.account-summary-grid > .info-box'));
+check('public auth pages use shared auth shell', ['signup', 'forgot-password', 'reset-password'].every((name) => text(`public/${name}/index.html`).includes('class="auth-shell"')));
+check('Turnstile uses responsive flexible sizing', text('public/assets/auth-public.js').includes('size: "flexible"'));
+
 
 const router = text('src/index.js');
 for (const route of ['/about', '/guide', '/privacy']) check(`${route} has an explicit asset route`, router.includes(`path === "${route}"`));

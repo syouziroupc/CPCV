@@ -33,6 +33,8 @@ export async function configureTurnstile(container, onToken) {
   try {
     widgetId = globalThis.turnstile.render(container, {
       sitekey: siteKey,
+      size: "flexible",
+      theme: "auto",
       callback: onToken,
       "error-callback": () => onToken(""),
       "expired-callback": () => onToken(""),
