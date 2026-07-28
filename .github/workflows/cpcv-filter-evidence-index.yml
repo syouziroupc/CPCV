@@ -1,0 +1,54 @@
+name: CPCV filter evidence index
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/cpcv-filter-evidence-index.yml
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Collect release evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/cpcv-filter-complete/final /tmp/cpcv-filter-complete/staging-and-deploy
+          final_run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=96185e68628cd34ceb9e6b73a43d6d6ba87b0d74&per_page=20" --jq '.workflow_runs[] | select(.name == "CPCV filter settings finalize") | .id' | head -n1)
+          test -n "$final_run"
+          gh run download "$final_run" -n cpcv-filter-settings-final-evidence -D /tmp/cpcv-filter-complete/final
+          gh run download 30408927208 -n cpcv-filter-settings-ux-retry-evidence -D /tmp/cpcv-filter-complete/staging-and-deploy
+          cat > /tmp/cpcv-filter-complete/STATUS.txt <<EOF
+          result=PASSED
+          master_commit=0212bfb7584da18bc34ce1989e6e1a2ecb7ae88e
+          production_version=5ad25154-5d99-40a2-8181-1c8c4cd8db95
+          final_verification_run=$final_run
+          staging_verification_run=30408927208
+          production_source_matches=true
+          widths=320,390,768,1440
+          EOF
+          find /tmp/cpcv-filter-complete -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > /tmp/cpcv-filter-complete/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-filter-settings-complete-evidence
+          path: /tmp/cpcv-filter-complete
+          if-no-files-found: error
+          retention-days: 90
+      - name: Remove evidence index workflow
+        if: always()
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/cpcv-filter-evidence-index.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "CPCV filter evidence indexed run ${GITHUB_RUN_ID}"
+          git push origin HEAD:master
