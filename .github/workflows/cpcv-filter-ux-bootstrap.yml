@@ -1,0 +1,39 @@
+name: CPCV filter UX workflow bootstrap
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/cpcv-filter-ux-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate workflow text
+        run: |
+          set -euo pipefail
+          test -f .github/workflows/cpcv-filter-settings-ux.yml
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/cpcv-filter-settings-ux.yml').read_text(encoding='utf-8')
+          required = ['name:', 'on:', 'jobs:', 'repair-test-release:', 'Implement preset and batch policy controls']
+          missing = [item for item in required if item not in text]
+          if missing:
+              raise SystemExit(f'missing: {missing}')
+          print('workflow text present', len(text))
+          PY
+      - name: Remove bootstrap
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/cpcv-filter-ux-bootstrap.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Validate CPCV filter UX workflow bootstrap"
+          git push origin HEAD:master
