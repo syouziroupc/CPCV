@@ -63,6 +63,13 @@ check('login state removes application shell framing', appCss.includes('.admin-p
 check('account settings avoid nested card framing', !account.includes('class="card wide account-shell"') && appCss.includes('.account-summary-grid > .info-box'));
 check('public auth pages use shared auth shell', ['signup', 'forgot-password', 'reset-password'].every((name) => text(`public/${name}/index.html`).includes('class="auth-shell"')));
 check('Turnstile uses responsive flexible sizing', text('public/assets/auth-public.js').includes('size: "flexible"'));
+check('filter presets apply immediately without a select-and-apply step', account.includes('data-filter-preset="standard"') && !account.includes('id="organizationFilterPreset"') && organizationSettings.includes('async function applyPreset(name, buttonNode)'));
+check('filter settings expose batch review mask and reject controls', account.includes('id="bulkReviewMinSeverity"') && account.includes('id="bulkMaskMinSeverity"') && account.includes('id="bulkRejectMinSeverity"') && account.includes('id="applyBulkPolicyButton"'));
+check('manual policy edits switch the visible state to custom', organizationSettings.includes('function markCustomDirty') && organizationSettings.includes("setFilterMode('custom', true)") && organizationSettings.includes("select.addEventListener('change', () => markCustomDirty())"));
+check('batch policy changes preserve category enablement', organizationSettings.includes("const policies = (filterData.policies || []).map((policy) => ({ ...policy, ...changes }))"));
+check('policy thresholds validate review mask reject order', organizationSettings.includes('function policyOrderValid') && organizationSettings.includes('承認待ち ≤ 伏字 ≤ 投稿拒否'));
+check('batch and category policy controls are separate flat sections', account.includes('class="workspace-detail policy-batch-section"') && account.includes('class="workspace-detail category-policy-detail"'));
+check('filter controls use a strong flat visual hierarchy', appCss.includes('v0.8.10 filter preset and batch policy UX') && appCss.includes('.filter-preset-actions') && appCss.includes('.policy-batch-grid'));
 
 
 const router = text('src/index.js');

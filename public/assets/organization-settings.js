@@ -5,6 +5,8 @@ if (section) {
   let identity = null;
   let filterData = { categories: [], languages: [], policies: [], terms: [], packs: [], termLimit: 2000 };
   let editingTermId = '';
+  let filterMode = 'custom';
+  let policyDirty = false;
 
   const POLICY_PRESETS = Object.freeze({
     standard: {
@@ -67,6 +69,68 @@ if (section) {
   function languageLabel(id) { return filterData.languages.find((item) => item.id === id)?.label || id || '自動'; }
   function boundaryLabel(id) { return ({ auto: '自動', word: '単語', substring: '部分' })[id] || id || '自動'; }
 
+  function presetLabel(mode) { return ({ standard: '推奨', strict: '厳格', off: '無効', custom: 'カスタム' })[mode] || 'カスタム'; }
+  function presetDescription(mode) {
+    return ({
+      standard: '推奨値を種類別の詳細設定へ展開して適用しています。',
+      strict: '厳格値を種類別の詳細設定へ展開して適用しています。',
+      off: '辞書による自動処理は停止しています。',
+      custom: '一括設定または種類別設定で調整された値を使用します。'
+    })[mode] || '';
+  }
+  function setFilterMode(mode, dirty = false) {
+    filterMode = ['standard', 'strict', 'off'].includes(mode) ? mode : 'custom';
+    policyDirty = Boolean(dirty);
+    const state = $('organizationFilterModeState');
+    if (state) state.dataset.mode = filterMode;
+    if ($('organizationFilterModeLabel')) $('organizationFilterModeLabel').textContent = presetLabel(filterMode);
+    if ($('organizationFilterModeDescription')) $('organizationFilterModeDescription').textContent = presetDescription(filterMode);
+    $('organizationFilterDirtyState')?.classList.toggle('hidden', !policyDirty);
+    for (const buttonNode of document.querySelectorAll('[data-filter-preset]')) {
+      const active = buttonNode.dataset.filterPreset === filterMode && !policyDirty;
+      buttonNode.setAttribute('aria-pressed', active ? 'true' : 'false');
+    }
+  }
+  function markCustomDirty(message = '詳細設定を変更しました。保存すると反映されます。') {
+    setFilterMode('custom', true);
+    setStatus('organizationFilterStatus', message);
+  }
+  function policyLevelLabel(level) {
+    return level === 1 ? '1 軽微以上' : level === 2 ? '2 注意以上' : level === 3 ? '3 中程度以上' : level === 4 ? '4 強い以上' : '5 最重大のみ';
+  }
+  function createPolicyLevelSelect(className, value) {
+    const select = document.createElement('select');
+    select.className = `select ${className}`;
+    select.disabled = !ownerEditable();
+    select.append(new Option('使用しない', ''));
+    for (let level = 1; level <= 5; level += 1) select.append(new Option(policyLevelLabel(level), String(level)));
+    select.value = value == null ? '' : String(value);
+    select.addEventListener('change', () => markCustomDirty());
+    return select;
+  }
+  function policyOrderValid(policy) {
+    const values = [policy.reviewMinSeverity, policy.maskMinSeverity, policy.rejectMinSeverity];
+    for (let index = 0; index < values.length - 1; index += 1) {
+      if (values[index] != null && values[index + 1] != null && values[index] > values[index + 1]) return false;
+    }
+    return true;
+  }
+  function syncBulkPolicyControls() {
+    const fields = [
+      ['bulkReviewMinSeverity', 'reviewMinSeverity'],
+      ['bulkMaskMinSeverity', 'maskMinSeverity'],
+      ['bulkRejectMinSeverity', 'rejectMinSeverity']
+    ];
+    for (const [id, key] of fields) {
+      const select = $(id);
+      if (!select) continue;
+      const values = new Set((filterData.policies || []).map((policy) => policy[key] == null ? '' : String(policy[key])));
+      select.value = values.size === 1 ? [...values][0] : 'mixed';
+      select.disabled = !ownerEditable();
+    }
+    if ($('applyBulkPolicyButton')) $('applyBulkPolicyButton').disabled = !ownerEditable();
+  }
+
   async function loadIdentity() {
     identity = await api('/api/auth/session');
     csrfToken = identity.csrfToken || '';
@@ -111,8 +175,8 @@ if (section) {
       renderTerms();
       renderPolicies();
       renderPackStatus();
-      $('organizationFilterPreset').value = inferPreset();
-      $('applyOrganizationFilterPresetButton').disabled = !ownerEditable();
+      setFilterMode(inferPreset());
+      syncBulkPolicyControls();
       $('addFilterTermButton').disabled = !termEditable();
       setStatus('organizationFilterStatus', `${filterData.terms.length}語を登録中。上限${filterData.termLimit}語。`);
     } catch (error) { setStatus('organizationFilterStatus', errorText(error), true); }
@@ -186,20 +250,26 @@ if (section) {
     return 'custom';
   }
 
-  async function applyPreset() {
-    const name = $('organizationFilterPreset').value;
-    if (name === 'custom') return setStatus('organizationFilterStatus', '現在の詳細設定を維持します。');
+  async function applyPreset(name, buttonNode) {
+    if (!['standard', 'strict', 'off'].includes(name)) return;
     const source = POLICY_PRESETS[name] || {};
     const policies = (filterData.policies || []).map((policy) => {
       const levels = source[policy.category];
-      return { category: policy.category, enabled: Boolean(levels), reviewMinSeverity: levels?.[0] ?? policy.reviewMinSeverity, maskMinSeverity: levels?.[1] ?? policy.maskMinSeverity, rejectMinSeverity: levels?.[2] ?? policy.rejectMinSeverity };
+      return {
+        category: policy.category,
+        enabled: Boolean(levels),
+        reviewMinSeverity: levels?.[0] ?? policy.reviewMinSeverity,
+        maskMinSeverity: levels?.[1] ?? policy.maskMinSeverity,
+        rejectMinSeverity: levels?.[2] ?? policy.rejectMinSeverity
+      };
     });
-    await withButton($('applyOrganizationFilterPresetButton'), '基本設定を適用', async () => {
+    await withButton(buttonNode, presetLabel(name), async () => {
       try {
         if (name === 'standard' || name === 'strict') await ensurePacks(name);
         await api('/api/org/content-filter/policies', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ policies }) });
         await loadFilterSettings();
-        setStatus('organizationFilterStatus', name === 'off' ? '辞書判定を無効にしました。' : `${name === 'strict' ? '厳格' : '推奨'}設定を適用しました。`);
+        setFilterMode(name);
+        setStatus('organizationFilterStatus', name === 'off' ? '辞書判定を無効にしました。' : `${presetLabel(name)}設定を自動作成して適用しました。`);
       } catch (error) { setStatus('organizationFilterStatus', errorText(error), true); }
     });
   }
@@ -281,19 +351,75 @@ if (section) {
     const body = $('filterPoliciesBody'); body.textContent = '';
     for (const policy of filterData.policies || []) {
       const row = body.insertRow(); row.dataset.category = policy.category; appendCell(row, categoryLabel(policy.category));
-      const enabledCell = row.insertCell(); const enabled = document.createElement('input'); enabled.type = 'checkbox'; enabled.className = 'filter-policy-enabled'; enabled.checked = Boolean(policy.enabled); enabled.disabled = !ownerEditable(); enabledCell.append(enabled);
-      for (const [key, value] of [['review', policy.reviewMinSeverity], ['mask', policy.maskMinSeverity], ['reject', policy.rejectMinSeverity]]) {
-        const cell = row.insertCell(); const select = document.createElement('select'); select.className = `select filter-policy-${key}`; select.disabled = !ownerEditable(); select.append(new Option('使用しない', '')); for (let level = 1; level <= 5; level += 1) select.append(new Option(String(level), String(level))); select.value = value == null ? '' : String(value); cell.append(select);
+      const enabledCell = row.insertCell();
+      const enabled = document.createElement('input');
+      enabled.type = 'checkbox'; enabled.className = 'filter-policy-enabled'; enabled.checked = Boolean(policy.enabled); enabled.disabled = !ownerEditable();
+      enabled.addEventListener('change', () => markCustomDirty());
+      enabledCell.append(enabled);
+      const fields = [
+        ['review', policy.reviewMinSeverity],
+        ['mask', policy.maskMinSeverity],
+        ['reject', policy.rejectMinSeverity]
+      ];
+      for (const [key, value] of fields) {
+        const cell = row.insertCell();
+        cell.append(createPolicyLevelSelect(`filter-policy-${key}`, value));
       }
     }
     $('saveFilterPoliciesButton').disabled = !ownerEditable();
   }
 
+  function policiesFromRows() {
+    return [...$('filterPoliciesBody').rows].map((row) => ({
+      category: row.dataset.category,
+      enabled: row.querySelector('.filter-policy-enabled').checked,
+      reviewMinSeverity: nullable(row.querySelector('.filter-policy-review').value),
+      maskMinSeverity: nullable(row.querySelector('.filter-policy-mask').value),
+      rejectMinSeverity: nullable(row.querySelector('.filter-policy-reject').value)
+    }));
+  }
+
+  function validatePolicies(policies) {
+    const invalid = policies.find((policy) => !policyOrderValid(policy));
+    if (!invalid) return true;
+    setStatus('organizationFilterStatus', `${categoryLabel(invalid.category)}の基準順を確認してください。承認待ち ≤ 伏字 ≤ 投稿拒否の順にします。`, true);
+    return false;
+  }
+
   async function savePolicies() {
-    const policies = [...$('filterPoliciesBody').rows].map((row) => ({ category: row.dataset.category, enabled: row.querySelector('.filter-policy-enabled').checked, reviewMinSeverity: nullable(row.querySelector('.filter-policy-review').value), maskMinSeverity: nullable(row.querySelector('.filter-policy-mask').value), rejectMinSeverity: nullable(row.querySelector('.filter-policy-reject').value) }));
-    await withButton($('saveFilterPoliciesButton'), '種類別基準を保存', async () => {
-      try { await api('/api/org/content-filter/policies', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ policies }) }); await loadFilterSettings(); setStatus('organizationFilterStatus', '種類別基準を保存しました。'); }
-      catch (error) { setStatus('organizationFilterStatus', errorText(error), true); }
+    const policies = policiesFromRows();
+    if (!validatePolicies(policies)) return;
+    await withButton($('saveFilterPoliciesButton'), '種類別の変更を保存', async () => {
+      try {
+        await api('/api/org/content-filter/policies', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ policies }) });
+        await loadFilterSettings();
+        setFilterMode('custom');
+        setStatus('organizationFilterStatus', '種類別のカスタム設定を保存しました。');
+      } catch (error) { setStatus('organizationFilterStatus', errorText(error), true); }
+    });
+  }
+
+  async function applyBulkPolicies() {
+    const changes = {};
+    const fields = [
+      ['bulkReviewMinSeverity', 'reviewMinSeverity'],
+      ['bulkMaskMinSeverity', 'maskMinSeverity'],
+      ['bulkRejectMinSeverity', 'rejectMinSeverity']
+    ];
+    for (const [id, key] of fields) {
+      const value = $(id).value;
+      if (value !== 'mixed') changes[key] = nullable(value);
+    }
+    if (!Object.keys(changes).length) return setStatus('organizationFilterStatus', '変更する項目を選択してください。', true);
+    const policies = (filterData.policies || []).map((policy) => ({ ...policy, ...changes }));
+    if (!validatePolicies(policies)) return;
+    await withButton($('applyBulkPolicyButton'), '全種類へ適用して保存', async () => {
+      try {
+        await api('/api/org/content-filter/policies', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ policies }) });
+        await loadFilterSettings();
+        setFilterMode('custom');
+        setStatus('organizationFilterStatus', '選択した基準を全種類へ適用して保存しました。');
+      } catch (error) { setStatus('organizationFilterStatus', errorText(error), true); }
     });
   }
 
@@ -305,7 +431,9 @@ if (section) {
   }
 
   $('saveOrganizationAiButton')?.addEventListener('click', saveAiSettings);
-  $('applyOrganizationFilterPresetButton')?.addEventListener('click', applyPreset);
+  for (const buttonNode of document.querySelectorAll('[data-filter-preset]')) buttonNode.addEventListener('click', () => applyPreset(buttonNode.dataset.filterPreset, buttonNode));
+  $('applyBulkPolicyButton')?.addEventListener('click', applyBulkPolicies);
+  for (const id of ['bulkReviewMinSeverity', 'bulkMaskMinSeverity', 'bulkRejectMinSeverity']) $(id)?.addEventListener('change', () => markCustomDirty('一括設定はまだ保存されていません。'));
   $('installJapaneseFilterPackButton')?.addEventListener('click', () => installPack('ja-core-v1', $('installJapaneseFilterPackButton')));
   $('installEnglishFilterPackButton')?.addEventListener('click', () => installPack('en-core-v1', $('installEnglishFilterPackButton')));
   $('installJapaneseContextFilterPackButton')?.addEventListener('click', () => installPack('ja-context-v1', $('installJapaneseContextFilterPackButton')));

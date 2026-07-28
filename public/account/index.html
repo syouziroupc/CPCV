@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>アカウント設定 | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui3">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui4">
 </head>
 <body class="page account-page">
   <a class="skip-link" href="#mainContent">本文へ移動</a>
@@ -56,15 +56,24 @@
             <p id="organizationAiStatus" class="status" aria-live="polite"></p>
           </section>
 
-          <section id="organizationFilterSection" class="workspace-panel">
-            <h3>辞書の基本設定</h3>
-            <p class="muted small-text">通常は推奨を選ぶだけで使えます。個別語句は下で追加できます。</p>
-            <label class="field-control" for="organizationFilterPreset">判定の強さ
-              <select id="organizationFilterPreset" class="select"><option value="standard">推奨</option><option value="strict">厳格</option><option value="off">すべて無効</option><option value="custom">現在の詳細設定</option></select>
-            </label>
-            <button id="applyOrganizationFilterPresetButton" class="button primary full-button" type="button">基本設定を適用</button>
+          <section id="organizationFilterSection" class="workspace-panel filter-control-panel">
+            <div class="filter-heading-row">
+              <div>
+                <p class="eyebrow">自動設定</p>
+                <h3>コメント判定</h3>
+                <p class="muted small-text">通常は「推奨」で十分です。ボタンを押すと、辞書パックと種類別の処理基準まで自動設定して保存します。</p>
+              </div>
+              <p id="organizationFilterModeState" class="filter-mode-state" data-mode="loading">現在 <strong id="organizationFilterModeLabel">読み込み中</strong><span id="organizationFilterDirtyState" class="filter-dirty-state hidden">未保存</span></p>
+            </div>
+            <div class="filter-preset-actions" role="group" aria-label="コメント判定の自動設定">
+              <button class="filter-preset-button" data-filter-preset="standard" type="button" aria-pressed="false"><strong>推奨</strong><span>迷う投稿は確認し、強い表現は伏字、最重大だけ投稿拒否にします。</span></button>
+              <button class="filter-preset-button" data-filter-preset="strict" type="button" aria-pressed="false"><strong>厳格</strong><span>軽い表現から早めに確認し、伏字の範囲も広げます。</span></button>
+              <button class="filter-preset-button" data-filter-preset="off" type="button" aria-pressed="false"><strong>無効</strong><span>辞書による承認待ち・伏字・投稿拒否を停止します。</span></button>
+            </div>
+            <p id="organizationFilterModeDescription" class="muted small-text filter-mode-description"></p>
+            <p id="organizationFilterStatus" class="status" aria-live="polite"></p>
             <p id="filterPackStatus" class="muted small-text">辞書パックを確認しています。</p>
-            <details class="advanced-settings"><summary>辞書パックを個別に導入・更新</summary>
+            <details class="advanced-settings filter-pack-details"><summary>辞書パックを個別に導入・更新</summary>
               <div class="row wrap">
                 <button id="installJapaneseFilterPackButton" data-default-label="日本語 基本" class="button" type="button">日本語 基本</button>
                 <button id="installEnglishFilterPackButton" data-default-label="英語 基本" class="button" type="button">英語 基本</button>
@@ -72,7 +81,6 @@
                 <button id="installEnglishContextFilterPackButton" data-default-label="英語 文脈注意" class="button" type="button">英語 文脈注意</button>
               </div>
             </details>
-            <p id="organizationFilterStatus" class="status" aria-live="polite"></p>
           </section>
         </div>
 
@@ -102,8 +110,25 @@
               <div class="filter-table-wrap"><table class="filter-table"><thead><tr><th>語句</th><th>言語</th><th>種類</th><th>レベル</th><th>一致</th><th>表記ゆれ</th><th>有効</th><th>操作</th></tr></thead><tbody id="filterTermsBody"></tbody></table></div>
             </div>
           </details>
-          <details class="workspace-detail"><summary>種類別の処理基準</summary>
-            <div class="detail-body"><p class="muted small-text">通常は変更不要です。空欄はその処理を使いません。</p><div class="filter-table-wrap"><table class="filter-table policy-table"><thead><tr><th>種類</th><th>使用</th><th>承認待ち</th><th>伏字</th><th>投稿拒否</th></tr></thead><tbody id="filterPoliciesBody"></tbody></table></div><button id="saveFilterPoliciesButton" class="button primary" type="button">種類別基準を保存</button></div>
+          <section class="workspace-detail policy-batch-section" aria-labelledby="policyBatchHeading">
+            <div class="policy-section-heading">
+              <div><p class="eyebrow">まとめて変更</p><h3 id="policyBatchHeading">全種類の処理基準</h3></div>
+              <p class="muted small-text">有効・無効は変えず、承認待ち・伏字・投稿拒否のレベルだけを全種類へそろえます。</p>
+            </div>
+            <div class="policy-batch-grid">
+              <label class="policy-batch-item" data-action="review" for="bulkReviewMinSeverity"><strong>承認待ち</strong><span>先生の確認後に表示</span><select id="bulkReviewMinSeverity" class="select"><option value="mixed">種類ごとに異なる・変更しない</option><option value="">使用しない</option><option value="1">レベル1以上</option><option value="2">レベル2以上</option><option value="3">レベル3以上</option><option value="4">レベル4以上</option><option value="5">レベル5のみ</option></select></label>
+              <label class="policy-batch-item" data-action="mask" for="bulkMaskMinSeverity"><strong>伏字</strong><span>該当部分を隠して表示</span><select id="bulkMaskMinSeverity" class="select"><option value="mixed">種類ごとに異なる・変更しない</option><option value="">使用しない</option><option value="1">レベル1以上</option><option value="2">レベル2以上</option><option value="3">レベル3以上</option><option value="4">レベル4以上</option><option value="5">レベル5のみ</option></select></label>
+              <label class="policy-batch-item" data-action="reject" for="bulkRejectMinSeverity"><strong>投稿拒否</strong><span>送信時点で受け付けない</span><select id="bulkRejectMinSeverity" class="select"><option value="mixed">種類ごとに異なる・変更しない</option><option value="">使用しない</option><option value="1">レベル1以上</option><option value="2">レベル2以上</option><option value="3">レベル3以上</option><option value="4">レベル4以上</option><option value="5">レベル5のみ</option></select></label>
+            </div>
+            <p class="muted small-text policy-order-help">基準は「承認待ち ≤ 伏字 ≤ 投稿拒否」の順にします。数字が小さいほど厳しい設定です。</p>
+            <button id="applyBulkPolicyButton" class="button primary" type="button">全種類へ適用して保存</button>
+          </section>
+          <details id="categoryPolicyDetails" class="workspace-detail category-policy-detail"><summary>種類ごとに微調整</summary>
+            <div class="detail-body">
+              <p class="muted small-text">ここを変更すると現在の設定は「カスタム・未保存」になります。通常は一括設定だけで十分です。</p>
+              <div class="filter-table-wrap"><table class="filter-table policy-table"><thead><tr><th>種類</th><th>使用</th><th>承認待ち</th><th>伏字</th><th>投稿拒否</th></tr></thead><tbody id="filterPoliciesBody"></tbody></table></div>
+              <button id="saveFilterPoliciesButton" class="button primary" type="button">種類別の変更を保存</button>
+            </div>
           </details>
         </section>
       </section>
