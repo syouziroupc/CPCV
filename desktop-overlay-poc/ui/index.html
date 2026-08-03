@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CPCV Overlay PoC</title>
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <p class="eyebrow">CPCV DESKTOP / STAGE 1</p>
+      <h1>透明オーバーレイ試作</h1>
+      <p class="lead">既存CPCVの投影画面からPDF部分を隠し、コメントだけを最前面へ表示します。</p>
+    </header>
+
+    <section class="panel" aria-labelledby="connectionHeading">
+      <h2 id="connectionHeading">1. CPCVへ接続</h2>
+      <label for="environment">接続先</label>
+      <select id="environment">
+        <option value="https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev">staging</option>
+        <option value="https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev">production</option>
+      </select>
+      <button id="openAdminButton" class="primary" type="button">管理画面を開く</button>
+      <p class="hint">管理画面でログインし、授業を作成してください。管理画面とオーバーレイは同じWebView2プロファイルを使います。</p>
+    </section>
+
+    <section class="panel" aria-labelledby="overlayHeading">
+      <h2 id="overlayHeading">2. オーバーレイを開始</h2>
+      <label for="sessionInput">授業IDまたは管理画面URL</label>
+      <input id="sessionInput" autocomplete="off" spellcheck="false" placeholder="sess_xxxxx または /admin/sess_xxxxx">
+
+      <div class="row">
+        <div class="grow">
+          <label for="monitorSelect">投影先ディスプレイ</label>
+          <select id="monitorSelect"></select>
+        </div>
+        <button id="refreshMonitorsButton" class="secondary compact" type="button">再取得</button>
+      </div>
+
+      <div class="button-grid">
+        <button id="startOverlayButton" class="primary" type="button">オーバーレイ開始</button>
+        <button id="closeOverlayButton" class="danger" type="button">オーバーレイ終了</button>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="controlsHeading">
+      <h2 id="controlsHeading">3. 表示とデバッグ</h2>
+      <label class="check-row" for="commentsVisible">
+        <input id="commentsVisible" type="checkbox" checked>
+        <span>コメントを表示</span>
+      </label>
+      <label class="check-row" for="qrVisible">
+        <input id="qrVisible" type="checkbox">
+        <span>大型QRコードを表示</span>
+      </label>
+      <label class="check-row" for="clickThrough">
+        <input id="clickThrough" type="checkbox" checked>
+        <span>カーソル入力を下のPowerPointへ通す</span>
+      </label>
+      <label class="check-row" for="diagnosticsVisible">
+        <input id="diagnosticsVisible" type="checkbox" checked>
+        <span>接続診断を右上に表示</span>
+      </label>
+      <button id="reapplyTopmostButton" class="secondary" type="button">最前面と画面位置を再適用</button>
+    </section>
+
+    <section class="panel status-panel" aria-labelledby="statusHeading">
+      <h2 id="statusHeading">状態</h2>
+      <pre id="statusLog" aria-live="polite">起動準備中</pre>
+    </section>
+
+    <footer>
+      <p>この試作は既存CPCVのAPI、DB、学生画面を変更しません。</p>
+    </footer>
+  </main>
+  <script src="./app.js" type="module"></script>
+</body>
+</html>
