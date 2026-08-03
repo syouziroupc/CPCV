@@ -1,13 +1,26 @@
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Position, Size, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    webview::Color, AppHandle, Manager, Position, Size, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
 const PRODUCTION_ORIGIN: &str = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev";
-const STAGING_ORIGIN: &str = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev";
+const STAGING_ORIGIN: &str =
+    "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev";
 const OVERLAY_LABEL: &str = "overlay";
 const ADMIN_LABEL: &str = "admin";
 
 const OVERLAY_INITIALIZATION_SCRIPT: &str = r#"
 (() => {
+  const allowedOrigins = new Set([
+    'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev',
+    'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
+  ]);
+  const viewerPathPattern = /^\/viewer\/sess_[A-Za-z0-9_-]+\/?$/;
+
+  if (window.top !== window) return;
+  if (!allowedOrigins.has(window.location.origin)) return;
+  if (!viewerPathPattern.test(window.location.pathname)) return;
   if (window.__CPCV_DESKTOP_OVERLAY__) return;
 
   const state = {
@@ -25,6 +38,13 @@ const OVERLAY_INITIALIZATION_SCRIPT: &str = r#"
     if (!element) return;
     element.style.setProperty('background', 'transparent', 'important');
     element.style.setProperty('background-color', 'transparent', 'important');
+  };
+
+  const clearLayoutOverrides = (element) => {
+    if (!element) return;
+    for (const property of ['inset', 'top', 'right', 'bottom', 'left', 'width', 'height', 'max-height']) {
+      element.style.removeProperty(property);
+    }
   };
 
   const ensureDiagnostic = () => {
@@ -57,6 +77,11 @@ const OVERLAY_INITIALIZATION_SCRIPT: &str = r#"
     transparent(document.body);
     transparent(document.getElementById('viewerStage'));
 
+    if (document.body) {
+      document.body.style.setProperty('margin', '0', 'important');
+      document.body.style.setProperty('overflow', 'hidden', 'important');
+    }
+
     hide(document.getElementById('pdfStage'));
     hide(document.getElementById('viewerLogin'));
     hide(document.getElementById('emptyDocument'));
@@ -67,11 +92,18 @@ const OVERLAY_INITIALIZATION_SCRIPT: &str = r#"
     const commentPanel = document.getElementById('commentPanel');
     if (commentPanel) {
       commentPanel.style.setProperty('position', 'fixed', 'important');
-      commentPanel.style.setProperty('inset', '0', 'important');
-      commentPanel.style.setProperty('width', '100vw', 'important');
-      commentPanel.style.setProperty('height', '100vh', 'important');
       commentPanel.style.setProperty('pointer-events', 'none', 'important');
       transparent(commentPanel);
+
+      if (commentPanel.classList.contains('scroll-mode')) {
+        commentPanel.style.setProperty('inset', '0', 'important');
+        commentPanel.style.setProperty('width', '100vw', 'important');
+        commentPanel.style.setProperty('height', '100vh', 'important');
+        commentPanel.style.setProperty('max-height', 'none', 'important');
+      } else {
+        clearLayoutOverrides(commentPanel);
+      }
+
       if (state.commentsVisible !== null) {
         commentPanel.classList.toggle('hidden', !state.commentsVisible);
       }
@@ -155,18 +187,18 @@ fn normalize_session_id(session_id: &str) -> Result<String, String> {
     let normalized = session_id.trim();
     if !(10..=128).contains(&normalized.len())
         || !normalized.starts_with("sess_")
-        || !normalized
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '_' || character == '-')
+        || !normalized.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '-'
+        })
     {
         return Err("授業IDの形式が正しくありません。".to_string());
     }
     Ok(normalized.to_string())
 }
 
-fn close_window_if_present(app: &AppHandle, label: &str) -> Result<(), String> {
+fn destroy_window_if_present(app: &AppHandle, label: &str) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(label) {
-        window.close().map_err(|error| error.to_string())?;
+        window.destroy().map_err(|error| error.to_string())?;
     }
     Ok(())
 }
@@ -187,7 +219,13 @@ fn place_overlay(window: &WebviewWindow, monitor: &tauri::Monitor) -> Result<(),
         .set_size(Size::Physical(*monitor.size()))
         .map_err(|error| error.to_string())?;
     window
+        .set_background_color(Some(Color(0, 0, 0, 0)))
+        .map_err(|error| error.to_string())?;
+    window
         .set_always_on_top(true)
+        .map_err(|error| error.to_string())?;
+    window
+        .set_focusable(false)
         .map_err(|error| error.to_string())?;
     window
         .set_ignore_cursor_events(true)
@@ -213,7 +251,9 @@ fn list_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
         .primary_monitor()
         .map_err(|error| error.to_string())?
         .map(|monitor| (*monitor.position(), *monitor.size()));
-    let monitors = app.available_monitors().map_err(|error| error.to_string())?;
+    let monitors = app
+        .available_monitors()
+        .map_err(|error| error.to_string())?;
     Ok(monitors
         .into_iter()
         .enumerate()
@@ -241,7 +281,7 @@ fn list_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
 #[tauri::command]
 fn open_admin(app: AppHandle, origin: String) -> Result<String, String> {
     let origin = normalize_origin(&origin)?;
-    close_window_if_present(&app, ADMIN_LABEL)?;
+    destroy_window_if_present(&app, ADMIN_LABEL)?;
     let url = format!("{origin}/admin")
         .parse()
         .map_err(|error| format!("管理画面URLを作成できません: {error}"))?;
@@ -266,7 +306,7 @@ fn open_overlay(
     let origin = normalize_origin(&origin)?;
     let session_id = normalize_session_id(&session_id)?;
     let monitor = monitor_at(&app, monitor_index)?;
-    close_window_if_present(&app, OVERLAY_LABEL)?;
+    destroy_window_if_present(&app, OVERLAY_LABEL)?;
     let url = format!("{origin}/viewer/{session_id}")
         .parse()
         .map_err(|error| format!("投影URLを作成できません: {error}"))?;
@@ -276,6 +316,7 @@ fn open_overlay(
         .decorations(false)
         .shadow(false)
         .transparent(true)
+        .background_color(Color(0, 0, 0, 0))
         .always_on_top(true)
         .focusable(false)
         .skip_taskbar(true)
@@ -294,7 +335,7 @@ fn open_overlay(
 
 #[tauri::command]
 fn close_overlay(app: AppHandle) -> Result<String, String> {
-    close_window_if_present(&app, OVERLAY_LABEL)?;
+    destroy_window_if_present(&app, OVERLAY_LABEL)?;
     Ok("オーバーレイを終了しました。".to_string())
 }
 
@@ -326,9 +367,7 @@ fn set_overlay_click_through(app: AppHandle, enabled: bool) -> Result<String, St
 fn set_overlay_comments(app: AppHandle, visible: bool) -> Result<String, String> {
     eval_overlay(
         &app,
-        &format!(
-            "window.__CPCV_DESKTOP_OVERLAY__?.setCommentsVisible({visible});"
-        ),
+        &format!("window.__CPCV_DESKTOP_OVERLAY__?.setCommentsVisible({visible});"),
     )?;
     Ok(if visible {
         "コメント表示を有効にしました。"
@@ -356,9 +395,7 @@ fn set_overlay_qr(app: AppHandle, visible: bool) -> Result<String, String> {
 fn set_overlay_diagnostics(app: AppHandle, visible: bool) -> Result<String, String> {
     eval_overlay(
         &app,
-        &format!(
-            "window.__CPCV_DESKTOP_OVERLAY__?.setDiagnosticsVisible({visible});"
-        ),
+        &format!("window.__CPCV_DESKTOP_OVERLAY__?.setDiagnosticsVisible({visible});"),
     )?;
     Ok(if visible {
         "接続診断を表示しました。"
@@ -391,8 +428,14 @@ mod tests {
 
     #[test]
     fn accepts_only_known_origins() {
-        assert_eq!(normalize_origin(PRODUCTION_ORIGIN).unwrap(), PRODUCTION_ORIGIN);
-        assert_eq!(normalize_origin(&format!("{STAGING_ORIGIN}/")).unwrap(), STAGING_ORIGIN);
+        assert_eq!(
+            normalize_origin(PRODUCTION_ORIGIN).unwrap(),
+            PRODUCTION_ORIGIN
+        );
+        assert_eq!(
+            normalize_origin(&format!("{STAGING_ORIGIN}/")).unwrap(),
+            STAGING_ORIGIN
+        );
         assert!(normalize_origin("https://example.com").is_err());
         assert!(normalize_origin("javascript:alert(1)").is_err());
     }
@@ -403,5 +446,12 @@ mod tests {
         assert!(normalize_session_id("sess_with-dash_123").is_ok());
         assert!(normalize_session_id("wrong_0123456789").is_err());
         assert!(normalize_session_id("sess_bad/path").is_err());
+    }
+
+    #[test]
+    fn overlay_script_is_scoped_to_expected_viewer_pages() {
+        assert!(OVERLAY_INITIALIZATION_SCRIPT.contains("window.top !== window"));
+        assert!(OVERLAY_INITIALIZATION_SCRIPT.contains("allowedOrigins.has"));
+        assert!(OVERLAY_INITIALIZATION_SCRIPT.contains("viewerPathPattern.test"));
     }
 }
