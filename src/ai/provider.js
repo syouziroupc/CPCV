@@ -3,7 +3,7 @@ import { normalizeModerationResult, normalizeTranslationResult } from "./validat
 const MODERATION_PROMPT_VERSION = "moderation-v2-dictionary-context";
 const TRANSLATION_PROMPT_VERSION = "translation-v2-dedicated";
 const DEFAULT_TIMEOUT_MS = 12_000;
-const DEFAULT_TRANSLATION_TIMEOUT_MS = 3_000;
+const DEFAULT_TRANSLATION_TIMEOUT_MS = 4_000;
 const DEFAULT_TRANSLATION_FALLBACK_TIMEOUT_MS = 2_500;
 const DEDICATED_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b";
 

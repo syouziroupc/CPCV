@@ -404,7 +404,7 @@ function createHarness() {
     AI_MODERATION_FALLBACK_MODEL: "@cf/qwen/qwen3-30b-a3b-fp8",
     AI_TRANSLATION_MODEL: "@cf/meta/m2m100-1.2b",
     AI_GATEWAY_ID: "cpcv-stage7", AI_TIMEOUT_MS: "12000",
-    AI_TRANSLATION_TIMEOUT_MS: "3000"
+    AI_TRANSLATION_TIMEOUT_MS: "4000"
   };
   return {
     sqlite, db, ai, queue, room, env, now, createdAt, sessionId: "sess_ai",
