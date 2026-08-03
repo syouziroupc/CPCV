@@ -1,4 +1,4 @@
-name: Apply translation display fix on PR v2
+name: Apply translation display fix on PR
 
 on:
   pull_request:
@@ -7,10 +7,6 @@ on:
 
 permissions:
   contents: write
-
-concurrency:
-  group: translation-order-fix-pr
-  cancel-in-progress: false
 
 jobs:
   patch-and-verify:
@@ -28,64 +24,15 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply ordering fix
-        shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          def replace_once(path, old, new):
-              file = Path(path)
-              text = file.read_text()
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f'{path}: expected one match, found {count}')
-              file.write_text(text.replace(old, new, 1))
-          replace_once('src/ai/processor.js', '''export async function scheduleAiForComment(env, input) {
-  if (!env?.DB_V2) return { jobs: [], dispatched: 0 };
-  const jobs = await createAiJobsForComment(env.DB_V2, input);
-  const dispatched = await dispatchAiJobs(env, jobs);
-  return { jobs, dispatched };
-}''', '''export async function scheduleAiForComment(env, input, options = {}) {
-  if (!env?.DB_V2) return { jobs: [], dispatched: 0 };
-  const jobs = await createAiJobsForComment(env.DB_V2, input);
-  const dispatched = options.dispatch === false ? 0 : await dispatchAiJobs(env, jobs);
-  return { jobs, dispatched };
-}''')
-          replace_once('src/realtime/comment-room.js', 'import { scheduleAiForComment } from "../ai/processor.js";', 'import { dispatchAiJobs, scheduleAiForComment } from "../ai/processor.js";')
-          replace_once('src/realtime/comment-room.js', '''          ai = await scheduleAiForComment(this.env, {
-            organizationId: input.organizationId,
-            liveSessionId: input.liveSessionId,
-            commentId: result.comment.id
-          });''', '''          ai = await scheduleAiForComment(this.env, {
-            organizationId: input.organizationId,
-            liveSessionId: input.liveSessionId,
-            commentId: result.comment.id
-          }, { dispatch: false });''')
-          replace_once('src/realtime/comment-room.js', '''      if (event) await this.broadcastEvent(event);
-      return authJson({''', '''      if (event) await this.broadcastEvent(event);
-      if (!result.duplicate && ai.jobs.length) {
-        const task = dispatchAiJobs(this.env, ai.jobs)
-          .catch((error) => console.error("AI queue dispatch failed", String(error?.code || error?.name || "ERROR")));
-        if (typeof this.state?.waitUntil === "function") this.state.waitUntil(task);
-        else void task;
-      }
-      return authJson({''')
-          replace_once('scripts/test-realtime-v2.mjs', '''function testViewerClient() {
-  const source = readFileSync(resolve(ROOT, "public/assets/viewer.js"), "utf8");''', '''function testViewerClient() {
-  const source = readFileSync(resolve(ROOT, "public/assets/viewer.js"), "utf8");
-  const roomSource = readFileSync(resolve(ROOT, "src/realtime/comment-room.js"), "utf8");
-  const acceptMessageSource = roomSource.slice(roomSource.indexOf("async acceptMessage"), roomSource.indexOf("async deliverEvent"));
-  check("translation queue dispatch follows pending marker broadcast", acceptMessageSource.indexOf("markRealtimeCommentTranslationPending") < acceptMessageSource.indexOf("broadcastEvent(event)")
-    && acceptMessageSource.indexOf("broadcastEvent(event)") < acceptMessageSource.indexOf("dispatchAiJobs(this.env, ai.jobs)"));''')
-          Path('.github/workflows/translation-order-fix.yml').unlink(missing_ok=True)
-          Path('.github/workflows/translation-display-fix-pr.yml').unlink()
-          PY
+          node .github/scripts/apply-translation-order-fix.mjs
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           npm run manifest:source
           git add SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt
           git diff --cached --check
-          git commit -m 'Serialize translation display before AI dispatch'
+          git commit -m "Serialize translation display before AI dispatch"
       - name: Verify ordering and regressions
         run: |
           node --check src/ai/processor.js
