@@ -29,87 +29,58 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Diagnose token and account access
+      - name: Diagnose product permissions
         shell: bash
         env:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CONFIGURED_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          LEGACY_ACCOUNT: ${{ secrets.CF_ACCOUNT_ID }}
-          VARIABLE_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          KNOWN_CPCV_ACCOUNT: 7cea58251b35319648343e0dd9f7cb76
+          ACCOUNT: 7cea58251b35319648343e0dd9f7cb76
         run: |
           set -euo pipefail
           mkdir -p auth-diagnostic
           report=auth-diagnostic/report.txt
           : > "$report"
-          if [ -z "${TOKEN:-}" ]; then
-            echo 'token_present=false' | tee -a "$report"
-            exit 1
-          fi
-          echo 'token_present=true' | tee -a "$report"
+          test -n "${TOKEN:-}"
           echo "::add-mask::$TOKEN"
+          echo "::add-mask::$ACCOUNT"
+          printf 'token_present=true\n' | tee -a "$report"
 
           set +e
           env -u CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN="$TOKEN" \
             npx wrangler whoami --json > /tmp/whoami.json 2>/tmp/whoami.err
           whoami_exit=$?
+          CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" \
+            npx wrangler deployments list --name class-pdf-comment-viewer-v01-staging --json \
+            > /tmp/workers.json 2>/tmp/workers.err
+          workers_exit=$?
+          CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" \
+            npx wrangler d1 list --json > /tmp/d1.json 2>/tmp/d1.err
+          d1_exit=$?
+          CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" \
+            npx wrangler queues info cpcv-ai-jobs-staging > /tmp/queue.txt 2>/tmp/queue.err
+          queue_exit=$?
           set -e
-          printf 'wrangler_whoami_exit=%s\n' "$whoami_exit" | tee -a "$report"
-          if jq -e . /tmp/whoami.json >/dev/null 2>&1; then
-            echo 'wrangler_whoami_json=true' | tee -a "$report"
-          else
-            echo 'wrangler_whoami_json=false' | tee -a "$report"
-          fi
 
-          : > /tmp/candidates.txt
-          for candidate in "${CONFIGURED_ACCOUNT:-}" "${LEGACY_ACCOUNT:-}" "${VARIABLE_ACCOUNT:-}" "$KNOWN_CPCV_ACCOUNT"; do
-            if [[ "$candidate" =~ ^[0-9a-fA-F]{32}$ ]]; then
-              echo "$candidate" >> /tmp/candidates.txt
-            fi
+          whoami_json=false
+          workers_json=false
+          d1_json=false
+          jq -e . /tmp/whoami.json >/dev/null 2>&1 && whoami_json=true
+          jq -e . /tmp/workers.json >/dev/null 2>&1 && workers_json=true
+          jq -e . /tmp/d1.json >/dev/null 2>&1 && d1_json=true
+          printf 'wrangler_whoami_exit=%s\nwrangler_whoami_json=%s\nworkers_read_exit=%s\nworkers_json=%s\nd1_list_exit=%s\nd1_json=%s\nqueue_info_exit=%s\n' \
+            "$whoami_exit" "$whoami_json" "$workers_exit" "$workers_json" "$d1_exit" "$d1_json" "$queue_exit" | tee -a "$report"
+
+          for pair in workers:/tmp/workers.err d1:/tmp/d1.err queue:/tmp/queue.err; do
+            label=${pair%%:*}
+            path=${pair#*:}
+            code=$(grep -Eo 'code: [0-9]+' "$path" 2>/dev/null | tail -1 | awk '{print $2}' || true)
+            printf '%s_error_code=%s\n' "$label" "${code:-none}" | tee -a "$report"
           done
-          if jq -e . /tmp/whoami.json >/dev/null 2>&1; then
-            jq -r '.. | strings | select(test("^[0-9a-fA-F]{32}$"))' /tmp/whoami.json >> /tmp/candidates.txt || true
-          fi
-          sort -u /tmp/candidates.txt -o /tmp/candidates.txt
-          candidate_count=$(wc -l < /tmp/candidates.txt | tr -d ' ')
-          printf 'candidate_account_count=%s\n' "$candidate_count" | tee -a "$report"
-
-          cat > /tmp/probe.toml <<'TOML'
-          name = "cpcv-staging-auth-probe"
-          main = "src/index.js"
-          compatibility_date = "2026-06-17"
-
-          [[d1_databases]]
-          binding = "DB"
-          database_name = "class_comment_db_staging"
-          database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"
-          TOML
-
-          found=false
-          found_known=false
-          while IFS= read -r account_id; do
-            [ -n "$account_id" ] || continue
-            echo "::add-mask::$account_id"
-            if CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$account_id" \
-              npx wrangler d1 migrations list class_comment_db_staging --remote --config /tmp/probe.toml \
-              > /tmp/d1-probe.txt 2>&1; then
-              found=true
-              if [ "$account_id" = "$KNOWN_CPCV_ACCOUNT" ]; then found_known=true; fi
-              break
-            fi
-          done < /tmp/candidates.txt
-          printf 'staging_d1_access=%s\nknown_cpcv_account_access=%s\n' "$found" "$found_known" | tee -a "$report"
-
-          if [ "$found" != 'true' ]; then
-            error_code=$(grep -Eo 'code: [0-9]+' /tmp/d1-probe.txt 2>/dev/null | tail -1 | awk '{print $2}' || true)
-            printf 'last_d1_error_code=%s\n' "${error_code:-none}" | tee -a "$report"
-          fi
           cat "$report"
       - name: Upload sanitized diagnostic
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cloudflare-staging-auth-diagnostic
+          name: cloudflare-staging-permission-diagnostic
           path: auth-diagnostic/report.txt
           if-no-files-found: warn
           retention-days: 30
