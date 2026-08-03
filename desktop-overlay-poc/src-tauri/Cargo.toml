@@ -1,6 +1,6 @@
 [package]
 name = "cpcv-overlay-poc"
-version = "0.1.0"
+version = "0.1.1"
 description = "CPCV transparent overlay proof of concept"
 authors = ["syouziroupc"]
 edition = "2021"
