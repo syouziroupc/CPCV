@@ -1,4 +1,4 @@
-name: Fix translation event ordering
+name: Fix translation event ordering v2
 
 on:
   pull_request:
