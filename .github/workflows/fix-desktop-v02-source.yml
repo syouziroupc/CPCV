@@ -1,0 +1,43 @@
+name: Fix CPCV Desktop v0.2 source
+
+on:
+  push:
+    branches:
+      - agent/desktop-overlay-v0.2
+    paths:
+      - ".github/workflows/fix-desktop-v02-source.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch-source:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/desktop-overlay-v0.2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Apply compiler fixes
+        shell: pwsh
+        run: |
+          $path = "desktop-overlay-poc/src-tauri/src/main.rs"
+          $content = Get-Content $path -Raw
+          $content = $content.Replace('app.state::<Mutex<DesktopState>>()', 'app.state::<Mutex<DesktopState>>().inner()')
+          $content = $content.Replace("payload: &PageLoadPayload<'_>", "payload: PageLoadPayload<'_>")
+          [System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))
+          rustfmt --edition 2021 $path
+
+      - name: Commit source fix
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desktop-overlay-poc/src-tauri/src/main.rs
+          git diff --cached --quiet; if ($LASTEXITCODE -eq 0) { exit 0 }
+          git commit -m "Fix CPCV Desktop v0.2 Rust types"
+          git push origin HEAD:agent/desktop-overlay-v0.2
