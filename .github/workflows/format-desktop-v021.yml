@@ -1,0 +1,40 @@
+name: Format CPCV Desktop v0.2.1
+
+on:
+  push:
+    branches:
+      - agent/desktop-overlay-v0.2.1-fixes
+    paths:
+      - ".github/workflows/format-desktop-v021.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: desktop-overlay-poc
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/desktop-overlay-v0.2.1-fixes
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Format Rust source
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml
+
+      - name: Commit formatted source
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/build.rs src-tauri/src/main.rs
+          if (git diff --cached --quiet) { exit 0 }
+          git commit -m "Format CPCV Desktop v0.2.1 Rust source"
+          git push origin "HEAD:agent/desktop-overlay-v0.2.1-fixes"
