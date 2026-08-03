@@ -1,0 +1,71 @@
+name: CPCV Desktop v0.2 Runtime Diagnostic
+
+on:
+  push:
+    branches:
+      - diagnostic/desktop-v0.2-runtime-check-20260803
+    paths:
+      - ".github/workflows/diagnostic-desktop-v02-runtime.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  windows-runtime-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: desktop-overlay-poc
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: diagnostic/desktop-v0.2-runtime-check-20260803
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt,clippy
+
+      - name: Install desktop dependencies
+        run: npm install
+
+      - name: JavaScript syntax check
+        run: npm run check:ui
+
+      - name: NPM dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Rust format check
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Rust Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Windows debug executable
+        run: npm run build:debug
+
+      - name: Launch smoke test
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "src-tauri/target/debug/cpcv-desktop.exe"
+          $stdout = Join-Path $env:RUNNER_TEMP "cpcv-desktop.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "cpcv-desktop.stderr.log"
+          $process = Start-Process -FilePath $exe -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          Start-Sleep -Seconds 20
+          $process.Refresh()
+          if ($process.HasExited) {
+            Write-Host "CPCV Desktop exited during startup. Exit code: $($process.ExitCode)"
+            if (Test-Path $stdout) { Write-Host "--- stdout ---"; Get-Content $stdout }
+            if (Test-Path $stderr) { Write-Host "--- stderr ---"; Get-Content $stderr }
+            exit 1
+          }
+          Write-Host "CPCV Desktop remained alive for 20 seconds. PID=$($process.Id)"
+          Stop-Process -Id $process.Id -Force
