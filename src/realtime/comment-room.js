@@ -1,7 +1,7 @@
 import { AuthError, isAuthError } from "../auth/errors.js";
 import { authJson } from "../auth/http.js";
 import { persistComment } from "../comments/repository.js";
-import { scheduleAiForComment } from "../ai/processor.js";
+import { dispatchAiJobs, scheduleAiForComment } from "../ai/processor.js";
 import { evaluateCommentFilter } from "../content-filter/repository.js";
 import {
   findRealtimeEventForComment,
@@ -126,7 +126,7 @@ export class CommentRoom {
             organizationId: input.organizationId,
             liveSessionId: input.liveSessionId,
             commentId: result.comment.id
-          });
+          }, { dispatch: false });
         } catch (error) {
           console.error("AI scheduling failed", String(error?.code || error?.name || "ERROR"));
         }
@@ -147,6 +147,12 @@ export class CommentRoom {
         }
       }
       if (event) await this.broadcastEvent(event);
+      if (!result.duplicate && ai.jobs.length) {
+        const task = dispatchAiJobs(this.env, ai.jobs)
+          .catch((error) => console.error("AI queue dispatch failed", String(error?.code || error?.name || "ERROR")));
+        if (typeof this.state?.waitUntil === "function") this.state.waitUntil(task);
+        else void task;
+      }
       return authJson({
         ok: true,
         commentId: result.comment.id,

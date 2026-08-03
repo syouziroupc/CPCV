@@ -17,10 +17,10 @@ import {
   skipAiJob
 } from "./repository.js";
 
-export async function scheduleAiForComment(env, input) {
+export async function scheduleAiForComment(env, input, options = {}) {
   if (!env?.DB_V2) return { jobs: [], dispatched: 0 };
   const jobs = await createAiJobsForComment(env.DB_V2, input);
-  const dispatched = await dispatchAiJobs(env, jobs);
+  const dispatched = options.dispatch === false ? 0 : await dispatchAiJobs(env, jobs);
   return { jobs, dispatched };
 }
 

@@ -295,6 +295,10 @@ async function testHibernationHandlers(h) {
 
 function testViewerClient() {
   const source = readFileSync(resolve(ROOT, "public/assets/viewer.js"), "utf8");
+  const roomSource = readFileSync(resolve(ROOT, "src/realtime/comment-room.js"), "utf8");
+  const acceptMessageSource = roomSource.slice(roomSource.indexOf("async acceptMessage"), roomSource.indexOf("async deliverEvent"));
+  check("translation queue dispatch follows pending marker broadcast", acceptMessageSource.indexOf("markRealtimeCommentTranslationPending") < acceptMessageSource.indexOf("broadcastEvent(event)")
+    && acceptMessageSource.indexOf("broadcastEvent(event)") < acceptMessageSource.indexOf("dispatchAiJobs(this.env, ai.jobs)"));
   check("viewer requests one-time live tickets", source.includes("/live-ticket") && source.includes("lastSequence"));
   check("viewer uses bounded exponential reconnect", source.includes("Math.min(30_000") && source.includes("2 **"));
   check("viewer discards duplicate sequence", source.includes("sequence <= lastAppliedSequence"));
