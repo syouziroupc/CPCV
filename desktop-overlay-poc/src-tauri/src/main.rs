@@ -346,7 +346,7 @@ fn list_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
 }
 
 #[tauri::command]
-fn open_admin(app: AppHandle, origin: String) -> Result<String, String> {
+async fn open_admin(app: AppHandle, origin: String) -> Result<String, String> {
     let origin = normalize_origin(&origin)?;
     let data_directory = shared_webview_data_directory(&app)?;
     destroy_window_if_present(&app, ADMIN_LABEL)?;
@@ -369,7 +369,7 @@ fn open_admin(app: AppHandle, origin: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn open_overlay(
+async fn open_overlay(
     app: AppHandle,
     origin: String,
     session_id: String,

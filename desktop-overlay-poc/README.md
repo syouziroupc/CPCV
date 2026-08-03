@@ -68,3 +68,7 @@ npm run build:poc
 ```
 
 第1段階ではHTTPSポーリング、自動更新、インストーラー、ショートカット、HDMI自動復旧は実装しません。
+
+## v0.1.2 Windowsフリーズ修正
+
+`WebviewWindowBuilder`を同期Tauriコマンドから呼ぶとWindowsでデッドロックする既知問題に対応し、管理画面とオーバーレイの生成コマンドを非同期化しました。
