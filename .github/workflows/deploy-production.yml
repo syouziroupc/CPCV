@@ -26,6 +26,7 @@ jobs:
       - name: Apply patch and restore workflow
         run: |
           node .github/scripts/apply-unknown-language-routing-fix.mjs
+          node .github/scripts/update-unknown-language-tests.mjs
           git checkout origin/master -- .github/workflows/deploy-production.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
