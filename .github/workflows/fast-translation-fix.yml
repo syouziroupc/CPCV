@@ -35,13 +35,32 @@ jobs:
           node .github/scripts/apply-fast-translation-fix.mjs
           python - <<'PY'
           from pathlib import Path
-          path = Path('scripts/test-ai-v2.mjs')
-          text = path.read_text()
-          old = 'const failOpenComment = await createComment(h, "translation_fail_open", "翻訳失敗時は原文を解放する", h.now + 111_000);'
-          new = 'const failOpenComment = await createComment(h, "fail_open", "授業内容を確認しました", h.now + 111_000);'
-          if text.count(old) != 1:
+
+          ai_test = Path('scripts/test-ai-v2.mjs')
+          ai_text = ai_test.read_text()
+          old_case = 'const failOpenComment = await createComment(h, "translation_fail_open", "翻訳失敗時は原文を解放する", h.now + 111_000);'
+          new_case = 'const failOpenComment = await createComment(h, "fail_open", "授業内容を確認しました", h.now + 111_000);'
+          if ai_text.count(old_case) != 1:
               raise SystemExit('FAIL_OPEN_TEST_CASE_NOT_FOUND')
-          path.write_text(text.replace(old, new, 1))
+          ai_test.write_text(ai_text.replace(old_case, new_case, 1))
+
+          usability = Path('scripts/test-v0810-usability.mjs')
+          usability_text = usability.read_text()
+          replacements = {
+              "check('AI queue waits at most one second for a batch', wrangler.includes('max_batch_timeout = 1'));":
+                  "check('AI queue dispatches without batch wait', wrangler.includes('max_batch_timeout = 0'));",
+              "check('AI queue consumer concurrency is bounded', wrangler.includes('max_concurrency = 10'));":
+                  "check('AI queue consumer uses automatic horizontal scaling', !wrangler.includes('max_concurrency ='));",
+              "check('AI queue batch size is bounded', wrangler.includes('max_batch_size = 5'));":
+                  "check('AI queue batch size supports burst throughput', wrangler.includes('max_batch_size = 10'));",
+              "check('translation has a short dedicated timeout', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = \"5000\"'));":
+                  "check('translation has a three-second fail-open timeout', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = \"3000\"'));",
+          }
+          for old, new in replacements.items():
+              if usability_text.count(old) != 1:
+                  raise SystemExit(f'USABILITY_EXPECTATION_NOT_FOUND: {old}')
+              usability_text = usability_text.replace(old, new, 1)
+          usability.write_text(usability_text)
           PY
           rm -f .github/workflows/fast-translation-pr-trigger.yml .github/workflows/fast-translation-pr-clean.yml
           git config user.name github-actions[bot]
@@ -57,6 +76,7 @@ jobs:
           node --check src/ai/processor.js
           node --no-warnings scripts/test-ai-v2.mjs
           node --no-warnings scripts/test-realtime-v2.mjs
+          node --no-warnings scripts/test-v0810-usability.mjs
           node scripts/verify-deployment-config.mjs wrangler.toml
       - name: Full release verification
         run: |
