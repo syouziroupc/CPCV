@@ -1,3 +1,8 @@
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
 use std::{
     fs,
     path::PathBuf,
@@ -16,361 +21,8 @@ const ACTION_HOST: &str = "desktop.cpcv.local";
 const ADMIN_LABEL: &str = "main";
 const OVERLAY_LABEL: &str = "overlay";
 const SHARED_PROFILE_DIRECTORY: &str = "shared-webview-profile";
-
-const ADMIN_INITIALIZATION_SCRIPT: &str = r#"
-(() => {
-  const allowedOrigins = new Set([
-    'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev',
-    'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
-  ]);
-  const adminPathPattern = /^\/admin(?:\/sess_[A-Za-z0-9_-]+)?\/?$/;
-
-  if (window.top !== window) return;
-  if (!allowedOrigins.has(window.location.origin)) return;
-  if (!adminPathPattern.test(window.location.pathname)) return;
-  if (window.__CPCV_DESKTOP_ADMIN__) return;
-
-  const state = {
-    overlayActive: false,
-    commentsVisible: true,
-    qrVisible: false,
-    monitorLabel: '自動選択',
-    environmentLabel: '',
-    message: 'CPCVへ接続しています。',
-    error: false
-  };
-
-  const sessionId = () => {
-    const match = window.location.pathname.match(/^\/admin\/(sess_[A-Za-z0-9_-]+)\/?$/);
-    return match ? match[1] : '';
-  };
-
-  const dispatch = (path, includeSession = false) => {
-    const url = new URL(`https://desktop.cpcv.local/${path}`);
-    if (includeSession) {
-      const id = sessionId();
-      if (!id) return;
-      url.searchParams.set('session', id);
-    }
-    window.location.assign(url.href);
-  };
-
-  const ensureStyle = () => {
-    if (document.getElementById('cpcvDesktopStyle')) return;
-    const style = document.createElement('style');
-    style.id = 'cpcvDesktopStyle';
-    style.textContent = `
-      #cpcvDesktopBar {
-        position: fixed;
-        z-index: 2147483646;
-        right: 18px;
-        bottom: 18px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        max-width: calc(100vw - 36px);
-        padding: 10px 12px;
-        border: 1px solid rgba(255,255,255,.38);
-        background: rgba(15,18,22,.94);
-        box-shadow: 0 12px 32px rgba(0,0,0,.34);
-        color: #fff;
-        font: 600 14px/1.25 "Segoe UI", "Yu Gothic UI", sans-serif;
-      }
-      #cpcvDesktopBar button {
-        min-height: 38px;
-        border: 1px solid rgba(255,255,255,.34);
-        border-radius: 0;
-        padding: 7px 11px;
-        background: #242a31;
-        color: #fff;
-        font: inherit;
-        cursor: pointer;
-      }
-      #cpcvDesktopBar button:hover:not(:disabled) { background: #343c46; }
-      #cpcvDesktopBar button:disabled { opacity: .42; cursor: not-allowed; }
-      #cpcvDesktopBar button[data-active="true"] {
-        background: #fff;
-        color: #111;
-      }
-      #cpcvDesktopStatus {
-        min-width: 170px;
-        max-width: 330px;
-        font-weight: 500;
-        white-space: normal;
-      }
-      #cpcvDesktopStatus[data-error="true"] { color: #ffb7b7; }
-      #cpcvDesktopEnvironment {
-        display: none;
-        border: 1px solid #ffd37a;
-        padding: 4px 7px;
-        color: #ffd37a;
-      }
-      #cpcvDesktopEnvironment:not(:empty) { display: inline-block; }
-      @media (max-width: 840px) {
-        #cpcvDesktopBar {
-          left: 10px;
-          right: 10px;
-          bottom: 10px;
-          flex-wrap: wrap;
-        }
-        #cpcvDesktopStatus { flex: 1 1 100%; max-width: none; }
-      }
-    `;
-    document.documentElement.appendChild(style);
-  };
-
-  const makeButton = (id, label, handler) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.id = id;
-    button.textContent = label;
-    button.addEventListener('click', handler);
-    return button;
-  };
-
-  const ensureBar = () => {
-    if (!document.body) return null;
-    ensureStyle();
-    let bar = document.getElementById('cpcvDesktopBar');
-    if (bar) return bar;
-
-    bar = document.createElement('div');
-    bar.id = 'cpcvDesktopBar';
-    bar.setAttribute('role', 'toolbar');
-    bar.setAttribute('aria-label', 'CPCVデスクトップ投影操作');
-
-    const start = makeButton('cpcvDesktopStart', '投影開始', () => dispatch('overlay/start', true));
-    const stop = makeButton('cpcvDesktopStop', '投影停止', () => dispatch('overlay/stop'));
-    const comments = makeButton('cpcvDesktopComments', 'コメント', () => dispatch('comments/toggle'));
-    const qr = makeButton('cpcvDesktopQr', 'QR', () => dispatch('qr/toggle'));
-    const monitor = makeButton('cpcvDesktopMonitor', '投影先', () => dispatch('monitor/next'));
-    const status = document.createElement('span');
-    status.id = 'cpcvDesktopStatus';
-    const environment = document.createElement('span');
-    environment.id = 'cpcvDesktopEnvironment';
-
-    bar.append(start, stop, comments, qr, monitor, status, environment);
-    document.body.appendChild(bar);
-    return bar;
-  };
-
-  const render = () => {
-    const bar = ensureBar();
-    if (!bar) return;
-    const id = sessionId();
-    const start = document.getElementById('cpcvDesktopStart');
-    const stop = document.getElementById('cpcvDesktopStop');
-    const comments = document.getElementById('cpcvDesktopComments');
-    const qr = document.getElementById('cpcvDesktopQr');
-    const monitor = document.getElementById('cpcvDesktopMonitor');
-    const status = document.getElementById('cpcvDesktopStatus');
-    const environment = document.getElementById('cpcvDesktopEnvironment');
-
-    start.disabled = !id;
-    start.textContent = state.overlayActive ? '投影を再開始' : '投影開始';
-    stop.disabled = !state.overlayActive;
-    comments.disabled = !state.overlayActive;
-    qr.disabled = !state.overlayActive;
-    comments.dataset.active = String(state.commentsVisible);
-    qr.dataset.active = String(state.qrVisible);
-    comments.textContent = state.commentsVisible ? 'コメント ON' : 'コメント OFF';
-    qr.textContent = state.qrVisible ? 'QR ON' : 'QR OFF';
-    monitor.textContent = `投影先: ${state.monitorLabel || '自動選択'}`;
-    status.textContent = !id && !state.error
-      ? '授業を作成または選択すると投影できます。'
-      : state.message;
-    status.dataset.error = String(Boolean(state.error));
-    environment.textContent = state.environmentLabel || '';
-
-    const existingViewerButton = document.getElementById('openViewerButton');
-    if (existingViewerButton) {
-      existingViewerButton.textContent = 'オーバーレイを開始';
-      existingViewerButton.dataset.desktopOverlay = 'true';
-    }
-  };
-
-  document.addEventListener('click', (event) => {
-    const button = event.target instanceof Element
-      ? event.target.closest('#openViewerButton')
-      : null;
-    if (!button) return;
-    const id = sessionId();
-    if (!id) return;
-    event.preventDefault();
-    event.stopImmediatePropagation();
-    dispatch('overlay/start', true);
-  }, true);
-
-  window.__CPCV_DESKTOP_ADMIN__ = {
-    setState(next) {
-      if (next && typeof next === 'object') Object.assign(state, next);
-      render();
-    },
-    render
-  };
-
-  const start = () => {
-    render();
-    window.setInterval(render, 1000);
-  };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start, { once: true });
-  } else {
-    start();
-  }
-})();
-"#;
-
-const OVERLAY_INITIALIZATION_SCRIPT: &str = r#"
-(() => {
-  const allowedOrigins = new Set([
-    'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev',
-    'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
-  ]);
-  const viewerPathPattern = /^\/viewer\/sess_[A-Za-z0-9_-]+\/?$/;
-
-  if (window.top !== window) return;
-  if (!allowedOrigins.has(window.location.origin)) return;
-  if (!viewerPathPattern.test(window.location.pathname)) return;
-  if (window.__CPCV_DESKTOP_OVERLAY__) return;
-
-  const state = {
-    commentsVisible: true,
-    qrVisible: false,
-    diagnosticsVisible: false
-  };
-
-  const hide = (element) => {
-    if (!element) return;
-    element.style.setProperty('display', 'none', 'important');
-  };
-
-  const transparent = (element) => {
-    if (!element) return;
-    element.style.setProperty('background', 'transparent', 'important');
-    element.style.setProperty('background-color', 'transparent', 'important');
-  };
-
-  const clearLayoutOverrides = (element) => {
-    if (!element) return;
-    for (const property of ['inset', 'top', 'right', 'bottom', 'left', 'width', 'height', 'max-height']) {
-      element.style.removeProperty(property);
-    }
-  };
-
-  const ensureDiagnostic = () => {
-    if (!document.body) return null;
-    let badge = document.getElementById('cpcvDesktopOverlayDiagnostic');
-    if (!badge) {
-      badge = document.createElement('div');
-      badge.id = 'cpcvDesktopOverlayDiagnostic';
-      Object.assign(badge.style, {
-        position: 'fixed',
-        zIndex: '2147483647',
-        top: '12px',
-        right: '12px',
-        maxWidth: '420px',
-        padding: '8px 11px',
-        background: 'rgba(0, 0, 0, 0.82)',
-        color: '#ffffff',
-        border: '1px solid rgba(255, 255, 255, 0.7)',
-        font: '600 13px/1.45 Segoe UI, Yu Gothic UI, sans-serif',
-        pointerEvents: 'none',
-        whiteSpace: 'pre-wrap'
-      });
-      document.body.appendChild(badge);
-    }
-    return badge;
-  };
-
-  const apply = () => {
-    transparent(document.documentElement);
-    transparent(document.body);
-    transparent(document.getElementById('viewerStage'));
-
-    if (document.body) {
-      document.body.style.setProperty('margin', '0', 'important');
-      document.body.style.setProperty('overflow', 'hidden', 'important');
-    }
-
-    hide(document.getElementById('pdfStage'));
-    hide(document.getElementById('emptyDocument'));
-    hide(document.getElementById('topBar'));
-    hide(document.getElementById('pdfPageControls'));
-    hide(document.getElementById('qrCorner'));
-
-    const commentPanel = document.getElementById('commentPanel');
-    if (commentPanel) {
-      commentPanel.style.setProperty('position', 'fixed', 'important');
-      commentPanel.style.setProperty('pointer-events', 'none', 'important');
-      transparent(commentPanel);
-
-      if (commentPanel.classList.contains('scroll-mode')) {
-        commentPanel.style.setProperty('inset', '0', 'important');
-        commentPanel.style.setProperty('width', '100vw', 'important');
-        commentPanel.style.setProperty('height', '100vh', 'important');
-        commentPanel.style.setProperty('max-height', 'none', 'important');
-      } else {
-        clearLayoutOverrides(commentPanel);
-      }
-
-      commentPanel.classList.toggle('hidden', !state.commentsVisible);
-    }
-
-    const commentList = document.getElementById('commentList');
-    const scrollLayer = document.getElementById('scrollCommentLayer');
-    if (commentList) commentList.style.setProperty('pointer-events', 'none', 'important');
-    if (scrollLayer) scrollLayer.style.setProperty('pointer-events', 'none', 'important');
-
-    const qrOverlay = document.getElementById('qrOverlay');
-    if (qrOverlay) {
-      qrOverlay.classList.toggle('hidden', !state.qrVisible);
-      qrOverlay.style.setProperty('pointer-events', 'none', 'important');
-    }
-
-    const login = document.getElementById('viewerLogin');
-    const loginVisible = login && !login.classList.contains('hidden');
-    hide(login);
-
-    const diagnostic = ensureDiagnostic();
-    if (diagnostic) {
-      diagnostic.style.display = loginVisible || state.diagnosticsVisible ? 'block' : 'none';
-      const connection = document.getElementById('connectionState')?.textContent?.trim() || '初期化中';
-      diagnostic.textContent = loginVisible
-        ? 'CPCV Overlay: 未認証\n管理画面でログインしてください。'
-        : `CPCV Overlay: ${connection}`;
-    }
-  };
-
-  window.__CPCV_DESKTOP_OVERLAY__ = {
-    setCommentsVisible(value) {
-      state.commentsVisible = Boolean(value);
-      apply();
-    },
-    setQrVisible(value) {
-      state.qrVisible = Boolean(value);
-      apply();
-    },
-    setDiagnosticsVisible(value) {
-      state.diagnosticsVisible = Boolean(value);
-      apply();
-    },
-    apply
-  };
-
-  const start = () => {
-    apply();
-    window.setInterval(apply, 500);
-  };
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', start, { once: true });
-  } else {
-    start();
-  }
-})();
-"#;
+const ADMIN_INITIALIZATION_SCRIPT: &str = include_str!("../scripts/admin.js");
+const OVERLAY_INITIALIZATION_SCRIPT: &str = include_str!("../scripts/overlay.js");
 
 #[derive(Debug)]
 struct DesktopState {
@@ -441,6 +93,28 @@ fn expected_remote_url(url: &tauri::Url, expected_origin: &str) -> bool {
 
 fn action_url(url: &tauri::Url) -> bool {
     url.scheme() == "https" && url.host_str() == Some(ACTION_HOST)
+}
+
+fn action_session(url: &tauri::Url) -> Option<String> {
+    url.query_pairs()
+        .find(|(key, _)| key == "session")
+        .map(|(_, value)| value.into_owned())
+}
+
+fn action_optional_bool(url: &tauri::Url, key: &str) -> Result<Option<bool>, String> {
+    let Some(value) = url
+        .query_pairs()
+        .find(|(query_key, _)| query_key == key)
+        .map(|(_, value)| value.into_owned())
+    else {
+        return Ok(None);
+    };
+
+    match value.as_str() {
+        "1" | "true" => Ok(Some(true)),
+        "0" | "false" => Ok(Some(false)),
+        _ => Err(format!("{key}の値が正しくありません。")),
+    }
 }
 
 fn destroy_window_if_present(app: &AppHandle, label: &str) -> Result<(), String> {
@@ -526,20 +200,13 @@ fn apply_overlay_state(app: &AppHandle) -> Result<(), String> {
         let state = state_lock(app)?;
         (state.comments_visible, state.qr_visible)
     };
+
     overlay_window(app)?
-        .eval(&format!(
+        .eval(format!(
             "window.__CPCV_DESKTOP_OVERLAY__?.setCommentsVisible({comments_visible});\
              window.__CPCV_DESKTOP_OVERLAY__?.setQrVisible({qr_visible});"
         ))
         .map_err(|error| error.to_string())
-}
-
-fn set_status(app: &AppHandle, message: impl Into<String>, error: bool) {
-    if let Ok(mut state) = state_lock(app) {
-        state.message = message.into();
-        state.error = error;
-    }
-    let _ = sync_admin_ui(app);
 }
 
 fn admin_ui_state(app: &AppHandle) -> Result<AdminUiState, String> {
@@ -555,9 +222,11 @@ fn admin_ui_state(app: &AppHandle) -> Result<AdminUiState, String> {
             state.error,
         )
     };
+
     let monitor_label = monitor_index_and_label(app, preferred)
         .map(|(_, label)| label)
         .unwrap_or_else(|_| "未検出".to_string());
+
     Ok(AdminUiState {
         overlay_active,
         comments_visible,
@@ -577,21 +246,56 @@ fn sync_admin_ui(app: &AppHandle) -> Result<(), String> {
     let Some(admin) = app.get_webview_window(ADMIN_LABEL) else {
         return Ok(());
     };
+
     let payload =
         serde_json::to_string(&admin_ui_state(app)?).map_err(|error| error.to_string())?;
     admin
-        .eval(&format!(
+        .eval(format!(
             "window.__CPCV_DESKTOP_ADMIN__?.setState({payload});"
         ))
         .map_err(|error| error.to_string())
 }
 
-async fn open_overlay(app: AppHandle, session_id: String) -> Result<(), String> {
+fn set_status(app: &AppHandle, message: impl Into<String>, error: bool) {
+    if let Ok(mut state) = state_lock(app) {
+        state.message = message.into();
+        state.error = error;
+    }
+    let _ = sync_admin_ui(app);
+}
+
+fn set_comments_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
+    {
+        let mut state = state_lock(app)?;
+        state.comments_visible = visible;
+        state.message = if visible {
+            "コメント表示を有効にしました。".to_string()
+        } else {
+            "コメントを隠しました。".to_string()
+        };
+        state.error = false;
+    }
+
+    if app.get_webview_window(OVERLAY_LABEL).is_some() {
+        apply_overlay_state(app)?;
+    }
+    sync_admin_ui(app)
+}
+
+async fn open_overlay(
+    app: AppHandle,
+    session_id: String,
+    comments_visible: Option<bool>,
+) -> Result<(), String> {
     let session_id = normalize_session_id(&session_id)?;
     let (origin, preferred) = {
-        let state = state_lock(&app)?;
+        let mut state = state_lock(&app)?;
+        if let Some(visible) = comments_visible {
+            state.comments_visible = visible;
+        }
         (state.origin, state.monitor_index)
     };
+
     let (monitor_index, monitor_label) = monitor_index_and_label(&app, preferred)?;
     let monitor = monitor_at(&app, monitor_index)?;
     let data_directory = shared_webview_data_directory(&app)?;
@@ -652,36 +356,17 @@ fn close_overlay(app: &AppHandle) -> Result<(), String> {
     sync_admin_ui(app)
 }
 
-fn toggle_comments(app: &AppHandle) -> Result<(), String> {
-    let visible = {
-        let mut state = state_lock(app)?;
-        state.comments_visible = !state.comments_visible;
-        state.comments_visible
-    };
-    if app.get_webview_window(OVERLAY_LABEL).is_some() {
-        apply_overlay_state(app)?;
-    }
-    set_status(
-        app,
-        if visible {
-            "コメント表示を有効にしました。"
-        } else {
-            "コメントを隠しました。"
-        },
-        false,
-    );
-    Ok(())
-}
-
 fn toggle_qr(app: &AppHandle) -> Result<(), String> {
     let visible = {
         let mut state = state_lock(app)?;
         state.qr_visible = !state.qr_visible;
         state.qr_visible
     };
+
     if app.get_webview_window(OVERLAY_LABEL).is_some() {
         apply_overlay_state(app)?;
     }
+
     set_status(
         app,
         if visible {
@@ -718,6 +403,7 @@ fn next_monitor(app: &AppHandle) -> Result<(), String> {
     if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
         place_overlay(&overlay, &monitor)?;
     }
+
     {
         let mut state = state_lock(app)?;
         state.monitor_index = Some(next_index);
@@ -727,21 +413,20 @@ fn next_monitor(app: &AppHandle) -> Result<(), String> {
     sync_admin_ui(app)
 }
 
-fn action_session(url: &tauri::Url) -> Option<String> {
-    url.query_pairs()
-        .find(|(key, _)| key == "session")
-        .map(|(_, value)| value.into_owned())
-}
-
 async fn handle_admin_action(app: AppHandle, url: tauri::Url) -> Result<(), String> {
     match url.path().trim_matches('/') {
         "overlay/start" => {
             let session =
                 action_session(&url).ok_or_else(|| "授業を選択してください。".to_string())?;
-            open_overlay(app, session).await
+            let comments_visible = action_optional_bool(&url, "comments")?;
+            open_overlay(app, session, comments_visible).await
         }
         "overlay/stop" => close_overlay(&app),
-        "comments/toggle" => toggle_comments(&app),
+        "comments/set" => {
+            let visible = action_optional_bool(&url, "visible")?
+                .ok_or_else(|| "コメント表示状態が指定されていません。".to_string())?;
+            set_comments_visible(&app, visible)
+        }
         "qr/toggle" => toggle_qr(&app),
         "monitor/next" => next_monitor(&app),
         _ => Err("不明なデスクトップ操作です。".to_string()),
@@ -804,6 +489,15 @@ fn main() {
             build_admin_window(app.handle(), origin).map_err(std::io::Error::other)?;
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if window.label() == ADMIN_LABEL
+                && matches!(event, tauri::WindowEvent::CloseRequested { .. })
+            {
+                let app = window.app_handle().clone();
+                let _ = destroy_window_if_present(&app, OVERLAY_LABEL);
+                app.exit(0);
+            }
+        })
         .run(tauri::generate_context!())
         .expect("failed to run CPCV Desktop");
 }
@@ -842,9 +536,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_optional_boolean_actions() {
+        let enabled =
+            tauri::Url::parse("https://desktop.cpcv.local/comments/set?visible=1").unwrap();
+        let disabled =
+            tauri::Url::parse("https://desktop.cpcv.local/comments/set?visible=false").unwrap();
+        let missing = tauri::Url::parse("https://desktop.cpcv.local/comments/set").unwrap();
+        let invalid =
+            tauri::Url::parse("https://desktop.cpcv.local/comments/set?visible=maybe").unwrap();
+
+        assert_eq!(
+            action_optional_bool(&enabled, "visible").unwrap(),
+            Some(true)
+        );
+        assert_eq!(
+            action_optional_bool(&disabled, "visible").unwrap(),
+            Some(false)
+        );
+        assert_eq!(action_optional_bool(&missing, "visible").unwrap(), None);
+        assert!(action_optional_bool(&invalid, "visible").is_err());
+    }
+
+    #[test]
     fn scripts_are_scoped_to_expected_pages() {
         assert!(ADMIN_INITIALIZATION_SCRIPT.contains("window.top !== window"));
         assert!(ADMIN_INITIALIZATION_SCRIPT.contains("adminPathPattern.test"));
+        assert!(ADMIN_INITIALIZATION_SCRIPT.contains("toggleCommentsButton"));
         assert!(OVERLAY_INITIALIZATION_SCRIPT.contains("viewerPathPattern.test"));
     }
 }
