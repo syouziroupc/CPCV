@@ -1,0 +1,11 @@
+name: Fast translation PR trigger
+on:
+  pull_request:
+    branches:
+      - master
+jobs:
+  trigger:
+    if: github.head_ref == 'agent/fix-ai-translation-throughput'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo trigger
