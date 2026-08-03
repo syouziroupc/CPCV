@@ -36,6 +36,7 @@ jobs:
           CONFIGURED_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           LEGACY_ACCOUNT: ${{ secrets.CF_ACCOUNT_ID }}
           VARIABLE_ACCOUNT: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          KNOWN_CPCV_ACCOUNT: 7cea58251b35319648343e0dd9f7cb76
         run: |
           set -euo pipefail
           mkdir -p auth-diagnostic
@@ -61,7 +62,7 @@ jobs:
           fi
 
           : > /tmp/candidates.txt
-          for candidate in "${CONFIGURED_ACCOUNT:-}" "${LEGACY_ACCOUNT:-}" "${VARIABLE_ACCOUNT:-}"; do
+          for candidate in "${CONFIGURED_ACCOUNT:-}" "${LEGACY_ACCOUNT:-}" "${VARIABLE_ACCOUNT:-}" "$KNOWN_CPCV_ACCOUNT"; do
             if [[ "$candidate" =~ ^[0-9a-fA-F]{32}$ ]]; then
               echo "$candidate" >> /tmp/candidates.txt
             fi
@@ -85,6 +86,7 @@ jobs:
           TOML
 
           found=false
+          found_known=false
           while IFS= read -r account_id; do
             [ -n "$account_id" ] || continue
             echo "::add-mask::$account_id"
@@ -92,10 +94,11 @@ jobs:
               npx wrangler d1 migrations list class_comment_db_staging --remote --config /tmp/probe.toml \
               > /tmp/d1-probe.txt 2>&1; then
               found=true
+              if [ "$account_id" = "$KNOWN_CPCV_ACCOUNT" ]; then found_known=true; fi
               break
             fi
           done < /tmp/candidates.txt
-          printf 'staging_d1_access=%s\n' "$found" | tee -a "$report"
+          printf 'staging_d1_access=%s\nknown_cpcv_account_access=%s\n' "$found" "$found_known" | tee -a "$report"
 
           if [ "$found" != 'true' ]; then
             error_code=$(grep -Eo 'code: [0-9]+' /tmp/d1-probe.txt 2>/dev/null | tail -1 | awk '{print $2}' || true)
