@@ -242,6 +242,36 @@ export async function findRealtimeEventForComment(db, input) {
   return row ? realtimeEventResponse(row) : null;
 }
 
+export async function markRealtimeCommentTranslationPending(db, input) {
+  const nowIso = new Date(input.now ?? Date.now()).toISOString();
+  const result = await db.prepare(
+    `UPDATE realtime_events
+     SET payload_json = json_set(
+       payload_json,
+       '$.translationPending', 1,
+       '$.translationTargetLanguage', ?1
+     )
+     WHERE organization_id = ?2 AND live_session_id = ?3
+       AND source_comment_id = ?4 AND event_type = ?5
+       AND expires_at > ?6`
+  ).bind(
+    String(input.targetLanguage || ""),
+    input.organizationId,
+    input.liveSessionId,
+    input.commentId,
+    input.eventType || "message:new",
+    nowIso
+  ).run();
+  if (changesOf(result) !== 1) throw new AuthError(404, "REALTIME_EVENT_NOT_FOUND");
+  return findRealtimeEventForComment(db, {
+    organizationId: input.organizationId,
+    liveSessionId: input.liveSessionId,
+    commentId: input.commentId,
+    eventType: input.eventType || "message:new",
+    now: input.now
+  });
+}
+
 export async function getRealtimeSync(db, input) {
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
   const session = await db.prepare(
@@ -279,7 +309,15 @@ export async function getRealtimeSync(db, input) {
                WHERE t.comment_id = c.id ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS translation_language,
               (SELECT t.display_text FROM translations t
                WHERE t.comment_id = c.id AND t.filter_action IN ('allow', 'mask')
-               ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS translation_text
+               ORDER BY t.created_at DESC, t.id DESC LIMIT 1) AS translation_text,
+              EXISTS (
+                SELECT 1 FROM ai_jobs pending_job
+                WHERE pending_job.organization_id = c.organization_id
+                  AND pending_job.live_session_id = c.live_session_id
+                  AND pending_job.comment_id = c.id
+                  AND pending_job.job_type = 'translation'
+                  AND pending_job.status IN ('queued', 'retry', 'processing')
+              ) AS translation_pending
        FROM comments c
        WHERE c.organization_id = ?1 AND c.live_session_id = ?2
          AND c.moderation_state = 'visible'
@@ -392,7 +430,8 @@ function commentSnapshotResponse(row) {
       targetLanguage: row.translation_language,
       text: row.translation_text,
       label: "AI翻訳"
-    } : null
+    } : null,
+    translationPending: Boolean(row.translation_pending) && !row.translation_text
   };
 }
 

@@ -42,6 +42,8 @@ const joinUrlText = document.getElementById('joinUrlText');
 let queue = [];
 const queuedCommentIds = new Set();
 const shownCommentIds = new Set();
+const pendingTranslationComments = new Map();
+const pendingTranslationTimers = new Map();
 let commentsVisible = true;
 let qrVisible = false;
 let qrCornerVisible = localStorage.getItem('CPCV_QR_CORNER') === '1';
@@ -67,6 +69,7 @@ let csrfToken = '';
 let authenticated = false;
 const MAX_QUEUE = 50;
 const INTERVAL_MS = 2_000;
+const TRANSLATION_WAIT_FALLBACK_MS = 3 * 60_000;
 let displayMs = 60_000;
 let displayMode = 'stack3';
 const SCROLL_LANE_COUNT = 14;
@@ -594,7 +597,10 @@ async function applyRoomSync(payload) {
   if (payload.resetRequired) {
     clearComments({ resetSeen: true });
     await replaceSessionLog(Array.isArray(payload.snapshot) ? payload.snapshot : []);
-    for (const comment of payload.snapshot || []) enqueueComment(comment);
+    for (const comment of payload.snapshot || []) {
+      if (comment.translationPending && !comment.translation?.text) holdCommentForTranslation(comment);
+      else enqueueComment(comment);
+    }
     commitSequence(Number(payload.currentSequence) || 0);
     return;
   }
@@ -615,11 +621,19 @@ async function applyRealtimeEvent(event) {
       console.error('Local log save failed', error);
       setLocalLogState('ログ保存エラー', true);
     });
-    enqueueComment(event, { force: event.type === 'message:restore' });
+    if (event.translationPending && !event.translation?.text) {
+      holdCommentForTranslation(event);
+    } else {
+      enqueueComment(event, { force: event.type === 'message:restore' });
+    }
     return;
   }
   if (event.type === 'translation:ready') {
     await applyTranslation(event);
+    return;
+  }
+  if (event.type === 'translation:unavailable') {
+    await releasePendingTranslation(event.commentId, event.comment);
     return;
   }
   if (event.type === 'message:remove') {
@@ -709,6 +723,42 @@ async function replaceSessionLog(comments) {
   await refreshLocalLogCount();
 }
 
+function clearPendingTranslation(commentId) {
+  const id = String(commentId || '');
+  if (!id) return null;
+  const payload = pendingTranslationComments.get(id) || null;
+  pendingTranslationComments.delete(id);
+  const timer = pendingTranslationTimers.get(id);
+  if (timer) clearTimeout(timer);
+  pendingTranslationTimers.delete(id);
+  return payload;
+}
+
+function holdCommentForTranslation(payload) {
+  const id = String(payload?.id || '');
+  if (!id) return;
+  pendingTranslationComments.set(id, payload);
+  const previousTimer = pendingTranslationTimers.get(id);
+  if (previousTimer) clearTimeout(previousTimer);
+  pendingTranslationTimers.set(id, setTimeout(() => {
+    void releasePendingTranslation(id);
+  }, TRANSLATION_WAIT_FALLBACK_MS));
+}
+
+async function releasePendingTranslation(commentId, fallbackComment = null) {
+  const id = String(commentId || fallbackComment?.id || '');
+  if (!id) return false;
+  let payload = clearPendingTranslation(id) || fallbackComment;
+  if (!payload) {
+    try {
+      payload = (await getSessionLogs()).find((item) => String(item?.id || '') === id) || null;
+    } catch {}
+  }
+  if (!payload) return false;
+  enqueueComment({ ...payload, id, translationPending: false }, { force: payload.type === 'message:restore' });
+  return true;
+}
+
 function enqueueComment(payload, options = {}) {
   if (!commentsVisible || !payload) return;
   const id = String(payload.id || '');
@@ -792,9 +842,28 @@ async function applyTranslation(payload) {
     label: 'AI翻訳'
   } : rawTranslation;
   if (!commentId || !translation?.text) return;
-  queue = queue.map((item) => item?.id === commentId ? { ...item, translation } : item);
+
+  let original = clearPendingTranslation(commentId) || payload?.comment || null;
+  if (!original) {
+    try {
+      original = (await getSessionLogs()).find((item) => String(item?.id || '') === commentId) || null;
+    } catch {}
+  }
+  if (original && !shownCommentIds.has(commentId)
+      && !document.querySelector(`[data-comment-id="${CSS.escape(commentId)}"]`)
+      && !queue.some((item) => String(item?.id || '') === commentId)) {
+    enqueueComment({ ...original, id: commentId, translationPending: false, translation }, {
+      force: original.type === 'message:restore'
+    });
+  }
+
+  queue = queue.map((item) => String(item?.id || '') === commentId ? { ...item, translation } : item);
   for (const element of document.querySelectorAll(`[data-comment-id="${CSS.escape(commentId)}"]`)) {
-    if (element.classList.contains('scroll-comment')) continue;
+    if (element.classList.contains('scroll-comment')) {
+      const originalText = element.dataset.originalText || element.textContent || '';
+      element.textContent = `${originalText} ｜ AI翻訳: ${translation.text}`;
+      continue;
+    }
     let node = element.querySelector('.comment-translation');
     if (!node) {
       node = document.createElement('span');
@@ -809,6 +878,7 @@ async function applyTranslation(payload) {
       const request = store.get(commentId);
       request.addEventListener('success', () => {
         if (request.result) store.put({ ...request.result, translation });
+        else if (original) store.put({ ...original, id: commentId, sessionId, translation, receivedAt: new Date().toISOString() });
       });
     });
     localLogChannel?.postMessage({ type: 'log:updated', sessionId, id: commentId });
@@ -820,6 +890,7 @@ async function applyTranslation(payload) {
 async function removeModeratedComment(commentId) {
   const id = String(commentId || '');
   if (!id) return;
+  clearPendingTranslation(id);
   queue = queue.filter((item) => String(item?.id || '') !== id);
   queuedCommentIds.delete(id);
   shownCommentIds.delete(id);
@@ -1000,6 +1071,9 @@ function showNextComment() {
 function clearComments(options = {}) {
   queue = [];
   queuedCommentIds.clear();
+  pendingTranslationComments.clear();
+  for (const timer of pendingTranslationTimers.values()) clearTimeout(timer);
+  pendingTranslationTimers.clear();
   if (options.resetSeen) shownCommentIds.clear();
   commentList.textContent = '';
   scrollCommentLayer.textContent = '';
@@ -1027,6 +1101,7 @@ function showScrollingComment(payload, lane) {
   comment.className = 'scroll-comment';
   comment.dataset.commentId = String(payload.id || '');
   const original = payload.nickname ? `${payload.nickname}: ${payload.message}` : payload.message;
+  comment.dataset.originalText = original;
   comment.textContent = payload.translation?.text ? `${original} ｜ AI翻訳: ${payload.translation.text}` : original;
   const now = Date.now();
   const laneHeightPercent = 100 / SCROLL_LANE_COUNT;

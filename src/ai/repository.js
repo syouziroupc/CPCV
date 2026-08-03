@@ -192,7 +192,8 @@ export async function loadAiJobContext(db, jobId, now = Date.now()) {
     `SELECT j.id, j.organization_id, j.live_session_id, j.comment_id,
             j.job_type, j.target_language, j.status, j.attempt_count,
             j.run_after, j.claimed_at, j.created_at, j.updated_at,
-            c.message, c.nickname, c.moderation_state, c.retained_until, c.updated_at AS comment_updated_at,
+            c.message, c.nickname, c.moderation_state, c.retained_until,
+            c.created_at AS comment_created_at, c.updated_at AS comment_updated_at,
             c.filter_action, c.filter_ai_required,
             COALESCE(c.detected_language, 'und') AS detected_language,
             COALESCE(c.unsupported_language, 0) AS unsupported_language,
@@ -375,7 +376,8 @@ export async function completeTranslationJob(db, input) {
       commentId: input.job.comment_id,
       targetLanguage: input.job.target_language,
       translation: displayText,
-      label: "AI翻訳"
+      label: "AI翻訳",
+      comment: translationCommentPayload(input.job)
     },
     requiredAiJob: {
       id: input.job.id,
@@ -669,6 +671,21 @@ function sessionSettingsResponse(row) {
     updatedByUserId: row.updated_by_user_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+export function translationCommentPayload(job) {
+  const message = String(job?.message || "");
+  return {
+    id: String(job?.comment_id || ""),
+    nickname: String(job?.nickname || ""),
+    message,
+    messageLength: Array.from(message).length,
+    moderationState: String(job?.moderation_state || "visible"),
+    createdAt: job?.comment_created_at || job?.comment_updated_at || new Date().toISOString(),
+    updatedAt: job?.comment_updated_at || job?.comment_created_at || new Date().toISOString(),
+    retainedUntil: job?.retained_until || null,
+    deletedAt: null
   };
 }
 
