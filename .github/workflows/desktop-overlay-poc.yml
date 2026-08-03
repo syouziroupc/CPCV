@@ -14,10 +14,13 @@ permissions:
 jobs:
   windows-build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     defaults:
       run:
         working-directory: desktop-overlay-poc
+    env:
+      CPCV_WINDOWS_CERTIFICATE_BASE64: ${{ secrets.CPCV_WINDOWS_CERTIFICATE_BASE64 }}
+      CPCV_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.CPCV_WINDOWS_CERTIFICATE_PASSWORD }}
 
     steps:
       - uses: actions/checkout@v4
@@ -25,32 +28,65 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: desktop-overlay-poc/package-lock.json
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt,clippy
 
-      - name: Install Tauri CLI
-        run: npm install
+      - name: Install locked desktop dependencies
+        run: npm ci
 
-      - name: Check bundled fallback JavaScript
+      - name: Check bundled JavaScript
         run: npm run check:ui
 
-      - name: Format Rust source
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+
+      - name: Run Rust Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --locked --all-targets -- -D warnings
 
       - name: Run Rust unit tests
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
-      - name: Compile Rust application
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+      - name: Build Windows release executable
+        run: npm run build:release
 
-      - name: Build Windows debug executable
-        run: npm run build:debug
+      - name: Sign Windows release executable
+        if: env.CPCV_WINDOWS_CERTIFICATE_BASE64 != ''
+        shell: pwsh
+        run: ./scripts/sign-windows.ps1 -Executable "src-tauri/target/release/cpcv-desktop.exe"
+
+      - name: Launch smoke test
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "src-tauri/target/release/cpcv-desktop.exe"
+          $process = Start-Process -FilePath $exe -PassThru
+          Start-Sleep -Seconds 20
+          $process.Refresh()
+          if ($process.HasExited) {
+            Write-Host "CPCV Desktop exited during startup. Exit code: $($process.ExitCode)"
+            exit 1
+          }
+          Write-Host "CPCV Desktop remained alive for 20 seconds. PID=$($process.Id)"
+          Stop-Process -Id $process.Id -Force
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path "src-tauri/target/release/cpcv-desktop.exe"
+          $hash = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  cpcv-desktop.exe" | Set-Content -Encoding ascii "src-tauri/target/release/cpcv-desktop.exe.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cpcv-desktop-v0.2-windows-debug
-          path: desktop-overlay-poc/src-tauri/target/debug/cpcv-desktop.exe
+          name: cpcv-desktop-v0.2.1-windows-release
+          path: |
+            desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe
+            desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe.sha256
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
