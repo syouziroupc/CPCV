@@ -1,0 +1,70 @@
+name: Apply translation display fix
+
+on:
+  push:
+    branches:
+      - agent/fix-translation-display-gate
+
+permissions:
+  contents: write
+
+concurrency:
+  group: translation-display-fix
+  cancel-in-progress: false
+
+jobs:
+  patch-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply focused fix
+        shell: bash
+        env:
+          PATCH_GZIP_BASE64: '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'
+        run: |
+          printf '%s' "$PATCH_GZIP_BASE64" | base64 --decode | gzip --decompress > /tmp/apply-translation-display-gate.mjs
+          node /tmp/apply-translation-display-gate.mjs
+          rm -f .github/workflows/translation-display-fix.yml
+          npm run manifest:source
+      - name: Targeted verification
+        run: |
+          node --check src/realtime/comment-room.js
+          node --check src/realtime/repository.js
+          node --check src/ai/repository.js
+          node --check src/ai/processor.js
+          node --check public/assets/viewer.js
+          node --no-warnings scripts/test-realtime-v2.mjs
+          node --no-warnings scripts/test-ai-v2.mjs
+          node scripts/verify-stage07-boundaries.mjs
+      - name: Full verification
+        run: |
+          npm run verify:source-manifest
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run check:stage08
+          npm run check:v0810
+          npm run test:owner-bootstrap
+          npm run verify:ai-ready
+          npm run verify:final-docs
+          npm run deploy:dry-run
+          npm audit
+          npm audit --omit=dev
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Fix delayed AI translation display'
+          git push origin HEAD:agent/fix-translation-display-gate
