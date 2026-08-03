@@ -6,122 +6,58 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  restore-v022-source:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+  check:
+    name: Full local validation
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - uses: actions/setup-node@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      - name: Restore verified v0.2.2 source
+      - name: Pin npm
+        run: npm install --global npm@11.18.0
+
+      - name: Install dependencies
         shell: bash
         run: |
-          set -euo pipefail
-          base64 --decode .github/v022-bundle.b64 > "$RUNNER_TEMP/v022.tar.gz"
-          echo "f8168fcd8e8dd71a408fffde4485f6d15ff31e78dcd78d633e295bac44db28ce  $RUNNER_TEMP/v022.tar.gz" | sha256sum --check
-          tar -xzf "$RUNNER_TEMP/v022.tar.gz" -C . \
-            ./desktop-overlay-poc/src-tauri/src/main.rs \
-            ./desktop-overlay-poc/src-tauri/scripts/admin.js
-          echo "f85d1c5034637b6b7882f372a2d61a08070697c42ce729e13b05c1a3e9562e6d  desktop-overlay-poc/src-tauri/src/main.rs" | sha256sum --check
-          echo "cbe78e7aef0279fa52114564bb6daad7bd35d6c9ce0682322319fb5e501e6b7f  desktop-overlay-poc/src-tauri/scripts/admin.js" | sha256sum --check
-
-      - name: Align v0.2.2 metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          replacements = {
-              "desktop-overlay-poc/package.json": [('"version": "0.2.1"', '"version": "0.2.2"')],
-              "desktop-overlay-poc/package-lock.json": [('"version": "0.2.1"', '"version": "0.2.2"')],
-              "desktop-overlay-poc/src-tauri/Cargo.toml": [('version = "0.2.1"', 'version = "0.2.2"')],
-              "desktop-overlay-poc/src-tauri/Cargo.lock": [('name = "cpcv-desktop"\nversion = "0.2.1"', 'name = "cpcv-desktop"\nversion = "0.2.2"')],
-              "desktop-overlay-poc/src-tauri/tauri.conf.json": [('"version": "0.2.1"', '"version": "0.2.2"')],
+          set -o pipefail
+          npm ci || {
+            echo "npm ci failed once; clearing the npm cache and retrying."
+            npm cache clean --force
+            npm ci
           }
-          for relative, pairs in replacements.items():
-              path = Path(relative)
-              text = path.read_text(encoding="utf-8")
-              for before, after in pairs:
-                  if before in text:
-                      text = text.replace(before, after)
-                  elif after not in text:
-                      raise SystemExit(f"version marker missing: {relative}")
-              path.write_text(text, encoding="utf-8")
-          Path("desktop-overlay-poc/VERSION").write_text("0.2.2\n", encoding="utf-8")
-          PY
-          cargo fmt --manifest-path desktop-overlay-poc/src-tauri/Cargo.toml
-          node --check desktop-overlay-poc/src-tauri/scripts/admin.js
-          node --check desktop-overlay-poc/src-tauri/scripts/overlay.js
 
-      - name: Regenerate source manifest
-        shell: bash
+      - name: Run static project and documentation checks
         run: |
-          set -euo pipefail
-          paths=(
-            ".github/workflows/desktop-overlay-poc.yml"
-            "desktop-overlay-poc/CONTEST-SOURCE-NOTES.md"
-            "desktop-overlay-poc/README.md"
-            "desktop-overlay-poc/VERSION"
-            "desktop-overlay-poc/package.json"
-            "desktop-overlay-poc/package-lock.json"
-            "desktop-overlay-poc/scripts/sign-windows.ps1"
-            "desktop-overlay-poc/src-tauri/Cargo.toml"
-            "desktop-overlay-poc/src-tauri/Cargo.lock"
-            "desktop-overlay-poc/src-tauri/build.rs"
-            "desktop-overlay-poc/src-tauri/capabilities/default.json"
-            "desktop-overlay-poc/src-tauri/scripts/admin.js"
-            "desktop-overlay-poc/src-tauri/scripts/overlay.js"
-            "desktop-overlay-poc/src-tauri/src/main.rs"
-            "desktop-overlay-poc/src-tauri/tauri.conf.json"
-            "desktop-overlay-poc/ui/app.css"
-            "desktop-overlay-poc/ui/app.js"
-            "desktop-overlay-poc/ui/index.html"
-            "docs/desktop-overlay-stage2-plan.md"
-          )
-          : > SOURCE_SHA256SUMS.override.txt
-          for path in "${paths[@]}"; do
-            test -f "$path"
-            sha256sum "$path" >> SOURCE_SHA256SUMS.override.txt
-          done
+          npm run verify:source-manifest
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run verify:final-docs
 
-      - name: Commit restored source
-        shell: bash
+      - name: Run all implemented-stage tests
+        run: npm run check:stage08
+
+      - name: Run Owner bootstrap regression
+        run: npm run test:owner-bootstrap
+
+      - name: Validate Wrangler bundle
+        run: npm run deploy:dry-run
+
+      - name: Audit all dependencies
         run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            desktop-overlay-poc/src-tauri/src/main.rs \
-            desktop-overlay-poc/src-tauri/scripts/admin.js \
-            desktop-overlay-poc/package.json \
-            desktop-overlay-poc/package-lock.json \
-            desktop-overlay-poc/src-tauri/Cargo.toml \
-            desktop-overlay-poc/src-tauri/Cargo.lock \
-            desktop-overlay-poc/src-tauri/tauri.conf.json \
-            desktop-overlay-poc/VERSION \
-            SOURCE_SHA256SUMS.override.txt
-          if git diff --cached --quiet; then
-            echo "Verified v0.2.2 source is already present."
-            exit 0
-          fi
-          git commit -m "Restore complete CPCV Desktop v0.2.2 source"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          npm audit
+          npm audit --omit=dev
