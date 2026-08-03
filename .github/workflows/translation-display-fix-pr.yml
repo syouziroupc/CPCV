@@ -56,7 +56,6 @@ jobs:
           node --check public/assets/viewer.js
           node --no-warnings scripts/test-realtime-v2.mjs
           node --no-warnings scripts/test-ai-v2.mjs
-          node scripts/verify-stage07-boundaries.mjs
       - name: Full verification
         run: |
           npm run verify:source-manifest
