@@ -6,114 +6,58 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-v022:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+  check:
+    name: Full local validation
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event.pull_request.head.ref }}
-          fetch-depth: 0
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-
-      - uses: actions/setup-node@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      - name: Extract verified v0.2.2 source bundle
+      - name: Pin npm
+        run: npm install --global npm@11.18.0
+
+      - name: Install dependencies
         shell: bash
         run: |
-          set -euo pipefail
-          base64 --decode .github/v022-bundle.b64 > "$RUNNER_TEMP/v022.tar.gz"
-          echo "f8168fcd8e8dd71a408fffde4485f6d15ff31e78dcd78d633e295bac44db28ce  $RUNNER_TEMP/v022.tar.gz" | sha256sum --check
-          tar -xzf "$RUNNER_TEMP/v022.tar.gz" -C .
-
-      - name: Align versions and remove temporary patch files
-        shell: bash
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          replacements = {
-              "desktop-overlay-poc/package.json": [('"version": "0.2.1"', '"version": "0.2.2"')],
-              "desktop-overlay-poc/package-lock.json": [('"version": "0.2.1"', '"version": "0.2.2"')],
-              "desktop-overlay-poc/src-tauri/Cargo.toml": [('version = "0.2.1"', 'version = "0.2.2"')],
-              "desktop-overlay-poc/src-tauri/Cargo.lock": [('name = "cpcv-desktop"\nversion = "0.2.1"', 'name = "cpcv-desktop"\nversion = "0.2.2"')],
-              "desktop-overlay-poc/src-tauri/tauri.conf.json": [('"version": "0.2.1"', '"version": "0.2.2"')],
+          set -o pipefail
+          npm ci || {
+            echo "npm ci failed once; clearing the npm cache and retrying."
+            npm cache clean --force
+            npm ci
           }
-          for relative, pairs in replacements.items():
-              path = Path(relative)
-              text = path.read_text(encoding="utf-8")
-              for before, after in pairs:
-                  if before not in text:
-                      raise SystemExit(f"missing version marker: {relative}: {before}")
-                  text = text.replace(before, after)
-              path.write_text(text, encoding="utf-8")
-          Path("desktop-overlay-poc/VERSION").write_text("0.2.2\n", encoding="utf-8")
-          PY
-          rm -f \
-            .github/v022-bundle.b64 \
-            .github/workflows/patch-desktop-v022-active-sessions.yml \
-            .github/workflows/run-patch-desktop-v022.yml \
-            .github/workflows/run-patch-desktop-v022-v2.yml
 
-      - name: Format and validate modified source
-        shell: bash
+      - name: Run static project and documentation checks
         run: |
-          set -euo pipefail
-          cargo fmt --manifest-path desktop-overlay-poc/src-tauri/Cargo.toml
-          node --check desktop-overlay-poc/src-tauri/scripts/admin.js
-          node --check desktop-overlay-poc/src-tauri/scripts/overlay.js
+          npm run verify:source-manifest
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run verify:final-docs
 
-      - name: Regenerate source manifest
-        shell: bash
-        run: |
-          set -euo pipefail
-          paths=(
-            ".github/workflows/desktop-overlay-poc.yml"
-            "desktop-overlay-poc/CONTEST-SOURCE-NOTES.md"
-            "desktop-overlay-poc/README.md"
-            "desktop-overlay-poc/VERSION"
-            "desktop-overlay-poc/package.json"
-            "desktop-overlay-poc/package-lock.json"
-            "desktop-overlay-poc/scripts/sign-windows.ps1"
-            "desktop-overlay-poc/src-tauri/Cargo.toml"
-            "desktop-overlay-poc/src-tauri/Cargo.lock"
-            "desktop-overlay-poc/src-tauri/build.rs"
-            "desktop-overlay-poc/src-tauri/capabilities/default.json"
-            "desktop-overlay-poc/src-tauri/scripts/admin.js"
-            "desktop-overlay-poc/src-tauri/scripts/overlay.js"
-            "desktop-overlay-poc/src-tauri/src/main.rs"
-            "desktop-overlay-poc/src-tauri/tauri.conf.json"
-            "desktop-overlay-poc/ui/app.css"
-            "desktop-overlay-poc/ui/app.js"
-            "desktop-overlay-poc/ui/index.html"
-            "docs/desktop-overlay-stage2-plan.md"
-          )
-          : > SOURCE_SHA256SUMS.override.txt
-          for path in "${paths[@]}"; do
-            test -f "$path"
-            sha256sum "$path" >> SOURCE_SHA256SUMS.override.txt
-          done
+      - name: Run all implemented-stage tests
+        run: npm run check:stage08
 
-      - name: Commit v0.2.2 source
-        shell: bash
+      - name: Run Owner bootstrap regression
+        run: npm run test:owner-bootstrap
+
+      - name: Validate Wrangler bundle
+        run: npm run deploy:dry-run
+
+      - name: Audit all dependencies
         run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Fix CPCV Desktop active session discovery"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+          npm audit
+          npm audit --omit=dev
