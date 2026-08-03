@@ -20,12 +20,12 @@ check('AI jobs use one queue batch when available', dispatched === 2 && batch.le
 check('queue batch contains job IDs only', batch.every((message) => Object.keys(message.body).join() === 'jobId'), batch);
 
 const wrangler = text('wrangler.toml');
-check('AI queue waits at most one second for a batch', wrangler.includes('max_batch_timeout = 1'));
-check('AI queue consumer concurrency is bounded', wrangler.includes('max_concurrency = 10'));
+check('AI queue dispatches without batch wait', wrangler.includes('max_batch_timeout = 0'));
+check('AI queue consumer uses automatic horizontal scaling', !wrangler.includes('max_concurrency ='));
 check('AI queue worker parallelism is bounded', wrangler.includes('AI_QUEUE_PARALLELISM = "5"'));
-check('AI queue batch size is bounded', wrangler.includes('max_batch_size = 5'));
+check('AI queue batch size supports burst throughput', wrangler.includes('max_batch_size = 10'));
 check('translation uses the dedicated Workers AI model', wrangler.includes('AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"'));
-check('translation has a short dedicated timeout', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = "5000"'));
+check('translation has a three-second fail-open timeout', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = "3000"'));
 
 const processor = text('src/ai/processor.js');
 check('AI queue batch is processed with bounded concurrency', processor.includes('runWithConcurrency(messages, parallelism'));
