@@ -31,14 +31,18 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
-          import re
+          import base64, gzip, re
           from pathlib import Path
           text = Path('.github/workflows/translation-display-fix.yml').read_text()
           match = re.search(r"PATCH_GZIP_BASE64: '([^']+)'", text)
           if not match:
               raise SystemExit('PATCH_PAYLOAD_NOT_FOUND')
-          import base64, gzip
-          Path('/tmp/apply-translation-display-gate.mjs').write_bytes(gzip.decompress(base64.b64decode(match.group(1))))
+          script = gzip.decompress(base64.b64decode(match.group(1))).decode()
+          script = script.replace(
+              "  const matches = [...text.matchAll(pattern)];",
+              "  const flags = pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g';\n  const matches = [...text.matchAll(new RegExp(pattern.source, flags))];"
+          )
+          Path('/tmp/apply-translation-display-gate.mjs').write_text(script)
           PY
           node /tmp/apply-translation-display-gate.mjs
           rm -f .github/workflows/translation-display-fix.yml .github/workflows/translation-display-fix-pr.yml
