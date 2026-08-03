@@ -21,12 +21,24 @@ const ACTION_HOST: &str = "desktop.cpcv.local";
 const ADMIN_LABEL: &str = "main";
 const OVERLAY_LABEL: &str = "overlay";
 const SHARED_PROFILE_DIRECTORY: &str = "shared-webview-profile";
+const PREFERRED_ORIGIN_FILE: &str = "preferred-origin.txt";
 const ADMIN_INITIALIZATION_SCRIPT: &str = include_str!("../scripts/admin.js");
 const OVERLAY_INITIALIZATION_SCRIPT: &str = include_str!("../scripts/overlay.js");
+
+#[derive(Debug, Clone)]
+struct EnvironmentReport {
+    authenticated: bool,
+    sessions_loaded: bool,
+    error: String,
+}
 
 #[derive(Debug)]
 struct DesktopState {
     origin: &'static str,
+    origin_locked: bool,
+    production_report: Option<EnvironmentReport>,
+    staging_report: Option<EnvironmentReport>,
+    environment_scan_complete: bool,
     overlay_active: bool,
     comments_visible: bool,
     qr_visible: bool,
@@ -47,11 +59,31 @@ struct AdminUiState {
     error: bool,
 }
 
-fn selected_origin() -> &'static str {
+fn requested_origin() -> Option<&'static str> {
     if std::env::args().any(|argument| argument == "--staging") {
-        STAGING_ORIGIN
+        Some(STAGING_ORIGIN)
+    } else if std::env::args().any(|argument| argument == "--production") {
+        Some(PRODUCTION_ORIGIN)
     } else {
+        None
+    }
+}
+
+fn origin_key(origin: &str) -> Option<&'static str> {
+    if origin == "production" || origin == PRODUCTION_ORIGIN {
+        Some(PRODUCTION_ORIGIN)
+    } else if origin == "staging" || origin == STAGING_ORIGIN {
+        Some(STAGING_ORIGIN)
+    } else {
+        None
+    }
+}
+
+fn alternate_origin(origin: &str) -> &'static str {
+    if origin == STAGING_ORIGIN {
         PRODUCTION_ORIGIN
+    } else {
+        STAGING_ORIGIN
     }
 }
 
@@ -62,15 +94,41 @@ fn state_lock(app: &AppHandle) -> Result<MutexGuard<'_, DesktopState>, String> {
         .map_err(|_| "デスクトップ状態の取得に失敗しました。".to_string())
 }
 
-fn shared_webview_data_directory(app: &AppHandle) -> Result<PathBuf, String> {
-    let directory = app
-        .path()
+fn app_data_path(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
         .app_data_dir()
-        .map_err(|error| format!("WebView2保存先を取得できません: {error}"))?
-        .join(SHARED_PROFILE_DIRECTORY);
+        .map_err(|error| format!("アプリ保存先を取得できません: {error}"))
+}
+
+fn shared_webview_data_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    let directory = app_data_path(app)?.join(SHARED_PROFILE_DIRECTORY);
     fs::create_dir_all(&directory)
         .map_err(|error| format!("WebView2保存先を作成できません: {error}"))?;
     Ok(directory)
+}
+
+fn preferred_origin_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app_data_path(app)?.join(PREFERRED_ORIGIN_FILE))
+}
+
+fn load_preferred_origin(app: &AppHandle) -> Option<&'static str> {
+    let path = preferred_origin_path(app).ok()?;
+    let value = fs::read_to_string(path).ok()?;
+    origin_key(value.trim())
+}
+
+fn save_preferred_origin(app: &AppHandle, origin: &str) -> Result<(), String> {
+    let path = preferred_origin_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("接続先保存先を作成できません: {error}"))?;
+    }
+    let key = if origin == STAGING_ORIGIN {
+        "staging"
+    } else {
+        "production"
+    };
+    fs::write(path, key).map_err(|error| format!("接続先を保存できません: {error}"))
 }
 
 fn normalize_session_id(session_id: &str) -> Result<String, String> {
@@ -91,22 +149,33 @@ fn expected_remote_url(url: &tauri::Url, expected_origin: &str) -> bool {
     value == expected_origin || value.starts_with(&format!("{expected_origin}/"))
 }
 
+fn expected_cpcv_url(url: &tauri::Url) -> bool {
+    expected_remote_url(url, PRODUCTION_ORIGIN) || expected_remote_url(url, STAGING_ORIGIN)
+}
+
 fn action_url(url: &tauri::Url) -> bool {
     url.scheme() == "https" && url.host_str() == Some(ACTION_HOST)
 }
 
-fn action_session(url: &tauri::Url) -> Option<String> {
+fn action_value(url: &tauri::Url, key: &str) -> Option<String> {
     url.query_pairs()
-        .find(|(key, _)| key == "session")
+        .find(|(query_key, _)| query_key == key)
         .map(|(_, value)| value.into_owned())
 }
 
+fn action_session(url: &tauri::Url) -> Option<String> {
+    action_value(url, "session")
+}
+
+fn action_usize(url: &tauri::Url, key: &str) -> Result<usize, String> {
+    action_value(url, key)
+        .ok_or_else(|| format!("{key}が指定されていません。"))?
+        .parse::<usize>()
+        .map_err(|_| format!("{key}の値が正しくありません。"))
+}
+
 fn action_optional_bool(url: &tauri::Url, key: &str) -> Result<Option<bool>, String> {
-    let Some(value) = url
-        .query_pairs()
-        .find(|(query_key, _)| query_key == key)
-        .map(|(_, value)| value.into_owned())
-    else {
+    let Some(value) = action_value(url, key) else {
         return Ok(None);
     };
 
@@ -210,11 +279,23 @@ fn apply_overlay_state(app: &AppHandle) -> Result<(), String> {
 }
 
 fn admin_ui_state(app: &AppHandle) -> Result<AdminUiState, String> {
-    let (preferred, origin, overlay_active, comments_visible, qr_visible, message, error) = {
+    let (
+        preferred,
+        origin,
+        origin_locked,
+        scan_complete,
+        overlay_active,
+        comments_visible,
+        qr_visible,
+        message,
+        error,
+    ) = {
         let state = state_lock(app)?;
         (
             state.monitor_index,
             state.origin,
+            state.origin_locked,
+            state.environment_scan_complete,
             state.overlay_active,
             state.comments_visible,
             state.qr_visible,
@@ -227,16 +308,20 @@ fn admin_ui_state(app: &AppHandle) -> Result<AdminUiState, String> {
         .map(|(_, label)| label)
         .unwrap_or_else(|_| "未検出".to_string());
 
+    let environment_label = if origin_locked && origin == STAGING_ORIGIN {
+        "試験環境".to_string()
+    } else if !scan_complete {
+        "接続先確認中".to_string()
+    } else {
+        String::new()
+    };
+
     Ok(AdminUiState {
         overlay_active,
         comments_visible,
         qr_visible,
         monitor_label,
-        environment_label: if origin == STAGING_ORIGIN {
-            "試験環境".to_string()
-        } else {
-            String::new()
-        },
+        environment_label,
         message,
         error,
     })
@@ -262,6 +347,31 @@ fn set_status(app: &AppHandle, message: impl Into<String>, error: bool) {
         state.error = error;
     }
     let _ = sync_admin_ui(app);
+}
+
+fn navigate_admin_to_origin(
+    app: &AppHandle,
+    origin: &'static str,
+    message: impl Into<String>,
+) -> Result<(), String> {
+    let admin = app
+        .get_webview_window(ADMIN_LABEL)
+        .ok_or_else(|| "管理画面が見つかりません。".to_string())?;
+    let target = format!("{origin}/admin");
+    let target_json = serde_json::to_string(&target).map_err(|error| error.to_string())?;
+
+    destroy_window_if_present(app, OVERLAY_LABEL)?;
+    {
+        let mut state = state_lock(app)?;
+        state.origin = origin;
+        state.overlay_active = false;
+        state.message = message.into();
+        state.error = false;
+    }
+    admin
+        .eval(format!("window.location.replace({target_json});"))
+        .map_err(|error| error.to_string())?;
+    sync_admin_ui(app)
 }
 
 fn set_comments_visible(app: &AppHandle, visible: bool) -> Result<(), String> {
@@ -413,6 +523,177 @@ fn next_monitor(app: &AppHandle) -> Result<(), String> {
     sync_admin_ui(app)
 }
 
+fn report_message(report: &EnvironmentReport, active_count: usize) -> (String, bool) {
+    if active_count > 0 && report.sessions_loaded {
+        return (
+            format!("進行中の授業を{active_count}件取得しました。"),
+            false,
+        );
+    }
+    if report.authenticated && report.sessions_loaded {
+        return ("進行中の授業はありません。".to_string(), false);
+    }
+    if report.authenticated {
+        let detail = if report.error.is_empty() {
+            "一覧APIの応答を確認できませんでした。"
+        } else {
+            report.error.as_str()
+        };
+        return (format!("進行中の授業を取得できません: {detail}"), true);
+    }
+    if !report.error.is_empty() {
+        return (format!("CPCVへ接続できません: {}", report.error), true);
+    }
+    ("ログインしてください。".to_string(), false)
+}
+
+fn handle_environment_report(app: &AppHandle, url: &tauri::Url) -> Result<(), String> {
+    let environment = action_value(url, "environment")
+        .and_then(|value| origin_key(&value))
+        .ok_or_else(|| "接続環境が正しくありません。".to_string())?;
+    let authenticated = action_optional_bool(url, "authenticated")?
+        .ok_or_else(|| "認証状態が指定されていません。".to_string())?;
+    let sessions_loaded = action_optional_bool(url, "sessionsLoaded")?
+        .ok_or_else(|| "授業取得状態が指定されていません。".to_string())?;
+    let active_count = action_usize(url, "activeCount")?;
+    let error = action_value(url, "error").unwrap_or_default();
+    let report = EnvironmentReport {
+        authenticated,
+        sessions_loaded,
+        error,
+    };
+
+    let (locked, complete, current_origin, alternate_report) = {
+        let mut state = state_lock(app)?;
+        let previous = if environment == STAGING_ORIGIN {
+            state.staging_report.clone()
+        } else {
+            state.production_report.clone()
+        };
+        if previous.as_ref().is_some_and(|previous| {
+            previous.authenticated != report.authenticated
+                || previous.sessions_loaded != report.sessions_loaded
+        }) {
+            state.environment_scan_complete = false;
+            if environment == STAGING_ORIGIN {
+                state.production_report = None;
+            } else {
+                state.staging_report = None;
+            }
+        }
+        if environment == STAGING_ORIGIN {
+            state.staging_report = Some(report.clone());
+        } else {
+            state.production_report = Some(report.clone());
+        }
+        let alternate_report = if environment == STAGING_ORIGIN {
+            state.production_report.clone()
+        } else {
+            state.staging_report.clone()
+        };
+        (
+            state.origin_locked,
+            state.environment_scan_complete,
+            state.origin,
+            alternate_report,
+        )
+    };
+
+    if active_count > 0 && sessions_loaded {
+        let (message, error) = report_message(&report, active_count);
+        {
+            let mut state = state_lock(app)?;
+            state.origin = environment;
+            state.environment_scan_complete = true;
+            state.message = message;
+            state.error = error;
+        }
+        save_preferred_origin(app, environment)?;
+        return sync_admin_ui(app);
+    }
+
+    if locked {
+        let (message, error) = report_message(&report, active_count);
+        {
+            let mut state = state_lock(app)?;
+            state.environment_scan_complete = true;
+            state.message = message;
+            state.error = error;
+        }
+        return sync_admin_ui(app);
+    }
+
+    if complete {
+        return Ok(());
+    }
+
+    if alternate_report.is_none() {
+        return navigate_admin_to_origin(
+            app,
+            alternate_origin(environment),
+            "進行中の授業を自動確認しています。",
+        );
+    }
+
+    let (production, staging) = {
+        let state = state_lock(app)?;
+        (
+            state
+                .production_report
+                .clone()
+                .unwrap_or(EnvironmentReport {
+                    authenticated: false,
+                    sessions_loaded: false,
+                    error: String::new(),
+                }),
+            state.staging_report.clone().unwrap_or(EnvironmentReport {
+                authenticated: false,
+                sessions_loaded: false,
+                error: String::new(),
+            }),
+        )
+    };
+
+    let chosen = if staging.authenticated
+        && staging.sessions_loaded
+        && !(production.authenticated && production.sessions_loaded)
+    {
+        STAGING_ORIGIN
+    } else if production.authenticated
+        && production.sessions_loaded
+        && !(staging.authenticated && staging.sessions_loaded)
+    {
+        PRODUCTION_ORIGIN
+    } else if staging.authenticated && !production.authenticated {
+        STAGING_ORIGIN
+    } else {
+        PRODUCTION_ORIGIN
+    };
+    let chosen_report = if chosen == STAGING_ORIGIN {
+        &staging
+    } else {
+        &production
+    };
+    let (message, error) = report_message(chosen_report, 0);
+
+    {
+        let mut state = state_lock(app)?;
+        state.origin = chosen;
+        state.environment_scan_complete = true;
+        state.message = message.clone();
+        state.error = error;
+    }
+    if chosen_report.authenticated || chosen_report.sessions_loaded {
+        save_preferred_origin(app, chosen)?;
+    }
+
+    if current_origin != chosen {
+        navigate_admin_to_origin(app, chosen, message)
+    } else {
+        sync_admin_ui(app)
+    }
+}
+
 async fn handle_admin_action(app: AppHandle, url: tauri::Url) -> Result<(), String> {
     match url.path().trim_matches('/') {
         "overlay/start" => {
@@ -429,6 +710,7 @@ async fn handle_admin_action(app: AppHandle, url: tauri::Url) -> Result<(), Stri
         }
         "qr/toggle" => toggle_qr(&app),
         "monitor/next" => next_monitor(&app),
+        "environment/report" => handle_environment_report(&app, &url),
         _ => Err("不明なデスクトップ操作です。".to_string()),
     }
 }
@@ -459,7 +741,7 @@ fn build_admin_window(app: &AppHandle, origin: &'static str) -> Result<WebviewWi
                 });
                 return false;
             }
-            expected_remote_url(url, origin)
+            expected_cpcv_url(url)
         })
         .on_page_load(move |_window, payload: PageLoadPayload<'_>| {
             if payload.event() == PageLoadEvent::Finished {
@@ -474,18 +756,29 @@ fn build_admin_window(app: &AppHandle, origin: &'static str) -> Result<WebviewWi
 }
 
 fn main() {
-    let origin = selected_origin();
+    let requested = requested_origin();
     tauri::Builder::default()
         .manage(Mutex::new(DesktopState {
-            origin,
+            origin: PRODUCTION_ORIGIN,
+            origin_locked: requested.is_some(),
+            production_report: None,
+            staging_report: None,
+            environment_scan_complete: false,
             overlay_active: false,
             comments_visible: true,
             qr_visible: false,
             monitor_index: None,
-            message: "ログイン後、授業を作成または選択してください。".to_string(),
+            message: "ログイン後、進行中の授業を自動確認します。".to_string(),
             error: false,
         }))
         .setup(move |app| {
+            let origin = requested
+                .or_else(|| load_preferred_origin(app.handle()))
+                .unwrap_or(PRODUCTION_ORIGIN);
+            {
+                let mut state = state_lock(app.handle()).map_err(std::io::Error::other)?;
+                state.origin = origin;
+            }
             build_admin_window(app.handle(), origin).map_err(std::io::Error::other)?;
             Ok(())
         })
@@ -522,7 +815,10 @@ mod tests {
         let unrelated = tauri::Url::parse("https://example.com/admin").unwrap();
         assert!(expected_remote_url(&production_admin, PRODUCTION_ORIGIN));
         assert!(expected_remote_url(&staging_viewer, STAGING_ORIGIN));
+        assert!(expected_cpcv_url(&production_admin));
+        assert!(expected_cpcv_url(&staging_viewer));
         assert!(!expected_remote_url(&unrelated, PRODUCTION_ORIGIN));
+        assert!(!expected_cpcv_url(&unrelated));
     }
 
     #[test]
@@ -558,10 +854,20 @@ mod tests {
     }
 
     #[test]
+    fn recognizes_origin_keys() {
+        assert_eq!(origin_key("production"), Some(PRODUCTION_ORIGIN));
+        assert_eq!(origin_key("staging"), Some(STAGING_ORIGIN));
+        assert_eq!(alternate_origin(PRODUCTION_ORIGIN), STAGING_ORIGIN);
+        assert_eq!(alternate_origin(STAGING_ORIGIN), PRODUCTION_ORIGIN);
+        assert_eq!(origin_key("invalid"), None);
+    }
+
+    #[test]
     fn scripts_are_scoped_to_expected_pages() {
         assert!(ADMIN_INITIALIZATION_SCRIPT.contains("window.top !== window"));
         assert!(ADMIN_INITIALIZATION_SCRIPT.contains("adminPathPattern.test"));
         assert!(ADMIN_INITIALIZATION_SCRIPT.contains("toggleCommentsButton"));
+        assert!(ADMIN_INITIALIZATION_SCRIPT.contains("environment/report"));
         assert!(OVERLAY_INITIALIZATION_SCRIPT.contains("viewerPathPattern.test"));
     }
 }

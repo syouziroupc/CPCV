@@ -84,7 +84,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cpcv-desktop-v0.2.1-windows-release
+          name: cpcv-desktop-v0.2.2-windows-release
           path: |
             desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe
             desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe.sha256

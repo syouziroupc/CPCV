@@ -24,6 +24,8 @@
   let lastReportedCommentsVisible = null;
   let observedCommentsState = null;
   let commentsObserver = null;
+  let environmentProbeRunning = false;
+  let lastEnvironmentReport = '';
 
   const sessionId = () => {
     const match = window.location.pathname.match(/^\/admin\/(sess_[A-Za-z0-9_-]+)\/?$/);
@@ -108,6 +110,63 @@
       childList: true,
       subtree: true,
       characterData: true
+    });
+  };
+
+  const reportEnvironmentState = async () => {
+    if (environmentProbeRunning) return;
+    if (!/^\/admin\/?$/.test(window.location.pathname)) return;
+
+    environmentProbeRunning = true;
+    let authenticated = false;
+    let sessionsLoaded = false;
+    let activeCount = 0;
+    let error = '';
+
+    try {
+      const authResponse = await fetch('/api/auth/session', {
+        cache: 'no-store',
+        credentials: 'same-origin'
+      });
+      authenticated = authResponse.ok;
+      if (authenticated) {
+        const sessionsResponse = await fetch('/api/private/sessions', {
+          cache: 'no-store',
+          credentials: 'same-origin'
+        });
+        if (!sessionsResponse.ok) {
+          throw new Error(`一覧API HTTP ${sessionsResponse.status}`);
+        }
+        const data = await sessionsResponse.json();
+        if (!Array.isArray(data.sessions)) {
+          throw new Error('一覧APIの応答形式が正しくありません。');
+        }
+        sessionsLoaded = true;
+        activeCount = data.sessions.length;
+      }
+    } catch (cause) {
+      error = cause instanceof Error ? cause.message : String(cause || '取得失敗');
+    } finally {
+      environmentProbeRunning = false;
+    }
+
+    const environment = window.location.origin.includes('-staging.') ? 'staging' : 'production';
+    const signature = [
+      environment,
+      authenticated ? '1' : '0',
+      sessionsLoaded ? '1' : '0',
+      String(activeCount),
+      error
+    ].join(':');
+    if (signature === lastEnvironmentReport) return;
+    lastEnvironmentReport = signature;
+
+    dispatch('environment/report', false, {
+      environment,
+      authenticated: authenticated ? '1' : '0',
+      sessionsLoaded: sessionsLoaded ? '1' : '0',
+      activeCount,
+      error
     });
   };
 
@@ -233,7 +292,7 @@
     qr.textContent = state.qrVisible ? 'QR ON' : 'QR OFF';
     monitor.textContent = `投影先: ${state.monitorLabel || '自動選択'}`;
     status.textContent = !id && !state.error
-      ? '授業を作成または選択すると投影できます。'
+      ? state.message || '授業を作成または選択すると投影できます。'
       : state.message;
     status.dataset.error = String(Boolean(state.error));
     environment.textContent = state.environmentLabel || '';
@@ -267,18 +326,23 @@
       render();
     },
     render,
-    syncCommentsState
+    syncCommentsState,
+    reportEnvironmentState
   };
 
   const start = () => {
     ensureCommentsObserver();
     syncCommentsState();
     render();
+    void reportEnvironmentState();
     window.setInterval(() => {
       ensureCommentsObserver();
       syncCommentsState();
       render();
     }, 500);
+    window.setInterval(() => {
+      void reportEnvironmentState();
+    }, 2000);
   };
 
   if (document.readyState === 'loading') {
