@@ -16,6 +16,8 @@ const controls = {
   diagnosticsVisible: document.getElementById('diagnosticsVisible')
 };
 
+let overlaySyncGeneration = 0;
+
 function log(message, error = false) {
   const time = new Date().toLocaleTimeString('ja-JP', { hour12: false });
   statusLog.textContent = `[${time}] ${message}`;
@@ -29,16 +31,45 @@ function requireInvoke() {
   return invoke;
 }
 
+function safeDecode(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function validSessionCandidate(value) {
+  const candidate = safeDecode(String(value || '').trim());
+  return /^sess_[A-Za-z0-9_-]{5,123}$/.test(candidate) ? candidate : '';
+}
+
 function normalizeSessionId(value) {
-  const raw = value.trim();
+  const raw = String(value || '').trim();
   if (!raw) return '';
+
+  const direct = validSessionCandidate(raw);
+  if (direct) return direct;
+
   try {
     const url = new URL(raw);
-    const parts = url.pathname.split('/').filter(Boolean);
-    return decodeURIComponent(parts.at(-1) || '');
+    for (const key of ['sessionId', 'session_id', 'session']) {
+      const fromQuery = validSessionCandidate(url.searchParams.get(key));
+      if (fromQuery) return fromQuery;
+    }
+    const parts = url.pathname.split('/').filter(Boolean).reverse();
+    for (const part of parts) {
+      const fromPath = validSessionCandidate(part);
+      if (fromPath) return fromPath;
+    }
   } catch {}
-  const parts = raw.split(/[/?#]/).filter(Boolean);
-  return decodeURIComponent(parts.at(-1) || '');
+
+  const embedded = raw.match(/sess_[A-Za-z0-9_-]{5,123}/);
+  return embedded ? validSessionCandidate(embedded[0]) : '';
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function withDisabled(button, operation) {
@@ -66,6 +97,9 @@ async function refreshMonitors() {
     } else if (monitors.length > 1) {
       monitorSelect.value = String(monitors.find((monitor) => !monitor.primary)?.index ?? 0);
     }
+    controls.startOverlayButton.disabled = monitors.length === 0;
+    controls.reapplyTopmostButton.disabled = monitors.length === 0;
+    if (monitors.length === 0) throw new Error('利用可能なディスプレイが見つかりません。');
     log(`${monitors.length}台のディスプレイを取得しました。`);
   });
 }
@@ -84,7 +118,7 @@ controls.refreshMonitorsButton.addEventListener('click', () => {
 controls.startOverlayButton.addEventListener('click', () => {
   withDisabled(controls.startOverlayButton, async () => {
     const sessionId = normalizeSessionId(sessionInput.value);
-    if (!sessionId) throw new Error('授業IDを入力してください。');
+    if (!sessionId) throw new Error('授業IDまたは投影画面URLを正しく入力してください。');
     sessionInput.value = sessionId;
     const monitorIndex = Number.parseInt(monitorSelect.value, 10);
     if (!Number.isInteger(monitorIndex)) throw new Error('投影先ディスプレイを選択してください。');
@@ -94,13 +128,13 @@ controls.startOverlayButton.addEventListener('click', () => {
       monitorIndex
     });
     log(result);
-    await new Promise((resolve) => setTimeout(resolve, 1200));
-    await syncOverlayControls();
+    scheduleOverlayControlSync();
   }).catch((error) => log(error.message || String(error), true));
 });
 
 controls.closeOverlayButton.addEventListener('click', () => {
   withDisabled(controls.closeOverlayButton, async () => {
+    overlaySyncGeneration += 1;
     const result = await requireInvoke()('close_overlay');
     log(result);
   }).catch((error) => log(error.message || String(error), true));
@@ -109,8 +143,10 @@ controls.closeOverlayButton.addEventListener('click', () => {
 controls.reapplyTopmostButton.addEventListener('click', () => {
   withDisabled(controls.reapplyTopmostButton, async () => {
     const monitorIndex = Number.parseInt(monitorSelect.value, 10);
+    if (!Number.isInteger(monitorIndex)) throw new Error('投影先ディスプレイを選択してください。');
     const result = await requireInvoke()('reapply_overlay_window', { monitorIndex });
     log(result);
+    scheduleOverlayControlSync();
   }).catch((error) => log(error.message || String(error), true));
 });
 
@@ -144,6 +180,24 @@ async function syncOverlayControls() {
   await api('set_overlay_qr', { visible: controls.qrVisible.checked });
   await api('set_overlay_click_through', { enabled: controls.clickThrough.checked });
   await api('set_overlay_diagnostics', { visible: controls.diagnosticsVisible.checked });
+}
+
+function scheduleOverlayControlSync() {
+  const generation = ++overlaySyncGeneration;
+  const delays = [0, 400, 1_200, 2_500, 5_000, 8_000];
+  for (const delay of delays) {
+    void (async () => {
+      await sleep(delay);
+      if (generation !== overlaySyncGeneration) return;
+      try {
+        await syncOverlayControls();
+      } catch (error) {
+        if (generation === overlaySyncGeneration && delay === delays.at(-1)) {
+          log(`オーバーレイ設定の同期に失敗しました: ${error.message || String(error)}`, true);
+        }
+      }
+    })();
+  }
 }
 
 window.addEventListener('DOMContentLoaded', () => {
