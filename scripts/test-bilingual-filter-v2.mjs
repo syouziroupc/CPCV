@@ -82,18 +82,18 @@ async function testUnsupportedLanguageEscalation(h) {
   const unsupported = await evaluateCommentFilter(h.db, {
     organizationId: "org_a", liveSessionId: h.sessionId, message: "Hola amigo, gracias"
   });
-  check("non-Japanese and non-English text is held for review", unsupported.action === "review" && unsupported.requiresReview && unsupported.unsupportedLanguage, unsupported);
+  check("unsupported text is visible while AI review runs asynchronously", unsupported.action === "allow" && !unsupported.requiresReview && unsupported.unsupportedLanguage, unsupported);
   check("unsupported language requests AI reference review", unsupported.aiRequired === true, unsupported);
   const mixedShort = await evaluateCommentFilter(h.db, {
     organizationId: "org_a", liveSessionId: h.sessionId, message: "no puta"
   });
-  check("shared short Latin words do not misclassify unsupported text as English", mixedShort.unsupportedLanguage === true && mixedShort.action === "review", mixedShort);
+  check("shared short Latin words remain unsupported without pre-approval blocking", mixedShort.unsupportedLanguage === true && mixedShort.action === "allow" && !mixedShort.requiresReview, mixedShort);
   const clearEnglish = await evaluateCommentFilter(h.db, {
     organizationId: "org_a", liveSessionId: h.sessionId, message: "I agree with this comment"
   });
   check("clear English sentence remains supported", clearEnglish.detectedLanguage === "en" && clearEnglish.unsupportedLanguage === false, clearEnglish);
   const comment = await persist(h, "spanish", "Hola amigo, gracias", unsupported, h.now + 20_000);
-  check("unsupported language comment is persisted pending", comment.moderationState === "pending" && comment.language.unsupported === true, comment);
+  check("unsupported language comment is persisted visible", comment.moderationState === "visible" && comment.language.unsupported === true, comment);
 
   await updateOrganizationAiSettings(h.db, {
     organizationId: "org_a", enabled: true, moderationDailyLimit: 100, translationDailyLimit: 100,
@@ -107,8 +107,8 @@ async function testUnsupportedLanguageEscalation(h) {
   const jobs = await createAiJobsForComment(h.db, {
     organizationId: "org_a", liveSessionId: h.sessionId, commentId: comment.id, now: h.now + 20_300
   });
-  check("unsupported language creates a moderation AI job even when ordinary AI moderation is off", jobs.length === 1 && jobs[0].jobType === "moderation", jobs);
-  check("pending unsupported comment is not translated before human approval", jobs.every((job) => job.jobType !== "translation"), jobs);
+  check("unsupported language creates moderation and translation jobs", jobs.length === 2 && jobs.some((job) => job.jobType === "moderation") && jobs.some((job) => job.jobType === "translation"), jobs);
+  check("visible unsupported comment is translated without human approval", jobs.some((job) => job.jobType === "translation"), jobs);
 }
 
 async function testTranslationPostFilter(h) {
