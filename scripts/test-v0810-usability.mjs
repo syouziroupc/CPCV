@@ -25,7 +25,7 @@ check('AI queue consumer uses automatic horizontal scaling', !wrangler.includes(
 check('AI queue worker parallelism is bounded', wrangler.includes('AI_QUEUE_PARALLELISM = "5"'));
 check('AI queue batch size supports burst throughput', wrangler.includes('max_batch_size = 10'));
 check('translation uses the dedicated Workers AI model', wrangler.includes('AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"'));
-check('translation has a three-second fail-open timeout', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = "3000"'));
+check('translation has a four-second fail-open timeout', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = "4000"'));
 
 const processor = text('src/ai/processor.js');
 check('AI queue batch is processed with bounded concurrency', processor.includes('runWithConcurrency(messages, parallelism'));
