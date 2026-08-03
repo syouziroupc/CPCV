@@ -1,0 +1,81 @@
+name: Run CPCV Desktop v0.2.2 patch
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/run-patch-desktop-v022.yml"
+      - ".github/workflows/patch-desktop-v022-active-sessions.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Extract and run patch script
+        shell: pwsh
+        run: |
+          $workflow = Get-Content ".github/workflows/patch-desktop-v022-active-sessions.yml" -Raw
+          $match = [regex]::Match($workflow, "(?ms)^\s*          @'\r?\n(.*?)\r?\n\s*          '@ \| python -")
+          if (-not $match.Success) { throw "Patch script block was not found." }
+          $lines = $match.Groups[1].Value -split "`r?`n"
+          $normalized = $lines | ForEach-Object {
+            if ($_.StartsWith("          ")) { $_.Substring(10) } else { $_ }
+          }
+          $script = Join-Path $env:RUNNER_TEMP "patch-v022.py"
+          $normalized | Set-Content -Path $script -Encoding utf8
+          python $script
+          cargo fmt --manifest-path desktop-overlay-poc/src-tauri/Cargo.toml
+
+      - name: Regenerate source manifest
+        shell: bash
+        run: |
+          paths=(
+            ".github/workflows/desktop-overlay-poc.yml"
+            "desktop-overlay-poc/CONTEST-SOURCE-NOTES.md"
+            "desktop-overlay-poc/README.md"
+            "desktop-overlay-poc/VERSION"
+            "desktop-overlay-poc/package.json"
+            "desktop-overlay-poc/package-lock.json"
+            "desktop-overlay-poc/scripts/sign-windows.ps1"
+            "desktop-overlay-poc/src-tauri/Cargo.toml"
+            "desktop-overlay-poc/src-tauri/Cargo.lock"
+            "desktop-overlay-poc/src-tauri/build.rs"
+            "desktop-overlay-poc/src-tauri/capabilities/default.json"
+            "desktop-overlay-poc/src-tauri/scripts/admin.js"
+            "desktop-overlay-poc/src-tauri/scripts/overlay.js"
+            "desktop-overlay-poc/src-tauri/src/main.rs"
+            "desktop-overlay-poc/src-tauri/tauri.conf.json"
+            "desktop-overlay-poc/ui/app.css"
+            "desktop-overlay-poc/ui/app.js"
+            "desktop-overlay-poc/ui/index.html"
+            "docs/desktop-overlay-stage2-plan.md"
+          )
+          : > SOURCE_SHA256SUMS.override.txt
+          for path in "${paths[@]}"; do sha256sum "$path" >> SOURCE_SHA256SUMS.override.txt; done
+
+      - name: Commit patch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desktop-overlay-poc .github/workflows/desktop-overlay-poc.yml SOURCE_SHA256SUMS.override.txt
+          if (git diff --cached --quiet) { exit 0 }
+          git commit -m "Fix CPCV Desktop active session discovery"
+          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
