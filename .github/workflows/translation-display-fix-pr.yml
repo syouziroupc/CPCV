@@ -1,4 +1,4 @@
-name: Apply translation display fix on PR
+name: Apply translation display fix on PR v2
 
 on:
   pull_request:
