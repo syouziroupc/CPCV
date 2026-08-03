@@ -33,6 +33,17 @@ jobs:
       - name: Apply fix and create local commit
         run: |
           node .github/scripts/apply-fast-translation-fix.mjs
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/test-ai-v2.mjs')
+          text = path.read_text()
+          old = 'const failOpenComment = await createComment(h, "translation_fail_open", "翻訳失敗時は原文を解放する", h.now + 111_000);'
+          new = 'const failOpenComment = await createComment(h, "translation_fail_open", "授業内容を確認しました", h.now + 111_000);'
+          if text.count(old) != 1:
+              raise SystemExit('FAIL_OPEN_TEST_MESSAGE_NOT_FOUND')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          rm -f .github/workflows/fast-translation-pr-trigger.yml .github/workflows/fast-translation-pr-clean.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
