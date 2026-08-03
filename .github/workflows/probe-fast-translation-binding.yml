@@ -28,7 +28,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Deploy, invoke, validate, and delete temporary AI-binding probe
+      - name: Benchmark dedicated translation binding and delete temporary Worker
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -37,12 +37,12 @@ jobs:
           PROBE_PATH: 4b7e1c2f-9347-4b14-a34d-d88a697d3fc0
         run: |
           set -euo pipefail
-          mkdir -p probe-records
+          mkdir -p probe-records/responses
           cleanup() {
             curl --silent --show-error --request DELETE \
               --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
               "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$PROBE_WORKER" \
-              > probe-records/03-delete.json || true
+              > probe-records/04-delete.json || true
           }
           trap cleanup EXIT
 
@@ -85,42 +85,69 @@ jobs:
 
           npx wrangler deploy --config .ai-binding-probe.toml > probe-records/00-deploy.txt 2>&1
           url="https://$PROBE_WORKER.syouziroupc.workers.dev/$PROBE_PATH"
-          http=000
+          route_http=000
           for attempt in $(seq 1 20); do
             sleep 2
-            http=$(curl --silent --show-error --output probe-records/01-response.json --write-out '%{http_code}' "$url" || true)
-            printf 'attempt=%s http=%s\n' "$attempt" "$http" >> probe-records/02-result.txt
-            if [ "$http" = "200" ] || [ "$http" = "502" ]; then
+            route_http=$(curl --silent --show-error --output probe-records/01-warmup.json --write-out '%{http_code}' "$url" || true)
+            printf 'attempt=%s http=%s\n' "$attempt" "$route_http" >> probe-records/01-route-readiness.txt
+            if [ "$route_http" = "200" ] || [ "$route_http" = "502" ]; then
               break
             fi
           done
-          test "$http" = "200"
+          test "$route_http" = "200"
+
+          for i in $(seq 1 20); do
+            (
+              http=$(curl --silent --show-error --output "probe-records/responses/$i.json" --write-out '%{http_code}' "$url" || true)
+              printf '%s\n' "$http" > "probe-records/responses/$i.http"
+            ) &
+          done
+          wait
 
           node - <<'NODE'
           const fs = require('node:fs');
-          const payload = JSON.parse(fs.readFileSync('probe-records/01-response.json', 'utf8'));
-          const result = payload?.result;
-          const translated = typeof result === 'string' ? result
-            : result?.translated_text ?? result?.translation ?? result?.translatedText
-              ?? result?.translation_text ?? result?.generated_text ?? result?.text ?? '';
-          if (payload?.ok !== true || typeof translated !== 'string' || !translated.trim()) {
-            console.error(JSON.stringify({ ok: payload?.ok, elapsed_ms: payload?.elapsed_ms, result_type: typeof result, result_keys: result && typeof result === 'object' ? Object.keys(result) : [], error_name: payload?.error_name, error_message: payload?.error_message }));
-            process.exit(1);
+          const path = require('node:path');
+          const records = [];
+          for (let i = 1; i <= 20; i += 1) {
+            const http = fs.readFileSync(path.join('probe-records/responses', `${i}.http`), 'utf8').trim();
+            const payload = JSON.parse(fs.readFileSync(path.join('probe-records/responses', `${i}.json`), 'utf8'));
+            const result = payload?.result;
+            const translated = typeof result === 'string' ? result
+              : result?.translated_text ?? result?.translation ?? result?.translatedText
+                ?? result?.translation_text ?? result?.generated_text ?? result?.text ?? '';
+            records.push({
+              i,
+              http,
+              ok: http === '200' && payload?.ok === true && typeof translated === 'string' && Boolean(translated.trim()),
+              elapsed_ms: Number(payload?.elapsed_ms || 0),
+              result_keys: result && typeof result === 'object' ? Object.keys(result).sort() : [],
+              error_name: payload?.error_name || '',
+              error_message: payload?.error_message || ''
+            });
           }
-          fs.appendFileSync('probe-records/02-result.txt', [
-            'binding_call=success',
-            `elapsed_ms=${Number(payload.elapsed_ms || 0)}`,
-            `result_type=${typeof result}`,
-            `result_keys=${result && typeof result === 'object' ? Object.keys(result).sort().join(',') : ''}`,
-            `translated_length=${[...translated.trim()].length}`,
-            ''
-          ].join('\n'));
+          const successes = records.filter((record) => record.ok);
+          const latencies = successes.map((record) => record.elapsed_ms).sort((a, b) => a - b);
+          const percentile = (p) => latencies[Math.min(latencies.length - 1, Math.max(0, Math.ceil(latencies.length * p) - 1))] ?? 0;
+          const summary = {
+            requested: records.length,
+            succeeded: successes.length,
+            failed: records.length - successes.length,
+            p50_ms: percentile(0.50),
+            p95_ms: percentile(0.95),
+            max_ms: latencies.at(-1) ?? 0,
+            result_keys: [...new Set(successes.flatMap((record) => record.result_keys))].sort(),
+            failures: records.filter((record) => !record.ok)
+          };
+          fs.writeFileSync('probe-records/02-concurrency-summary.json', JSON.stringify(summary, null, 2));
+          fs.writeFileSync('probe-records/03-concurrency-records.json', JSON.stringify(records, null, 2));
+          console.log(JSON.stringify(summary));
+          if (summary.succeeded !== 20 || !summary.result_keys.includes('translated_text')) process.exit(1);
           NODE
       - name: Upload probe records
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cpcv-ai-binding-probe-e1130111
+          name: cpcv-ai-binding-concurrency-probe-e1130111
           path: probe-records/
           if-no-files-found: warn
           retention-days: 30
