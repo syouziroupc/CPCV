@@ -1,0 +1,522 @@
+name: Patch CPCV Desktop v0.2.2 active sessions
+
+on:
+  push:
+    branches:
+      - agent/desktop-overlay-v0.2.2-active-sessions
+    paths:
+      - ".github/workflows/patch-desktop-v022-active-sessions.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: agent/desktop-overlay-v0.2.2-active-sessions
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Apply active-session environment detection fix
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+
+          root = Path.cwd()
+          main_path = root / "desktop-overlay-poc/src-tauri/src/main.rs"
+          admin_path = root / "desktop-overlay-poc/src-tauri/scripts/admin.js"
+          main = main_path.read_text(encoding="utf-8")
+          admin = admin_path.read_text(encoding="utf-8")
+
+          def replace_once(text, old, new, label):
+              if old not in text:
+                  raise RuntimeError(f"missing replacement: {label}")
+              return text.replace(old, new, 1)
+
+          main = replace_once(main,
+          '''const SHARED_PROFILE_DIRECTORY: &str = "shared-webview-profile";
+          const ADMIN_INITIALIZATION_SCRIPT: &str = include_str!("../scripts/admin.js");''',
+          '''const SHARED_PROFILE_DIRECTORY: &str = "shared-webview-profile";
+          const PREFERRED_ORIGIN_FILE: &str = "preferred-origin.txt";
+          const ADMIN_INITIALIZATION_SCRIPT: &str = include_str!("../scripts/admin.js");''',
+          "preferred origin constant")
+
+          main = replace_once(main,
+          '''#[derive(Debug)]
+          struct DesktopState {
+              origin: &'static str,
+              overlay_active: bool,''',
+          '''#[derive(Debug, Clone, Copy)]
+          struct EnvironmentReport {
+              authenticated: bool,
+              active_count: usize,
+          }
+
+          #[derive(Debug)]
+          struct DesktopState {
+              origin: &'static str,
+              origin_locked: bool,
+              production_report: Option<EnvironmentReport>,
+              staging_report: Option<EnvironmentReport>,
+              environment_scan_complete: bool,
+              overlay_active: bool,''',
+          "environment state")
+
+          main = replace_once(main,
+          '''fn selected_origin() -> &'static str {
+              if std::env::args().any(|argument| argument == "--staging") {
+                  STAGING_ORIGIN
+              } else {
+                  PRODUCTION_ORIGIN
+              }
+          }
+          ''',
+          '''fn requested_origin() -> Option<&'static str> {
+              if std::env::args().any(|argument| argument == "--staging") {
+                  Some(STAGING_ORIGIN)
+              } else if std::env::args().any(|argument| argument == "--production") {
+                  Some(PRODUCTION_ORIGIN)
+              } else {
+                  None
+              }
+          }
+
+          fn origin_key(origin: &str) -> Option<&'static str> {
+              if origin == "production" || origin == PRODUCTION_ORIGIN {
+                  Some(PRODUCTION_ORIGIN)
+              } else if origin == "staging" || origin == STAGING_ORIGIN {
+                  Some(STAGING_ORIGIN)
+              } else {
+                  None
+              }
+          }
+
+          fn alternate_origin(origin: &str) -> &'static str {
+              if origin == STAGING_ORIGIN {
+                  PRODUCTION_ORIGIN
+              } else {
+                  STAGING_ORIGIN
+              }
+          }
+
+          fn preferred_origin_path(app: &AppHandle) -> Result<PathBuf, String> {
+              app.path()
+                  .app_data_dir()
+                  .map_err(|error| format!("接続先保存先を取得できません: {error}"))
+                  .map(|directory| directory.join(PREFERRED_ORIGIN_FILE))
+          }
+
+          fn load_preferred_origin(app: &AppHandle) -> Option<&'static str> {
+              let path = preferred_origin_path(app).ok()?;
+              let value = fs::read_to_string(path).ok()?;
+              origin_key(value.trim())
+          }
+
+          fn save_preferred_origin(app: &AppHandle, origin: &str) -> Result<(), String> {
+              let path = preferred_origin_path(app)?;
+              if let Some(parent) = path.parent() {
+                  fs::create_dir_all(parent)
+                      .map_err(|error| format!("接続先保存先を作成できません: {error}"))?;
+              }
+              let key = if origin == STAGING_ORIGIN {
+                  "staging"
+              } else {
+                  "production"
+              };
+              fs::write(path, key).map_err(|error| format!("接続先を保存できません: {error}"))
+          }
+          ''',
+          "origin selection")
+
+          main = replace_once(main,
+          '''fn action_optional_bool(url: &tauri::Url, key: &str) -> Result<Option<bool>, String> {''',
+          '''fn action_value(url: &tauri::Url, key: &str) -> Option<String> {
+              url.query_pairs()
+                  .find(|(query_key, _)| query_key == key)
+                  .map(|(_, value)| value.into_owned())
+          }
+
+          fn action_usize(url: &tauri::Url, key: &str) -> Result<usize, String> {
+              action_value(url, key)
+                  .ok_or_else(|| format!("{key}が指定されていません。"))?
+                  .parse::<usize>()
+                  .map_err(|_| format!("{key}の値が正しくありません。"))
+          }
+
+          fn action_optional_bool(url: &tauri::Url, key: &str) -> Result<Option<bool>, String> {''',
+          "action parsers")
+
+          main = replace_once(main,
+          '''fn destroy_window_if_present(app: &AppHandle, label: &str) -> Result<(), String> {''',
+          '''fn expected_cpcv_url(url: &tauri::Url) -> bool {
+              expected_remote_url(url, PRODUCTION_ORIGIN)
+                  || expected_remote_url(url, STAGING_ORIGIN)
+          }
+
+          fn navigate_admin_to_origin(
+              app: &AppHandle,
+              origin: &'static str,
+              message: impl Into<String>,
+          ) -> Result<(), String> {
+              let admin = app
+                  .get_webview_window(ADMIN_LABEL)
+                  .ok_or_else(|| "管理画面が見つかりません。".to_string())?;
+              let target = format!("{origin}/admin");
+              let target_json = serde_json::to_string(&target).map_err(|error| error.to_string())?;
+              {
+                  let mut state = state_lock(app)?;
+                  state.origin = origin;
+                  state.overlay_active = false;
+                  state.message = message.into();
+                  state.error = false;
+              }
+              destroy_window_if_present(app, OVERLAY_LABEL)?;
+              admin
+                  .eval(format!("window.location.replace({target_json});"))
+                  .map_err(|error| error.to_string())?;
+              sync_admin_ui(app)
+          }
+
+          fn destroy_window_if_present(app: &AppHandle, label: &str) -> Result<(), String> {''',
+          "cross environment navigation")
+
+          main = replace_once(main,
+          '''        environment_label: if origin == STAGING_ORIGIN {
+                  "試験環境".to_string()
+              } else {
+                  String::new()
+              },''',
+          '''        environment_label: {
+                  let state = state_lock(app)?;
+                  if state.origin_locked && origin == STAGING_ORIGIN {
+                      "試験環境".to_string()
+                  } else if !state.environment_scan_complete {
+                      "接続先確認中".to_string()
+                  } else {
+                      String::new()
+                  }
+              },''',
+          "environment label")
+
+          marker = '''async fn handle_admin_action(app: AppHandle, url: tauri::Url) -> Result<(), String> {'''
+          helper = '''fn handle_environment_report(app: &AppHandle, url: &tauri::Url) -> Result<(), String> {
+              let environment = action_value(url, "environment")
+                  .and_then(|value| origin_key(&value))
+                  .ok_or_else(|| "接続環境が正しくありません。".to_string())?;
+              let authenticated = action_optional_bool(url, "authenticated")?
+                  .ok_or_else(|| "認証状態が指定されていません。".to_string())?;
+              let active_count = action_usize(url, "activeCount")?;
+              let report = EnvironmentReport {
+                  authenticated,
+                  active_count,
+              };
+
+              let (locked, complete, current_origin, alternate_report) = {
+                  let mut state = state_lock(app)?;
+                  if environment == STAGING_ORIGIN {
+                      state.staging_report = Some(report);
+                  } else {
+                      state.production_report = Some(report);
+                  }
+                  let alternate_report = if environment == STAGING_ORIGIN {
+                      state.production_report
+                  } else {
+                      state.staging_report
+                  };
+                  (
+                      state.origin_locked,
+                      state.environment_scan_complete,
+                      state.origin,
+                      alternate_report,
+                  )
+              };
+
+              if locked {
+                  let mut state = state_lock(app)?;
+                  state.environment_scan_complete = true;
+                  state.message = if active_count > 0 {
+                      format!("進行中の授業を{active_count}件取得しました。")
+                  } else if authenticated {
+                      "進行中の授業はありません。".to_string()
+                  } else {
+                      "ログインしてください。".to_string()
+                  };
+                  state.error = false;
+                  drop(state);
+                  return sync_admin_ui(app);
+              }
+
+              if complete {
+                  return Ok(());
+              }
+
+              if active_count > 0 {
+                  {
+                      let mut state = state_lock(app)?;
+                      state.origin = environment;
+                      state.environment_scan_complete = true;
+                      state.message = format!("進行中の授業を{active_count}件取得しました。");
+                      state.error = false;
+                  }
+                  save_preferred_origin(app, environment)?;
+                  return sync_admin_ui(app);
+              }
+
+              if alternate_report.is_none() {
+                  let alternate = alternate_origin(environment);
+                  return navigate_admin_to_origin(
+                      app,
+                      alternate,
+                      "進行中の授業を自動確認しています。",
+                  );
+              }
+
+              let (production, staging) = {
+                  let state = state_lock(app)?;
+                  (
+                      state.production_report.unwrap_or(EnvironmentReport {
+                          authenticated: false,
+                          active_count: 0,
+                      }),
+                      state.staging_report.unwrap_or(EnvironmentReport {
+                          authenticated: false,
+                          active_count: 0,
+                      }),
+                  )
+              };
+              let chosen = if staging.authenticated && !production.authenticated {
+                  STAGING_ORIGIN
+              } else {
+                  PRODUCTION_ORIGIN
+              };
+
+              {
+                  let mut state = state_lock(app)?;
+                  state.origin = chosen;
+                  state.environment_scan_complete = true;
+                  state.message = if production.authenticated || staging.authenticated {
+                      "進行中の授業はありません。".to_string()
+                  } else {
+                      "ログインしてください。".to_string()
+                  };
+                  state.error = false;
+              }
+              save_preferred_origin(app, chosen)?;
+
+              if current_origin != chosen {
+                  navigate_admin_to_origin(app, chosen, "進行中の授業はありません。")
+              } else {
+                  sync_admin_ui(app)
+              }
+          }
+
+          '''
+          main = replace_once(main, marker, helper + marker, "environment report handler")
+
+          main = replace_once(main,
+          '''        "monitor/next" => next_monitor(&app),
+                  _ => Err("不明なデスクトップ操作です。".to_string()),''',
+          '''        "monitor/next" => next_monitor(&app),
+                  "environment/report" => handle_environment_report(&app, &url),
+                  _ => Err("不明なデスクトップ操作です。".to_string()),''',
+          "environment action")
+
+          main = replace_once(main,
+          '''            expected_remote_url(url, origin)
+                  })''',
+          '''            expected_cpcv_url(url)
+                  })''',
+          "allow both CPCV origins")
+
+          main = replace_once(main,
+          '''fn main() {
+              let origin = selected_origin();
+              tauri::Builder::default()
+                  .manage(Mutex::new(DesktopState {
+                      origin,
+                      overlay_active: false,''',
+          '''fn main() {
+              let requested = requested_origin();
+              tauri::Builder::default()
+                  .manage(Mutex::new(DesktopState {
+                      origin: PRODUCTION_ORIGIN,
+                      origin_locked: requested.is_some(),
+                      production_report: None,
+                      staging_report: None,
+                      environment_scan_complete: false,
+                      overlay_active: false,''',
+          "main state initialization")
+
+          main = replace_once(main,
+          '''        .setup(move |app| {
+                      build_admin_window(app.handle(), origin).map_err(std::io::Error::other)?;
+                      Ok(())
+                  })''',
+          '''        .setup(move |app| {
+                      let origin = requested
+                          .or_else(|| load_preferred_origin(app.handle()))
+                          .unwrap_or(PRODUCTION_ORIGIN);
+                      {
+                          let mut state = state_lock(app.handle()).map_err(std::io::Error::other)?;
+                          state.origin = origin;
+                      }
+                      build_admin_window(app.handle(), origin).map_err(std::io::Error::other)?;
+                      Ok(())
+                  })''',
+          "setup origin")
+
+          main = replace_once(main,
+          '''        assert!(expected_remote_url(&staging_viewer, STAGING_ORIGIN));
+                  assert!(!expected_remote_url(&unrelated, PRODUCTION_ORIGIN));''',
+          '''        assert!(expected_remote_url(&staging_viewer, STAGING_ORIGIN));
+                  assert!(expected_cpcv_url(&production_admin));
+                  assert!(expected_cpcv_url(&staging_viewer));
+                  assert!(!expected_remote_url(&unrelated, PRODUCTION_ORIGIN));
+                  assert!(!expected_cpcv_url(&unrelated));''',
+          "origin tests")
+
+          admin = replace_once(admin,
+          '''  let commentsObserver = null;
+
+            const sessionId = () => {''',
+          '''  let commentsObserver = null;
+            let environmentProbeRunning = false;
+            let lastEnvironmentReport = '';
+
+            const sessionId = () => {''',
+          "admin probe state")
+
+          marker = '''  const ensureStyle = () => {'''
+          probe = '''  const reportEnvironmentState = async () => {
+              if (environmentProbeRunning) return;
+              if (!/^\\/admin\\/?$/.test(window.location.pathname)) return;
+              environmentProbeRunning = true;
+              let authenticated = false;
+              let activeCount = 0;
+              let error = '';
+              try {
+                const authResponse = await fetch('/api/auth/session', {
+                  cache: 'no-store',
+                  credentials: 'same-origin'
+                });
+                authenticated = authResponse.ok;
+                if (authenticated) {
+                  const sessionsResponse = await fetch('/api/private/sessions', {
+                    cache: 'no-store',
+                    credentials: 'same-origin'
+                  });
+                  if (!sessionsResponse.ok) throw new Error(`HTTP_${sessionsResponse.status}`);
+                  const data = await sessionsResponse.json();
+                  activeCount = Array.isArray(data.sessions) ? data.sessions.length : 0;
+                }
+              } catch (cause) {
+                error = cause instanceof Error ? cause.message : String(cause || '取得失敗');
+              } finally {
+                environmentProbeRunning = false;
+              }
+
+              const environment = window.location.origin.includes('-staging.') ? 'staging' : 'production';
+              const signature = `${environment}:${authenticated}:${activeCount}:${error}`;
+              if (signature === lastEnvironmentReport) return;
+              lastEnvironmentReport = signature;
+              dispatch('environment/report', false, {
+                environment,
+                authenticated: authenticated ? '1' : '0',
+                activeCount,
+                error
+              });
+            };
+
+          '''
+          admin = replace_once(admin, marker, probe + marker, "admin probe function")
+
+          admin = replace_once(admin,
+          '''    render();
+              window.setInterval(() => {
+                ensureCommentsObserver();
+                syncCommentsState();
+                render();
+              }, 500);''',
+          '''    render();
+              void reportEnvironmentState();
+              window.setInterval(() => {
+                ensureCommentsObserver();
+                syncCommentsState();
+                render();
+              }, 500);
+              window.setInterval(() => {
+                void reportEnvironmentState();
+              }, 2000);''',
+          "start environment probe")
+
+          main_path.write_text(main, encoding="utf-8")
+          admin_path.write_text(admin, encoding="utf-8")
+
+          replacements = {
+              "desktop-overlay-poc/package.json": [('"version": "0.2.1"', '"version": "0.2.2"')],
+              "desktop-overlay-poc/package-lock.json": [('"version": "0.2.1"', '"version": "0.2.2"')],
+              "desktop-overlay-poc/src-tauri/Cargo.toml": [('version = "0.2.1"', 'version = "0.2.2"')],
+              "desktop-overlay-poc/src-tauri/Cargo.lock": [('name = "cpcv-desktop"\nversion = "0.2.1"', 'name = "cpcv-desktop"\nversion = "0.2.2"')],
+              "desktop-overlay-poc/src-tauri/tauri.conf.json": [('"version": "0.2.1"', '"version": "0.2.2"')],
+              "desktop-overlay-poc/VERSION": [("0.2.1", "0.2.2")],
+              ".github/workflows/desktop-overlay-poc.yml": [("cpcv-desktop-v0.2.1-windows-release", "cpcv-desktop-v0.2.2-windows-release")],
+              "desktop-overlay-poc/README.md": [("# CPCV Desktop v0.2.1", "# CPCV Desktop v0.2.2")]
+          }
+          for relative, pairs in replacements.items():
+              path = root / relative
+              text = path.read_text(encoding="utf-8")
+              for before, after in pairs:
+                  if before not in text:
+                      raise RuntimeError(f"missing version replacement: {relative}: {before}")
+                  text = text.replace(before, after)
+              path.write_text(text, encoding="utf-8")
+          '@ | python -
+
+          cargo fmt --manifest-path desktop-overlay-poc/src-tauri/Cargo.toml
+
+      - name: Regenerate source manifest
+        shell: bash
+        run: |
+          paths=(
+            ".github/workflows/desktop-overlay-poc.yml"
+            "desktop-overlay-poc/CONTEST-SOURCE-NOTES.md"
+            "desktop-overlay-poc/README.md"
+            "desktop-overlay-poc/VERSION"
+            "desktop-overlay-poc/package.json"
+            "desktop-overlay-poc/package-lock.json"
+            "desktop-overlay-poc/scripts/sign-windows.ps1"
+            "desktop-overlay-poc/src-tauri/Cargo.toml"
+            "desktop-overlay-poc/src-tauri/Cargo.lock"
+            "desktop-overlay-poc/src-tauri/build.rs"
+            "desktop-overlay-poc/src-tauri/capabilities/default.json"
+            "desktop-overlay-poc/src-tauri/scripts/admin.js"
+            "desktop-overlay-poc/src-tauri/scripts/overlay.js"
+            "desktop-overlay-poc/src-tauri/src/main.rs"
+            "desktop-overlay-poc/src-tauri/tauri.conf.json"
+            "desktop-overlay-poc/ui/app.css"
+            "desktop-overlay-poc/ui/app.js"
+            "desktop-overlay-poc/ui/index.html"
+            "docs/desktop-overlay-stage2-plan.md"
+          )
+          : > SOURCE_SHA256SUMS.override.txt
+          for path in "${paths[@]}"; do sha256sum "$path" >> SOURCE_SHA256SUMS.override.txt; done
+
+      - name: Commit patch
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add desktop-overlay-poc .github/workflows/desktop-overlay-poc.yml SOURCE_SHA256SUMS.override.txt
+          git commit -m "Fix CPCV Desktop active session discovery"
+          git push origin "HEAD:agent/desktop-overlay-v0.2.2-active-sessions"
