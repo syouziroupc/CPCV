@@ -15,7 +15,7 @@ on:
       - "desktop-overlay-poc/src-tauri/Cargo.toml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   generate:
@@ -27,6 +27,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.head.sha }}
 
       - uses: actions/setup-node@v4
         with:
@@ -48,3 +50,14 @@ jobs:
             desktop-overlay-poc/src-tauri/Cargo.lock
           if-no-files-found: error
           retention-days: 1
+
+      - name: Commit generated lockfiles
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json src-tauri/Cargo.lock
+          if (git diff --cached --quiet) { exit 0 }
+          git commit -m "Lock CPCV Desktop v0.2.1 dependencies"
+          git push origin "HEAD:$env:GITHUB_REF_NAME"
