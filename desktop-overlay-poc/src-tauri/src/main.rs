@@ -11,8 +11,7 @@ use tauri::{
 };
 
 const PRODUCTION_ORIGIN: &str = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev";
-const STAGING_ORIGIN: &str =
-    "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev";
+const STAGING_ORIGIN: &str = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev";
 const ACTION_HOST: &str = "desktop.cpcv.local";
 const ADMIN_LABEL: &str = "main";
 const OVERLAY_LABEL: &str = "overlay";
@@ -406,6 +405,7 @@ fn selected_origin() -> &'static str {
 
 fn state_lock(app: &AppHandle) -> Result<MutexGuard<'_, DesktopState>, String> {
     app.state::<Mutex<DesktopState>>()
+        .inner()
         .lock()
         .map_err(|_| "デスクトップ状態の取得に失敗しました。".to_string())
 }
@@ -425,9 +425,9 @@ fn normalize_session_id(session_id: &str) -> Result<String, String> {
     let normalized = session_id.trim();
     if !(10..=128).contains(&normalized.len())
         || !normalized.starts_with("sess_")
-        || !normalized
-            .chars()
-            .all(|character| character.is_ascii_alphanumeric() || character == '_' || character == '-')
+        || !normalized.chars().all(|character| {
+            character.is_ascii_alphanumeric() || character == '_' || character == '-'
+        })
     {
         return Err("授業IDの形式が正しくありません。".to_string());
     }
@@ -450,7 +450,10 @@ fn destroy_window_if_present(app: &AppHandle, label: &str) -> Result<(), String>
     Ok(())
 }
 
-fn monitor_index_and_label(app: &AppHandle, preferred: Option<usize>) -> Result<(usize, String), String> {
+fn monitor_index_and_label(
+    app: &AppHandle,
+    preferred: Option<usize>,
+) -> Result<(usize, String), String> {
     let monitors = app
         .available_monitors()
         .map_err(|error| error.to_string())?;
@@ -467,11 +470,9 @@ fn monitor_index_and_label(app: &AppHandle, preferred: Option<usize>) -> Result<
         .filter(|index| *index < monitors.len())
         .or_else(|| {
             monitors.iter().position(|monitor| {
-                primary
-                    .as_ref()
-                    .is_some_and(|(position, size)| {
-                        *position != *monitor.position() || *size != *monitor.size()
-                    })
+                primary.as_ref().is_some_and(|(position, size)| {
+                    *position != *monitor.position() || *size != *monitor.size()
+                })
             })
         })
         .unwrap_or(0);
@@ -576,8 +577,8 @@ fn sync_admin_ui(app: &AppHandle) -> Result<(), String> {
     let Some(admin) = app.get_webview_window(ADMIN_LABEL) else {
         return Ok(());
     };
-    let payload = serde_json::to_string(&admin_ui_state(app)?)
-        .map_err(|error| error.to_string())?;
+    let payload =
+        serde_json::to_string(&admin_ui_state(app)?).map_err(|error| error.to_string())?;
     admin
         .eval(&format!(
             "window.__CPCV_DESKTOP_ADMIN__?.setState({payload});"
@@ -703,7 +704,10 @@ fn next_monitor(app: &AppHandle) -> Result<(), String> {
 
     let next_index = {
         let state = state_lock(app)?;
-        state.monitor_index.map(|index| (index + 1) % monitors.len()).unwrap_or(0)
+        state
+            .monitor_index
+            .map(|index| (index + 1) % monitors.len())
+            .unwrap_or(0)
     };
     let monitor = monitor_at(app, next_index)?;
     let label = monitor
@@ -732,8 +736,8 @@ fn action_session(url: &tauri::Url) -> Option<String> {
 async fn handle_admin_action(app: AppHandle, url: tauri::Url) -> Result<(), String> {
     match url.path().trim_matches('/') {
         "overlay/start" => {
-            let session = action_session(&url)
-                .ok_or_else(|| "授業を選択してください。".to_string())?;
+            let session =
+                action_session(&url).ok_or_else(|| "授業を選択してください。".to_string())?;
             open_overlay(app, session).await
         }
         "overlay/stop" => close_overlay(&app),
@@ -772,7 +776,7 @@ fn build_admin_window(app: &AppHandle, origin: &'static str) -> Result<WebviewWi
             }
             expected_remote_url(url, origin)
         })
-        .on_page_load(move |_window, payload: &PageLoadPayload<'_>| {
+        .on_page_load(move |_window, payload: PageLoadPayload<'_>| {
             if payload.event() == PageLoadEvent::Finished {
                 let app = load_app.clone();
                 tauri::async_runtime::spawn(async move {
@@ -797,8 +801,7 @@ fn main() {
             error: false,
         }))
         .setup(move |app| {
-            build_admin_window(app.handle(), origin)
-                .map_err(std::io::Error::other)?;
+            build_admin_window(app.handle(), origin).map_err(std::io::Error::other)?;
             Ok(())
         })
         .run(tauri::generate_context!())
