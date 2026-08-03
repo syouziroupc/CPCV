@@ -1,0 +1,64 @@
+name: Fix unknown language routing
+
+on:
+  push:
+    branches:
+      - agent/fix-unknown-language-review
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fix-unknown-language-routing
+  cancel-in-progress: false
+
+jobs:
+  patch-and-verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-unknown-language-review
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply multilingual routing fix
+        run: |
+          node .github/scripts/apply-unknown-language-routing-fix.mjs
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          npm run manifest:source
+          git add SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt
+          git diff --cached --check
+          git commit -m "Allow unknown languages while AI reviews asynchronously"
+      - name: Targeted tests
+        run: |
+          node --check src/content-filter/language.js
+          node --check src/content-filter/repository.js
+          node --check src/ai/provider.js
+          node scripts/test-multilingual-routing.mjs
+          node --no-warnings scripts/test-content-filter-v2.mjs
+          node --no-warnings scripts/test-bilingual-filter-v2.mjs
+          node --no-warnings scripts/test-ai-v2.mjs
+      - name: Full release gates
+        run: |
+          npm run verify:source-manifest
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run check:stage08
+          npm run check:v0810
+          npm run test:owner-bootstrap
+          npm run verify:ai-ready
+          npm run verify:final-docs
+          npm run deploy:dry-run
+          npm audit
+          npm audit --omit=dev
+      - name: Push verified fix
+        run: git push origin HEAD:agent/fix-unknown-language-review
