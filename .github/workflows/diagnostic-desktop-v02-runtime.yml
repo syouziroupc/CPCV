@@ -6,6 +6,10 @@ on:
       - diagnostic/desktop-v0.2-runtime-check-20260803
     paths:
       - ".github/workflows/diagnostic-desktop-v02-runtime.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/diagnostic-desktop-v02-runtime.yml"
+      - "desktop-overlay-poc/**"
 
 permissions:
   contents: read
@@ -20,8 +24,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: diagnostic/desktop-v0.2-runtime-check-20260803
 
       - uses: actions/setup-node@v4
         with:
