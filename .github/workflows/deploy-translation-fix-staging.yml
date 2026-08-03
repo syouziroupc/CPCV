@@ -1,4 +1,4 @@
-name: Diagnose Cloudflare staging authentication
+name: Deploy translation fix to isolated staging
 
 on:
   push:
@@ -12,75 +12,175 @@ permissions:
   contents: read
 
 concurrency:
-  group: diagnose-cloudflare-staging-auth
-  cancel-in-progress: true
+  group: deploy-translation-fix-staging
+  cancel-in-progress: false
 
 jobs:
-  diagnose:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 120
     steps:
       - name: Checkout exact release commit
         uses: actions/checkout@v4
         with:
           ref: 3c1da6900b0d0d91043b2f823581ca79fd4a31f4
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Diagnose product permissions
+      - name: Materialize isolated staging configuration
         shell: bash
-        env:
-          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ACCOUNT: 7cea58251b35319648343e0dd9f7cb76
+        run: |
+          cat > .cpcv-staging.wrangler.toml <<'TOML'
+          #:schema node_modules/wrangler/config-schema.json
+          name = "class-pdf-comment-viewer-v01-staging"
+          main = "src/index.js"
+          compatibility_date = "2026-06-17"
+          workers_dev = true
+
+          assets = { directory = "./public", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
+
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "class_comment_db_staging"
+          database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"
+
+          [[d1_databases]]
+          binding = "DB_V2"
+          database_name = "class_comment_db_v2_staging"
+          database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"
+          migrations_dir = "migrations-v2"
+
+          [[send_email]]
+          name = "EMAIL"
+          allowed_sender_addresses = [ "noreply@szworld.uk" ]
+
+          [ai]
+          binding = "AI"
+
+          [[queues.producers]]
+          binding = "AI_JOBS_QUEUE"
+          queue = "cpcv-ai-jobs-staging"
+
+          [[queues.consumers]]
+          queue = "cpcv-ai-jobs-staging"
+          max_batch_size = 5
+          max_batch_timeout = 5
+          max_retries = 3
+
+          [[durable_objects.bindings]]
+          name = "COMMENT_ROOM"
+          class_name = "CommentRoom"
+
+          [[migrations]]
+          tag = "v1"
+          new_sqlite_classes = [ "CommentRoom" ]
+
+          [[ratelimits]]
+          name = "AUTH_LOGIN_IP_LIMITER"
+          namespace_id = "826071801"
+          simple = { limit = 20, period = 60 }
+
+          [[ratelimits]]
+          name = "AUTH_LOGIN_ACCOUNT_LIMITER"
+          namespace_id = "826071802"
+          simple = { limit = 10, period = 60 }
+
+          [[ratelimits]]
+          name = "PUBLIC_COMMENT_RATE_LIMITER"
+          namespace_id = "826071803"
+          simple = { limit = 30, period = 60 }
+
+          [[ratelimits]]
+          name = "AUTH_PUBLIC_EMAIL_LIMITER"
+          namespace_id = "826071804"
+          simple = { limit = 30, period = 60 }
+
+          [vars]
+          APP_ENV = "production"
+          AUTH_V2_ENABLED = "1"
+          EMAIL_AUTH_REQUIRED = "0"
+          AI_MODERATION_MODEL = "@cf/zai-org/glm-4.7-flash"
+          AI_MODERATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+          AI_TRANSLATION_MODEL = "@cf/zai-org/glm-4.7-flash"
+          AI_TRANSLATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+          AI_TIMEOUT_MS = "12000"
+          AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          AUTH_EMAIL_FROM = "noreply@szworld.uk"
+          AUTH_EMAIL_REPLY_TO = "noreply@szworld.uk"
+          TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
+
+          [triggers]
+          crons = [ "*/5 * * * *", "17 3 * * *" ]
+          TOML
+          test "$(sha256sum .cpcv-staging.wrangler.toml | cut -d' ' -f1)" = "753bc3a850733c3c07ef6fe3e8b3dbb7ddc86c1a7fe3e9ddd5d0724d7e48efbc"
+          cp .cpcv-staging.wrangler.toml /tmp/cpcv-staging.wrangler.toml
+      - name: Verify revision, separation, and no database migration changes
+        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p auth-diagnostic
-          report=auth-diagnostic/report.txt
-          : > "$report"
-          test -n "${TOKEN:-}"
-          echo "::add-mask::$TOKEN"
-          echo "::add-mask::$ACCOUNT"
-          printf 'token_present=true\n' | tee -a "$report"
-
-          set +e
-          env -u CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN="$TOKEN" \
-            npx wrangler whoami --json > /tmp/whoami.json 2>/tmp/whoami.err
-          whoami_exit=$?
-          CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" \
-            npx wrangler deployments list --name class-pdf-comment-viewer-v01-staging --json \
-            > /tmp/workers.json 2>/tmp/workers.err
-          workers_exit=$?
-          CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" \
-            npx wrangler d1 list --json > /tmp/d1.json 2>/tmp/d1.err
-          d1_exit=$?
-          CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$ACCOUNT" \
-            npx wrangler queues info cpcv-ai-jobs-staging > /tmp/queue.txt 2>/tmp/queue.err
-          queue_exit=$?
-          set -e
-
-          whoami_json=false
-          workers_json=false
-          d1_json=false
-          jq -e . /tmp/whoami.json >/dev/null 2>&1 && whoami_json=true
-          jq -e . /tmp/workers.json >/dev/null 2>&1 && workers_json=true
-          jq -e . /tmp/d1.json >/dev/null 2>&1 && d1_json=true
-          printf 'wrangler_whoami_exit=%s\nwrangler_whoami_json=%s\nworkers_read_exit=%s\nworkers_json=%s\nd1_list_exit=%s\nd1_json=%s\nqueue_info_exit=%s\n' \
-            "$whoami_exit" "$whoami_json" "$workers_exit" "$workers_json" "$d1_exit" "$d1_json" "$queue_exit" | tee -a "$report"
-
-          for pair in workers:/tmp/workers.err d1:/tmp/d1.err queue:/tmp/queue.err; do
-            label=${pair%%:*}
-            path=${pair#*:}
-            code=$(grep -Eo 'code: [0-9]+' "$path" 2>/dev/null | tail -1 | awk '{print $2}' || true)
-            printf '%s_error_code=%s\n' "$label" "${code:-none}" | tee -a "$report"
-          done
-          cat "$report"
-      - name: Upload sanitized diagnostic
+          test "$(git rev-parse HEAD)" = "3c1da6900b0d0d91043b2f823581ca79fd4a31f4"
+          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+          node scripts/verify-environment-separation.mjs wrangler.toml .cpcv-staging.wrangler.toml
+          if git diff --name-only 8c394b793031e640e94b120dfef32e63db83502b 3c1da6900b0d0d91043b2f823581ca79fd4a31f4 -- migrations migrations-v2 | grep -q .; then
+            echo 'Database migration files changed; refusing staging deployment.'
+            exit 1
+          fi
+          echo 'database_migration_changes=false'
+          npx wrangler deploy --dry-run --config .cpcv-staging.wrangler.toml
+      - name: Run complete release validation
+        run: |
+          npm run verify:source-manifest
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run check:stage08
+          npm run check:v0810
+          npm run test:owner-bootstrap
+          npm run verify:ai-ready
+          npm run verify:final-docs
+          npm audit
+          npm audit --omit=dev
+      - name: Restore verified staging configuration
+        shell: bash
+        run: |
+          cp /tmp/cpcv-staging.wrangler.toml .cpcv-staging.wrangler.toml
+          test "$(sha256sum .cpcv-staging.wrangler.toml | cut -d' ' -f1)" = "753bc3a850733c3c07ef6fe3e8b3dbb7ddc86c1a7fe3e9ddd5d0724d7e48efbc"
+          mkdir -p staging-records
+          printf 'commit=%s\nconfig_sha256=%s\ndatabase_migration_changes=false\n' \
+            '3c1da6900b0d0d91043b2f823581ca79fd4a31f4' \
+            '753bc3a850733c3c07ef6fe3e8b3dbb7ddc86c1a7fe3e9ddd5d0724d7e48efbc' \
+            > staging-records/00-metadata.txt
+      - name: Deploy exact release commit to isolated staging
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 7cea58251b35319648343e0dd9f7cb76
+        run: |
+          set -o pipefail
+          npx wrangler deploy --config .cpcv-staging.wrangler.toml 2>&1 | tee staging-records/01-worker-deploy.txt
+      - name: Smoke deployed staging assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
+          curl --fail --silent --show-error --location "$base/" -o staging-records/02-root.html
+          curl --fail --silent --show-error --location "$base/viewer/" -o staging-records/03-viewer.html
+          grep -q 'viewer.js?v=0.8.10-t1' staging-records/03-viewer.html
+          curl --fail --silent --show-error --location "$base/assets/viewer.js?v=0.8.10-t1" -o staging-records/04-viewer.js
+          grep -q 'holdCommentForTranslation' staging-records/04-viewer.js
+          grep -q 'translation:unavailable' staging-records/04-viewer.js
+          grep -q 'translationPending' staging-records/04-viewer.js
+          printf 'completed_at_utc=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> staging-records/00-metadata.txt
+          find staging-records -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > staging-records/SHA256SUMS.txt
+      - name: Upload staging deployment records
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cloudflare-staging-permission-diagnostic
-          path: auth-diagnostic/report.txt
+          name: cpcv-translation-fix-staging-3c1da690
+          path: staging-records/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
