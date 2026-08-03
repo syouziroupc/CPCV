@@ -1,0 +1,45 @@
+name: Generate CPCV Desktop lockfiles
+
+on:
+  push:
+    branches:
+      - agent/desktop-overlay-v0.2.1-fixes
+    paths:
+      - ".github/workflows/generate-desktop-lockfiles.yml"
+      - "desktop-overlay-poc/package.json"
+      - "desktop-overlay-poc/src-tauri/Cargo.toml"
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: desktop-overlay-poc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Generate npm lockfile
+        run: npm install --package-lock-only
+
+      - name: Generate Cargo lockfile
+        run: cargo generate-lockfile --manifest-path src-tauri/Cargo.toml
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-desktop-v0.2.1-lockfiles
+          path: |
+            desktop-overlay-poc/package-lock.json
+            desktop-overlay-poc/src-tauri/Cargo.lock
+          if-no-files-found: error
+          retention-days: 1
