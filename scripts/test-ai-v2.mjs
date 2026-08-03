@@ -186,8 +186,25 @@ async function testFallbackAndAtomicTranslation(h) {
 
   await updateSessionAiSettings(h.db, {
     organizationId: "org_a", liveSessionId: h.sessionId,
-    moderationEnabled: true, translationEnabled: true, targetLanguage: "en",
+    moderationEnabled: false, translationEnabled: true, targetLanguage: "en",
     actorUserId: "usr_teacher_a", now: h.now + 110_000
+  });
+  const failOpenComment = await createComment(h, "fail_open", "授業内容を確認しました", h.now + 111_000);
+  const [failOpenJob] = await createAiJobsForComment(h.db, {
+    organizationId: "org_a", liveSessionId: h.sessionId, commentId: failOpenComment.id, now: h.now + 111_100
+  });
+  h.ai.fail = true;
+  const failOpenOutcome = await processAiJob(h.env, failOpenJob.id, { now: h.now + 111_200 });
+  h.ai.fail = false;
+  const failOpenRow = h.row("SELECT status,attempt_count,last_error_code FROM ai_jobs WHERE id=?1", failOpenJob.id);
+  const failOpenEvent = h.rows("SELECT payload_json FROM realtime_events WHERE source_comment_id=?1 ORDER BY sequence", failOpenComment.id)
+    .map((row) => JSON.parse(row.payload_json)).find((item) => item.type === "translation:unavailable");
+  check("translation provider failure fails open after one attempt", failOpenOutcome.retry === false && failOpenRow?.status === "failed" && failOpenRow.attempt_count === 1 && failOpenEvent?.comment?.message === failOpenComment.message, { failOpenOutcome, failOpenRow, failOpenEvent });
+
+  await updateSessionAiSettings(h.db, {
+    organizationId: "org_a", liveSessionId: h.sessionId,
+    moderationEnabled: true, translationEnabled: true, targetLanguage: "en",
+    actorUserId: "usr_teacher_a", now: h.now + 112_000
   });
 }
 
@@ -266,6 +283,17 @@ async function testProviderResponseShapes() {
     AI: { async run() { return { choices: [{ message: { content: [{ type: "text", text: "Result: " }, { type: "text", text: "{\"translation\":\"Array content\"}" }] } }] }; } }
   }, { message: "原文", targetLanguage: "en" });
   check("translation parser accepts content arrays with surrounding text", arrayContent.translatedText === "Array content", arrayContent);
+
+  let invalidIsTerminal = false;
+  try {
+    await runTranslationModel({
+      AI_TRANSLATION_MODEL: "test-model",
+      AI: { async run() { return { response: { invalid: true } }; } }
+    }, { message: "原文", sourceLanguage: "ja", targetLanguage: "en" });
+  } catch (error) {
+    invalidIsTerminal = error?.aiCode === "AI_RESPONSE_INVALID" && error?.retryable === false;
+  }
+  check("invalid translation output is terminal instead of entering a slow retry loop", invalidIsTerminal);
 }
 
 async function testQueueBehavior(h) {
@@ -318,9 +346,11 @@ function testValidationAndClientBoundaries() {
   check("unsupported target languages are rejected", invalidLanguage);
   const admin = readFileSync(resolve(ROOT, "public/assets/admin.js"), "utf8");
   const viewer = readFileSync(resolve(ROOT, "public/assets/viewer.js"), "utf8");
+  const wrangler = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
   check("admin labels AI verdict as reference only", admin.includes("AI参考") && !admin.includes("AI自動削除"));
   check("viewer labels translated content", viewer.includes("AI翻訳:") && viewer.includes("translation:ready"));
   check("viewer never replaces original message with translation", viewer.includes("text.textContent = payload.message") && viewer.includes("card.appendChild(translation)"));
+  check("translation queue uses immediate autoscaling delivery", wrangler.includes("max_batch_timeout = 0") && !wrangler.includes("max_concurrency =") && wrangler.includes('AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"') && !wrangler.includes("AI_TRANSLATION_FALLBACK_MODEL"), wrangler);
 }
 
 async function createComment(h, suffix, message, now) {
@@ -373,9 +403,8 @@ function createHarness() {
     AI_MODERATION_MODEL: "@cf/zai-org/glm-4.7-flash",
     AI_MODERATION_FALLBACK_MODEL: "@cf/qwen/qwen3-30b-a3b-fp8",
     AI_TRANSLATION_MODEL: "@cf/meta/m2m100-1.2b",
-    AI_TRANSLATION_FALLBACK_MODEL: "@cf/zai-org/glm-4.7-flash",
     AI_GATEWAY_ID: "cpcv-stage7", AI_TIMEOUT_MS: "12000",
-    AI_TRANSLATION_TIMEOUT_MS: "5000", AI_TRANSLATION_FALLBACK_TIMEOUT_MS: "5000"
+    AI_TRANSLATION_TIMEOUT_MS: "3000"
   };
   return {
     sqlite, db, ai, queue, room, env, now, createdAt, sessionId: "sess_ai",

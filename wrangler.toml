@@ -30,10 +30,9 @@ queue = "cpcv-ai-jobs"
 
 [[queues.consumers]]
 queue = "cpcv-ai-jobs"
-max_batch_size = 5
-max_batch_timeout = 1
+max_batch_size = 10
+max_batch_timeout = 0
 max_retries = 3
-max_concurrency = 10
 
 [[durable_objects.bindings]]
 name = "COMMENT_ROOM"
@@ -70,10 +69,8 @@ EMAIL_AUTH_REQUIRED = "0"
 AI_MODERATION_MODEL = "@cf/zai-org/glm-4.7-flash"
 AI_MODERATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
 AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"
-AI_TRANSLATION_FALLBACK_MODEL = "@cf/zai-org/glm-4.7-flash"
 AI_TIMEOUT_MS = "12000"
-AI_TRANSLATION_TIMEOUT_MS = "5000"
-AI_TRANSLATION_FALLBACK_TIMEOUT_MS = "5000"
+AI_TRANSLATION_TIMEOUT_MS = "3000"
 AI_QUEUE_PARALLELISM = "5"
 AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"

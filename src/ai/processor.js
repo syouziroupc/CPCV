@@ -227,7 +227,7 @@ export async function processAiJob(env, jobId, options = {}) {
       return { retry: false, skipped: "AI_DAILY_LIMIT_REACHED" };
     }
     const code = String(error?.aiCode || error?.code || "AI_PROVIDER_FAILED").slice(0, 80);
-    const retryable = Boolean(error?.retryable);
+    const retryable = shouldRetryAiJob(job, error, code);
     const failed = await failOrRetryAiJob(env.DB_V2, job, code, retryable, now);
     if (!failed.retry && job.job_type === "translation") {
       await dispatchTranslationUnavailable(env, job, code, now);
@@ -299,6 +299,12 @@ function parseFilterContext(value) {
   } catch {
     return [];
   }
+}
+
+function shouldRetryAiJob(job, error, code) {
+  if (!error?.retryable) return false;
+  if (job?.job_type !== "translation") return true;
+  return code === "AI_PERSISTENCE_FAILED";
 }
 
 function safeCode(error) {

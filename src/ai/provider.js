@@ -3,8 +3,8 @@ import { normalizeModerationResult, normalizeTranslationResult } from "./validat
 const MODERATION_PROMPT_VERSION = "moderation-v2-dictionary-context";
 const TRANSLATION_PROMPT_VERSION = "translation-v2-dedicated";
 const DEFAULT_TIMEOUT_MS = 12_000;
-const DEFAULT_TRANSLATION_TIMEOUT_MS = 5_000;
-const DEFAULT_TRANSLATION_FALLBACK_TIMEOUT_MS = 5_000;
+const DEFAULT_TRANSLATION_TIMEOUT_MS = 3_000;
+const DEFAULT_TRANSLATION_FALLBACK_TIMEOUT_MS = 2_500;
 const DEDICATED_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b";
 
 const MODERATION_SCHEMA = Object.freeze({
@@ -112,7 +112,7 @@ export async function runTranslationModel(env, input, options = {}) {
       try {
         normalized = normalizeTranslationResult({ translation: extractTranslationText(response) });
       } catch {
-        throw codedError("AI_RESPONSE_INVALID", true);
+        throw codedError("AI_RESPONSE_INVALID", false);
       }
       return {
         ...normalized,
@@ -183,10 +183,10 @@ function extractTranslationText(value) {
   if (typeof value === "string") return translationTextFromString(value);
   if (!value || typeof value !== "object") return "";
 
-  for (const key of ["translation", "translated_text", "translatedText", "text"]) {
+  for (const key of ["translation", "translated_text", "translatedText", "translation_text", "generated_text", "text"]) {
     if (typeof value[key] === "string" && value[key].trim()) return value[key].trim();
   }
-  for (const key of ["response", "result", "output", "output_text"]) {
+  for (const key of ["response", "result", "data", "output", "output_text"]) {
     if (value[key] != null) {
       const text = extractTranslationText(value[key]);
       if (text) return text;
@@ -343,7 +343,8 @@ function normalizeProviderError(error) {
   const status = Number(error?.status || error?.statusCode || 0);
   if (status === 429 || /rate.?limit|too many requests/i.test(message)) return codedError("AI_PROVIDER_RATE_LIMITED", true);
   if (status >= 500 || /timeout|temporar|unavailable|network/i.test(message)) return codedError("AI_PROVIDER_UNAVAILABLE", true);
-  if (/schema|json|response/i.test(message)) return codedError("AI_RESPONSE_INVALID", true);
+  if (/schema|json/i.test(message)) return codedError("AI_RESPONSE_INVALID", false);
+  if (status >= 400 && status < 500) return codedError("AI_PROVIDER_REQUEST_REJECTED", false);
   return codedError("AI_PROVIDER_FAILED", status === 0 || status >= 500);
 }
 
