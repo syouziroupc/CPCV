@@ -8,6 +8,11 @@ on:
       - ".github/workflows/generate-desktop-lockfiles.yml"
       - "desktop-overlay-poc/package.json"
       - "desktop-overlay-poc/src-tauri/Cargo.toml"
+  pull_request:
+    paths:
+      - ".github/workflows/generate-desktop-lockfiles.yml"
+      - "desktop-overlay-poc/package.json"
+      - "desktop-overlay-poc/src-tauri/Cargo.toml"
 
 permissions:
   contents: read
