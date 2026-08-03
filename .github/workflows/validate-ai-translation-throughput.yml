@@ -1,0 +1,55 @@
+name: Validate AI translation throughput release
+
+on:
+  push:
+    branches:
+      - agent/validate-ai-translation-throughput
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-ai-translation-throughput
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ff4607a5e09341b3417c065a43fd4ee48b0b5e21
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Verify exact release commit
+        run: test "$(git rev-parse HEAD)" = "ff4607a5e09341b3417c065a43fd4ee48b0b5e21"
+      - name: Targeted translation and realtime tests
+        run: |
+          node --check src/ai/provider.js
+          node --check src/ai/processor.js
+          node --no-warnings scripts/test-ai-v2.mjs
+          node --no-warnings scripts/test-realtime-v2.mjs
+          node --no-warnings scripts/test-v0810-usability.mjs
+          node scripts/verify-deployment-config.mjs wrangler.toml
+      - name: Full release validation
+        run: |
+          npm run verify:source-manifest
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run check:stage08
+          npm run check:v0810
+          npm run test:owner-bootstrap
+          npm run verify:ai-ready
+          npm run verify:final-docs
+          npm run deploy:dry-run
+          npm audit
+          npm audit --omit=dev
