@@ -1,14 +1,20 @@
+use std::{fs, path::PathBuf};
+
 use serde::Serialize;
 use tauri::{
-    webview::Color, AppHandle, Manager, Position, Size, WebviewUrl, WebviewWindow,
+    webview::{Color, PageLoadEvent, PageLoadPayload},
+    AppHandle, Emitter, Manager, Position, Size, WebviewUrl, WebviewWindow,
     WebviewWindowBuilder,
 };
 
 const PRODUCTION_ORIGIN: &str = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev";
 const STAGING_ORIGIN: &str =
     "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev";
+const MAIN_LABEL: &str = "main";
 const OVERLAY_LABEL: &str = "overlay";
 const ADMIN_LABEL: &str = "admin";
+const REMOTE_PAGE_STATE_EVENT: &str = "cpcv-remote-page-state";
+const SHARED_PROFILE_DIRECTORY: &str = "shared-webview-profile";
 
 const OVERLAY_INITIALIZATION_SCRIPT: &str = r#"
 (() => {
@@ -174,6 +180,16 @@ struct MonitorInfo {
     primary: bool,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemotePageState {
+    window_label: String,
+    phase: String,
+    url: String,
+    connected: bool,
+    message: String,
+}
+
 fn normalize_origin(origin: &str) -> Result<&'static str, String> {
     let normalized = origin.trim().trim_end_matches('/');
     match normalized {
@@ -194,6 +210,57 @@ fn normalize_session_id(session_id: &str) -> Result<String, String> {
         return Err("授業IDの形式が正しくありません。".to_string());
     }
     Ok(normalized.to_string())
+}
+
+fn shared_webview_data_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("WebView2保存先を取得できません: {error}"))?
+        .join(SHARED_PROFILE_DIRECTORY);
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("WebView2保存先を作成できません: {error}"))?;
+    Ok(directory)
+}
+
+fn expected_remote_url(url: &tauri::Url, expected_origin: &str) -> bool {
+    let value = url.as_str();
+    value == expected_origin || value.starts_with(&format!("{expected_origin}/"))
+}
+
+fn report_remote_page_load(
+    window: &WebviewWindow,
+    payload: &PageLoadPayload<'_>,
+    expected_origin: &str,
+) {
+    let phase = match payload.event() {
+        PageLoadEvent::Started => "started",
+        PageLoadEvent::Finished => "finished",
+    };
+    let connected = expected_remote_url(payload.url(), expected_origin);
+    let url = payload.url().to_string();
+    let message = if connected {
+        if phase == "finished" {
+            "CPCVページの読み込みが完了しました。"
+        } else {
+            "CPCVページへ接続しています。"
+        }
+    } else if url.starts_with("chrome-error://") || url.starts_with("edge-error://") {
+        "WebView2がCPCVへ接続できませんでした。DNS、プロキシ、証明書、学内ネットワーク制限を確認してください。"
+    } else {
+        "CPCV以外のページへ遷移しました。接続先URLまたは認証遷移を確認してください。"
+    };
+
+    let state = RemotePageState {
+        window_label: window.label().to_string(),
+        phase: phase.to_string(),
+        url,
+        connected,
+        message: message.to_string(),
+    };
+    let _ = window
+        .app_handle()
+        .emit_to(MAIN_LABEL, REMOTE_PAGE_STATE_EVENT, state);
 }
 
 fn destroy_window_if_present(app: &AppHandle, label: &str) -> Result<(), String> {
@@ -281,6 +348,7 @@ fn list_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
 #[tauri::command]
 fn open_admin(app: AppHandle, origin: String) -> Result<String, String> {
     let origin = normalize_origin(&origin)?;
+    let data_directory = shared_webview_data_directory(&app)?;
     destroy_window_if_present(&app, ADMIN_LABEL)?;
     let url = format!("{origin}/admin")
         .parse()
@@ -290,10 +358,14 @@ fn open_admin(app: AppHandle, origin: String) -> Result<String, String> {
         .inner_size(1180.0, 820.0)
         .min_inner_size(760.0, 620.0)
         .resizable(true)
+        .data_directory(data_directory)
+        .on_page_load(move |window, payload| {
+            report_remote_page_load(&window, &payload, origin);
+        })
         .build()
         .map_err(|error| error.to_string())?;
     window.set_focus().map_err(|error| error.to_string())?;
-    Ok("管理画面を開きました。ログイン後に授業を作成してください。".to_string())
+    Ok("管理画面の接続を開始しました。状態欄で読み込み結果を確認してください。".to_string())
 }
 
 #[tauri::command]
@@ -306,6 +378,7 @@ fn open_overlay(
     let origin = normalize_origin(&origin)?;
     let session_id = normalize_session_id(&session_id)?;
     let monitor = monitor_at(&app, monitor_index)?;
+    let data_directory = shared_webview_data_directory(&app)?;
     destroy_window_if_present(&app, OVERLAY_LABEL)?;
     let url = format!("{origin}/viewer/{session_id}")
         .parse()
@@ -322,13 +395,17 @@ fn open_overlay(
         .skip_taskbar(true)
         .resizable(false)
         .visible(false)
+        .data_directory(data_directory)
         .initialization_script(OVERLAY_INITIALIZATION_SCRIPT)
+        .on_page_load(move |window, payload| {
+            report_remote_page_load(&window, &payload, origin);
+        })
         .build()
         .map_err(|error| error.to_string())?;
 
     place_overlay(&overlay, &monitor)?;
     Ok(format!(
-        "ディスプレイ{}にオーバーレイを開始しました。",
+        "ディスプレイ{}でオーバーレイの接続を開始しました。",
         monitor_index + 1
     ))
 }
@@ -446,6 +523,17 @@ mod tests {
         assert!(normalize_session_id("sess_with-dash_123").is_ok());
         assert!(normalize_session_id("wrong_0123456789").is_err());
         assert!(normalize_session_id("sess_bad/path").is_err());
+    }
+
+    #[test]
+    fn recognizes_expected_remote_urls() {
+        let production_admin = tauri::Url::parse(&format!("{PRODUCTION_ORIGIN}/admin")).unwrap();
+        let staging_viewer =
+            tauri::Url::parse(&format!("{STAGING_ORIGIN}/viewer/sess_0123456789")).unwrap();
+        let unrelated = tauri::Url::parse("https://example.com/admin").unwrap();
+        assert!(expected_remote_url(&production_admin, PRODUCTION_ORIGIN));
+        assert!(expected_remote_url(&staging_viewer, STAGING_ORIGIN));
+        assert!(!expected_remote_url(&unrelated, PRODUCTION_ORIGIN));
     }
 
     #[test]
