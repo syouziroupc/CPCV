@@ -36,6 +36,29 @@ jobs:
       - name: Check bundled fallback JavaScript
         run: npm run check:ui
 
+      - name: Report v0.2 source hashes
+        shell: pwsh
+        run: |
+          $paths = @(
+            "../.github/workflows/desktop-overlay-poc.yml",
+            "CONTEST-SOURCE-NOTES.md",
+            "README.md",
+            "VERSION",
+            "package.json",
+            "src-tauri/Cargo.toml",
+            "src-tauri/capabilities/default.json",
+            "src-tauri/src/main.rs",
+            "src-tauri/tauri.conf.json",
+            "ui/app.css",
+            "ui/app.js",
+            "ui/index.html",
+            "../docs/desktop-overlay-stage2-plan.md"
+          )
+          foreach ($path in $paths) {
+            $hash = (Get-FileHash $path -Algorithm SHA256).Hash.ToLower()
+            Write-Host "$hash  $path"
+          }
+
       - name: Format Rust source
         run: cargo fmt --manifest-path src-tauri/Cargo.toml
 
