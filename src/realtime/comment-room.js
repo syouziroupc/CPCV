@@ -1,12 +1,13 @@
 import { AuthError, isAuthError } from "../auth/errors.js";
 import { authJson } from "../auth/http.js";
 import { persistComment } from "../comments/repository.js";
-import { scheduleAiForComment } from "../ai/processor.js";
+import { dispatchAiJobs, scheduleAiForComment } from "../ai/processor.js";
 import { evaluateCommentFilter } from "../content-filter/repository.js";
 import {
   findRealtimeEventForComment,
   getRealtimeEvent,
-  getRealtimeSync
+  getRealtimeSync,
+  markRealtimeCommentTranslationPending
 } from "./repository.js";
 
 const MAX_CLIENT_FRAME_BYTES = 256;
@@ -116,14 +117,39 @@ export class CommentRoom {
           eventType: "message:new"
         });
         if (!event) throw new AuthError(500, "REALTIME_EVENT_MISSING");
-        await this.broadcastEvent(event);
       }
+
+      let ai = { jobs: [], dispatched: 0 };
       if (!result.duplicate) {
-        const task = scheduleAiForComment(this.env, {
-          organizationId: input.organizationId,
-          liveSessionId: input.liveSessionId,
-          commentId: result.comment.id
-        }).catch((error) => console.error("AI scheduling failed", String(error?.code || error?.name || "ERROR")));
+        try {
+          ai = await scheduleAiForComment(this.env, {
+            organizationId: input.organizationId,
+            liveSessionId: input.liveSessionId,
+            commentId: result.comment.id
+          }, { dispatch: false });
+        } catch (error) {
+          console.error("AI scheduling failed", String(error?.code || error?.name || "ERROR"));
+        }
+      }
+
+      const translationJob = ai.jobs.find((job) => job.jobType === "translation");
+      if (event && translationJob) {
+        try {
+          event = await markRealtimeCommentTranslationPending(this.env.DB_V2, {
+            organizationId: input.organizationId,
+            liveSessionId: input.liveSessionId,
+            commentId: result.comment.id,
+            eventType: "message:new",
+            targetLanguage: translationJob.targetLanguage
+          });
+        } catch (error) {
+          console.error("Translation pending marker failed", String(error?.code || error?.name || "ERROR"));
+        }
+      }
+      if (event) await this.broadcastEvent(event);
+      if (!result.duplicate && ai.jobs.length) {
+        const task = dispatchAiJobs(this.env, ai.jobs)
+          .catch((error) => console.error("AI queue dispatch failed", String(error?.code || error?.name || "ERROR")));
         if (typeof this.state?.waitUntil === "function") this.state.waitUntil(task);
         else void task;
       }
@@ -134,6 +160,7 @@ export class CommentRoom {
         moderationState: result.comment.moderationState,
         duplicate: result.duplicate,
         sequence: event?.sequence || null,
+        translationPending: Boolean(event?.payload?.translationPending),
         filter: {
           action: result.comment.filter?.action || filterDecision.action || "allow",
           categories: [...new Set((result.duplicate

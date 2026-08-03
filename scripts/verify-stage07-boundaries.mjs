@@ -31,7 +31,7 @@ const comments = text("src/comments/repository.js");
 const privateRoute = text("src/routes/private-v2.js");
 const room = text("src/realtime/comment-room.js");
 const worker = text("src/index.js");
-check("posting schedules AI after comment persistence", room.includes("scheduleAiForComment") && room.includes("state.waitUntil"));
+check("posting resolves translation jobs before viewer delivery", room.includes("await scheduleAiForComment") && room.includes("markRealtimeCommentTranslationPending"));
 check("queue dispatch failures do not throw into posting", processor.includes("AI queue dispatch failed") && processor.includes("return dispatched"));
 check("Queue consumer is connected", worker.includes("async queue(batch, env)") && worker.includes("processAiQueueBatch"));
 check("scheduled recovery requeues stale AI jobs", worker.includes("recoverAndDispatchAiJobs") && repository.includes("AI_STALE_PROCESSING"));
@@ -55,7 +55,7 @@ check("organization Owner controls AI quota", admin.includes("/api/org/ai-settin
 check("session managers control AI features", admin.includes("/ai-settings") && adminHtml.includes("sessionAiTranslationEnabled"));
 check("AI verdict is marked as reference", admin.includes("AI参考") && adminHtml.includes("自動で非表示にはしません"));
 check("viewer labels AI translations", viewer.includes("AI翻訳:") && viewer.includes("translation:ready"));
-check("viewer retains original before translation", viewer.indexOf("text.textContent = payload.message") < viewer.indexOf("card.appendChild(translation)"));
+check("viewer gates pending translations until one merged display", viewer.includes("holdCommentForTranslation") && viewer.includes("pendingTranslationComments") && viewer.includes("translation:unavailable"));
 check("admin and viewer SPA mirrors match", text("public/_admin_spa.html") === adminHtml && text("public/_viewer_spa.html") === text("public/viewer/index.html"));
 
 const wrangler = text("wrangler.toml");

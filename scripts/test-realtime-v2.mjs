@@ -295,12 +295,19 @@ async function testHibernationHandlers(h) {
 
 function testViewerClient() {
   const source = readFileSync(resolve(ROOT, "public/assets/viewer.js"), "utf8");
+  const roomSource = readFileSync(resolve(ROOT, "src/realtime/comment-room.js"), "utf8");
+  const acceptMessageSource = roomSource.slice(roomSource.indexOf("async acceptMessage"), roomSource.indexOf("async deliverEvent"));
+  check("translation queue dispatch follows pending marker broadcast", acceptMessageSource.indexOf("markRealtimeCommentTranslationPending") < acceptMessageSource.indexOf("broadcastEvent(event)")
+    && acceptMessageSource.indexOf("broadcastEvent(event)") < acceptMessageSource.indexOf("dispatchAiJobs(this.env, ai.jobs)"));
   check("viewer requests one-time live tickets", source.includes("/live-ticket") && source.includes("lastSequence"));
   check("viewer uses bounded exponential reconnect", source.includes("Math.min(30_000") && source.includes("2 **"));
   check("viewer discards duplicate sequence", source.includes("sequence <= lastAppliedSequence"));
   check("viewer detects sequence gaps", source.includes("sequence !== lastAppliedSequence + 1"));
   check("viewer persists only non-secret sequence state", source.includes("CPCV_REALTIME_SEQUENCE") && !/localStorage[^\n]*(token|ticket)/i.test(source));
   check("viewer stops reconnecting when room closes", source.includes("room:closed") && source.includes("realtimeStopped"));
+  check("viewer holds AI-translated comments until completion", source.includes("holdCommentForTranslation") && source.includes("pendingTranslationComments"));
+  check("viewer releases failed translations exactly once", source.includes("translation:unavailable") && source.includes("releasePendingTranslation"));
+  check("scroll mode can receive a late translation", source.includes("dataset.originalText") && source.includes("AI翻訳:"));
 }
 
 function createHarness() {
