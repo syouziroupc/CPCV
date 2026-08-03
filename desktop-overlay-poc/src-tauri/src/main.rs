@@ -16,8 +16,7 @@ use tauri::{
 };
 
 const PRODUCTION_ORIGIN: &str = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev";
-const STAGING_ORIGIN: &str =
-    "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev";
+const STAGING_ORIGIN: &str = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev";
 const ACTION_HOST: &str = "desktop.cpcv.local";
 const ADMIN_LABEL: &str = "main";
 const OVERLAY_LABEL: &str = "overlay";
@@ -546,7 +545,10 @@ mod tests {
         let invalid =
             tauri::Url::parse("https://desktop.cpcv.local/comments/set?visible=maybe").unwrap();
 
-        assert_eq!(action_optional_bool(&enabled, "visible").unwrap(), Some(true));
+        assert_eq!(
+            action_optional_bool(&enabled, "visible").unwrap(),
+            Some(true)
+        );
         assert_eq!(
             action_optional_bool(&disabled, "visible").unwrap(),
             Some(false)
