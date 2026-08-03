@@ -116,6 +116,7 @@ jobs:
           crons = [ "*/5 * * * *", "17 3 * * *" ]
           TOML
           test "$(sha256sum .cpcv-staging.wrangler.toml | cut -d' ' -f1)" = "753bc3a850733c3c07ef6fe3e8b3dbb7ddc86c1a7fe3e9ddd5d0724d7e48efbc"
+          cp .cpcv-staging.wrangler.toml /tmp/cpcv-staging.wrangler.toml
       - name: Verify exact revision and staging separation
         run: |
           test "$(git rev-parse HEAD)" = "3c1da6900b0d0d91043b2f823581ca79fd4a31f4"
@@ -138,6 +139,8 @@ jobs:
       - name: Inspect staging migrations
         shell: bash
         run: |
+          cp /tmp/cpcv-staging.wrangler.toml .cpcv-staging.wrangler.toml
+          test "$(sha256sum .cpcv-staging.wrangler.toml | cut -d' ' -f1)" = "753bc3a850733c3c07ef6fe3e8b3dbb7ddc86c1a7fe3e9ddd5d0724d7e48efbc"
           mkdir -p staging-records
           npx wrangler d1 migrations list class_comment_db_staging --remote --config .cpcv-staging.wrangler.toml 2>&1 | tee staging-records/01-legacy-migrations.txt
           npx wrangler d1 migrations list class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml 2>&1 | tee staging-records/02-v2-migrations.txt
