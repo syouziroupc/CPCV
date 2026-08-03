@@ -1,4 +1,4 @@
-2b94f111db35aaef710ea3d34b4866ddd3fc3b996b5c2aa0268b154d22b37586  .github/workflows/desktop-overlay-poc.yml
+edbd42f2b6a551264bc26176955fee5eee3e9b432fcdb812f6c02b7a2016eb34  .github/workflows/desktop-overlay-poc.yml
 975f13c3b310475db09a73e1e5f40c76dc5ab1c858fc81ccb278da8ba23a2e2b  desktop-overlay-poc/CONTEST-SOURCE-NOTES.md
 f6ade335b837bc8c42006460418ab6c973575c5549ad959f2c83855ca806988d  desktop-overlay-poc/README.md
 71015c979ccb0fc8a0be7ca0ae83046ab045cdc2c8faa09fb2f0f7e440f9b4a6  desktop-overlay-poc/VERSION
