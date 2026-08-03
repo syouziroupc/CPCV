@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "local-controller",
-  "description": "Permissions for the bundled CPCV overlay controller only.",
-  "windows": ["main"],
+  "identifier": "local-developer-fallback",
+  "description": "The production and staging CPCV remote pages receive no Tauri capability.",
+  "windows": ["developer"],
   "permissions": ["core:default"]
 }
