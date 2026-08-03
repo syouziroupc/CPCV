@@ -157,9 +157,11 @@ function isDedicatedTranslationModel(model) {
   return String(model || "").trim() === DEDICATED_TRANSLATION_MODEL;
 }
 
+const SUPPORTED_TRANSLATION_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);
+
 function normalizeTranslationLanguage(value) {
   const language = String(value || "").trim().toLowerCase();
-  return language === "ja" || language === "en" ? language : "";
+  return SUPPORTED_TRANSLATION_LANGUAGES.has(language) ? language : "";
 }
 
 function translationTimeoutMs(env, dedicated) {

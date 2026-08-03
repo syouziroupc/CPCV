@@ -1,59 +1,350 @@
-name: Validate unknown language routing
+name: Deploy production
 
 on:
-  pull_request:
-    branches:
-      - master
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: Exact 40-character commit SHA to deploy
+        required: true
+        type: string
+      confirmation:
+        description: Type DEPLOY_PRODUCTION to continue
+        required: true
+        type: string
+      staging_commit_sha:
+        description: Exact 40-character commit SHA tested in staging
+        required: true
+        type: string
+      staging_deployment_id:
+        description: Staging Worker deployment or version ID
+        required: true
+        type: string
+      staging_test_record_sha256:
+        description: SHA-256 of the completed staging acceptance record
+        required: true
+        type: string
+      staging_config_sha256:
+        description: SHA-256 of the validated external staging Wrangler config
+        required: true
+        type: string
+      staging_config_base64:
+        description: Base64 of the exact validated staging Wrangler config
+        required: true
+        type: string
+      staging_test_record_base64:
+        description: Base64 of the completed staging acceptance record
+        required: true
+        type: string
+      staging_confirmation:
+        description: Type STAGING_PASSED after all staging acceptance tests pass
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
 
 jobs:
-  validate:
-    if: github.head_ref == 'agent/fix-unknown-language-review'
+  deploy:
+    name: Validate migrate and deploy
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    environment: production
     steps:
-      - uses: actions/checkout@v4
+      - name: Verify explicit immutable target
+        shell: bash
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+          CONFIRMATION: ${{ inputs.confirmation }}
+          STAGING_COMMIT_SHA: ${{ inputs.staging_commit_sha }}
+          STAGING_DEPLOYMENT_ID: ${{ inputs.staging_deployment_id }}
+          STAGING_TEST_RECORD_SHA256: ${{ inputs.staging_test_record_sha256 }}
+          STAGING_CONFIG_SHA256: ${{ inputs.staging_config_sha256 }}
+          STAGING_CONFIG_BASE64: ${{ inputs.staging_config_base64 }}
+          STAGING_TEST_RECORD_BASE64: ${{ inputs.staging_test_record_base64 }}
+          STAGING_CONFIRMATION: ${{ inputs.staging_confirmation }}
+        run: |
+          test "$CONFIRMATION" = "DEPLOY_PRODUCTION"
+          test "$STAGING_CONFIRMATION" = "STAGING_PASSED"
+          [[ "$COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]
+          [[ "$STAGING_COMMIT_SHA" =~ ^[0-9a-fA-F]{40}$ ]]
+          test "${COMMIT_SHA,,}" = "${STAGING_COMMIT_SHA,,}"
+          test -n "$STAGING_DEPLOYMENT_ID"
+          [[ "$STAGING_TEST_RECORD_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]
+          [[ "$STAGING_CONFIG_SHA256" =~ ^[0-9a-fA-F]{64}$ ]]
+          test -n "$STAGING_CONFIG_BASE64"
+          test -n "$STAGING_TEST_RECORD_BASE64"
+
+      - name: Checkout selected commit
+        uses: actions/checkout@v4
         with:
-          ref: agent/fix-unknown-language-review
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
+          ref: ${{ inputs.commit_sha }}
+
+      - name: Verify and record selected revision
+        id: revision
+        shell: bash
+        env:
+          COMMIT_SHA: ${{ inputs.commit_sha }}
+        run: |
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          test "${ACTUAL_SHA,,}" = "${COMMIT_SHA,,}"
+          echo "sha=$ACTUAL_SHA" >> "$GITHUB_OUTPUT"
+          git log -1 --oneline
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
-      - name: Apply patch and restore workflow
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Materialize and verify staging evidence
+        shell: bash
+        env:
+          STAGING_CONFIG_BASE64: ${{ inputs.staging_config_base64 }}
+          STAGING_TEST_RECORD_BASE64: ${{ inputs.staging_test_record_base64 }}
+          STAGING_CONFIG_SHA256: ${{ inputs.staging_config_sha256 }}
+          STAGING_TEST_RECORD_SHA256: ${{ inputs.staging_test_record_sha256 }}
+          STAGING_COMMIT_SHA: ${{ inputs.staging_commit_sha }}
+          STAGING_DEPLOYMENT_ID: ${{ inputs.staging_deployment_id }}
         run: |
-          node .github/scripts/apply-unknown-language-routing-fix.mjs
-          node .github/scripts/update-unknown-language-tests.mjs
-          git checkout origin/master -- .github/workflows/deploy-production.yml
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          npm run manifest:source
-          git add SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt
-          git diff --cached --check
-          git commit -m "Allow unknown languages while AI reviews asynchronously"
-      - name: Targeted tests
+          set -euo pipefail
+          umask 077
+          STAGING_CONFIG_PATH="$RUNNER_TEMP/cpcv-wrangler.staging.toml"
+          STAGING_RECORD_PATH="$RUNNER_TEMP/cpcv-staging-acceptance-record.txt"
+          printf '%s' "$STAGING_CONFIG_BASE64" | base64 --decode > "$STAGING_CONFIG_PATH"
+          printf '%s' "$STAGING_TEST_RECORD_BASE64" | base64 --decode > "$STAGING_RECORD_PATH"
+          test "$(sha256sum "$STAGING_CONFIG_PATH" | cut -d' ' -f1)" = "${STAGING_CONFIG_SHA256,,}"
+          test "$(sha256sum "$STAGING_RECORD_PATH" | cut -d' ' -f1)" = "${STAGING_TEST_RECORD_SHA256,,}"
+          node scripts/materialize-staging-config.mjs "$STAGING_CONFIG_PATH" --expected-sha256 "$STAGING_CONFIG_SHA256"
+          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+          node scripts/verify-environment-separation.mjs wrangler.toml .cpcv-staging.wrangler.toml
+          node scripts/verify-staging-evidence.mjs "$STAGING_RECORD_PATH" \
+            --commit "$STAGING_COMMIT_SHA" \
+            --deployment "$STAGING_DEPLOYMENT_ID" \
+            --config-sha256 "$STAGING_CONFIG_SHA256"
+          npx wrangler deploy --dry-run --config .cpcv-staging.wrangler.toml
+          rm -f .cpcv-staging.wrangler.toml
+          echo "STAGING_CONFIG_PATH=$STAGING_CONFIG_PATH" >> "$GITHUB_ENV"
+          echo "STAGING_RECORD_PATH=$STAGING_RECORD_PATH" >> "$GITHUB_ENV"
+
+      - name: Verify clean immutable checkout
+        shell: bash
         run: |
-          node scripts/test-multilingual-routing.mjs
-          node --no-warnings scripts/test-content-filter-v2.mjs
-          node --no-warnings scripts/test-bilingual-filter-v2.mjs
-          node --no-warnings scripts/test-ai-v2.mjs
-      - name: Full release gates
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "${{ steps.revision.outputs.sha }}"
+
+      - name: Verify production configuration
+        run: npm run verify:deployment
+
+      - name: Require deployment secrets
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AUTH_RATE_LIMIT_PEPPER: ${{ secrets.AUTH_RATE_LIMIT_PEPPER }}
+          PUBLIC_RATE_LIMIT_PEPPER: ${{ secrets.PUBLIC_RATE_LIMIT_PEPPER }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$AUTH_RATE_LIMIT_PEPPER"
+          test -n "$PUBLIC_RATE_LIMIT_PEPPER"
+          test -n "$TURNSTILE_SECRET_KEY"
+
+      - name: Run full local validation
         run: |
           npm run verify:source-manifest
           npm run check
           npm run check:project
           npm run check:pdf-links
           npm run check:stage08
-          npm run check:v0810
           npm run test:owner-bootstrap
           npm run verify:ai-ready
           npm run verify:final-docs
           npm run deploy:dry-run
           npm audit
           npm audit --omit=dev
-      - name: Push verified fix
-        run: git push origin HEAD:agent/fix-unknown-language-review
+
+      - name: Initialize deployment records
+        shell: bash
+        run: |
+          mkdir -p deployment-records
+          {
+            echo "requested_commit=${{ inputs.commit_sha }}"
+            echo "checked_out_commit=${{ steps.revision.outputs.sha }}"
+            echo "staging_commit=${{ inputs.staging_commit_sha }}"
+            echo "staging_deployment_id=${{ inputs.staging_deployment_id }}"
+            echo "staging_test_record_sha256=${{ inputs.staging_test_record_sha256 }}"
+            echo "staging_config_sha256=${{ inputs.staging_config_sha256 }}"
+            echo "started_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "node=$(node --version)"
+            echo "npm=$(npm --version)"
+            echo "wrangler=$(npx wrangler --version | tail -n 1)"
+          } > deployment-records/00-metadata.txt
+          cp wrangler.toml deployment-records/00-wrangler-production.toml
+          cp "$STAGING_CONFIG_PATH" deployment-records/00-wrangler-staging-canonical.toml
+          cp "$STAGING_RECORD_PATH" deployment-records/00-staging-acceptance-record.txt
+
+      - name: Record DB_V2 Time Travel bookmark
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler d1 time-travel info class_comment_db_v2 2>&1 | tee deployment-records/01-d1-time-travel.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify Stage 8.2 existing data
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run verify:stage82-preflight 2>&1 | tee deployment-records/02-stage82-preflight.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Record pending migrations
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler d1 migrations list class_comment_db --remote 2>&1 | tee deployment-records/03-legacy-migrations-before.txt
+          npx wrangler d1 migrations list class_comment_db_v2 --remote 2>&1 | tee deployment-records/04-v2-migrations-before.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify read-only production state before migration
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/05-remote-d1-before-migration.txt
+          npm run verify:email-auth-ready 2>&1 | tee deployment-records/06-email-auth-readiness-before-migration.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Record pre-deploy Worker rollback state
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler deployments status 2>&1 | tee deployment-records/07-deployments-status-before.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/08-versions-list-before.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Apply legacy D1 migrations
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee deployment-records/10-legacy-migrations-apply.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Apply DB_V2 migrations
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee deployment-records/11-v2-migrations-apply.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Verify DB_V2 integrity and active Owner
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/12-remote-d1-after-migration.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Configure authentication secrets
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/configure-rate-limit-secret.mjs 2>&1 | tee deployment-records/14-secret-configuration.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AUTH_RATE_LIMIT_PEPPER: ${{ secrets.AUTH_RATE_LIMIT_PEPPER }}
+          PUBLIC_RATE_LIMIT_PEPPER: ${{ secrets.PUBLIC_RATE_LIMIT_PEPPER }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+
+      - name: Deploy selected revision
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler deploy 2>&1 | tee deployment-records/15-worker-deploy.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Reverify production DB_V2 after deployment
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/16-remote-d1-after-deploy.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Run production smoke checks
+        shell: bash
+        run: |
+          set -o pipefail
+          node scripts/smoke-production.mjs 2>&1 | tee deployment-records/17-production-smoke.txt
+
+      - name: Record deployed Worker state
+        shell: bash
+        run: |
+          set -o pipefail
+          npx wrangler deployments status 2>&1 | tee deployment-records/18-deployments-status-after.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/19-versions-list-after.txt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Finalize deployment records
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          mkdir -p deployment-records
+          {
+            echo "completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "job_status=${{ job.status }}"
+            echo "final_commit=$(git rev-parse HEAD 2>/dev/null || true)"
+          } > deployment-records/99-result.txt
+          find deployment-records -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > deployment-records/SHA256SUMS.txt
+
+      - name: Upload deployment records
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-production-deployment-records-${{ inputs.commit_sha }}
+          path: deployment-records/
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Write deployment summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "## Production deployment"
+            echo ""
+            echo "- Requested commit: \`${{ inputs.commit_sha }}\`"
+            echo "- Checked-out commit: \`${{ steps.revision.outputs.sha }}\`"
+            echo "- Staging commit: \`${{ inputs.staging_commit_sha }}\`"
+            echo "- Staging deployment: \`${{ inputs.staging_deployment_id }}\`"
+            echo "- Staging record SHA-256: \`${{ inputs.staging_test_record_sha256 }}\`"
+            echo "- Staging config SHA-256: \`${{ inputs.staging_config_sha256 }}\`"
+            echo "- Deployment record artifact: \`cpcv-production-deployment-records-${{ inputs.commit_sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

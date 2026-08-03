@@ -17,7 +17,9 @@ export async function evaluateCommentFilter(db, input) {
   const effectiveLanguage = matchedLanguage || language.code;
   const supported = matchedLanguage ? isSupportedFilterLanguage(matchedLanguage) : language.supported;
   const unsupported = context.settings.enabled && !supported && effectiveLanguage !== "neutral";
-  const requiresReview = unsupported && context.settings.unsupportedLanguageMode !== "allow";
+  // ai_review means asynchronous AI inspection, not pre-publication blocking.
+  // Only the explicit review mode places an otherwise clean comment in pending.
+  const requiresReview = unsupported && context.settings.unsupportedLanguageMode === "review";
   const aiForUnsupported = unsupported && context.settings.unsupportedLanguageMode === "ai_review";
   const action = requiresReview && decision.action === "allow" ? "review" : decision.action;
   return {
