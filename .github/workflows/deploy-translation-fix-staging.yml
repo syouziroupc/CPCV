@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/deploy-translation-fix-staging
+  pull_request:
+    branches:
+      - master
 
 permissions:
   contents: read
