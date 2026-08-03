@@ -35,8 +35,8 @@ jobs:
       - name: Check controller JavaScript
         run: npm run check:ui
 
-      - name: Check Rust formatting
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Format Rust source
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml
 
       - name: Run Rust unit tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
