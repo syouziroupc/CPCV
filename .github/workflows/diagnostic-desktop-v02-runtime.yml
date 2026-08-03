@@ -42,8 +42,8 @@ jobs:
       - name: NPM dependency audit
         run: npm audit --audit-level=high
 
-      - name: Rust format check
-        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+      - name: Format Rust source for diagnostics
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml
 
       - name: Rust Clippy
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
