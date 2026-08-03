@@ -1,0 +1,99 @@
+name: Fix Overlay WebView Deadlock
+
+on:
+  push:
+    branches:
+      - agent/desktop-overlay-poc
+    paths:
+      - ".github/workflows/fix-overlay-webview-deadlock.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/desktop-overlay-poc
+          fetch-depth: 0
+
+      - name: Apply deadlock fix and update version
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          main_path = Path('desktop-overlay-poc/src-tauri/src/main.rs')
+          text = main_path.read_text(encoding='utf-8')
+
+          replacements = {
+              '#[tauri::command]\nfn open_admin(': '#[tauri::command]\nasync fn open_admin(',
+              '#[tauri::command]\nfn open_overlay(': '#[tauri::command]\nasync fn open_overlay(',
+          }
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one occurrence of {old!r}, found {count}')
+              text = text.replace(old, new, 1)
+          main_path.write_text(text, encoding='utf-8')
+
+          version_files = [
+              Path('desktop-overlay-poc/package.json'),
+              Path('desktop-overlay-poc/src-tauri/Cargo.toml'),
+              Path('desktop-overlay-poc/src-tauri/tauri.conf.json'),
+          ]
+          for path in version_files:
+              value = path.read_text(encoding='utf-8')
+              if '0.1.1' not in value:
+                  raise SystemExit(f'0.1.1 not found in {path}')
+              path.write_text(value.replace('0.1.1', '0.1.2'), encoding='utf-8')
+
+          readme = Path('desktop-overlay-poc/README.md')
+          value = readme.read_text(encoding='utf-8')
+          note = (
+              '\n## v0.1.2 Windowsフリーズ修正\n\n'
+              '`WebviewWindowBuilder`を同期Tauriコマンドから呼ぶとWindowsでデッドロックする既知問題に対応し、'
+              '管理画面とオーバーレイの生成コマンドを非同期化しました。\n'
+          )
+          if '## v0.1.2 Windowsフリーズ修正' not in value:
+              value += note
+          readme.write_text(value, encoding='utf-8')
+
+          changed_paths = [
+              'desktop-overlay-poc/README.md',
+              'desktop-overlay-poc/package.json',
+              'desktop-overlay-poc/src-tauri/Cargo.toml',
+              'desktop-overlay-poc/src-tauri/src/main.rs',
+              'desktop-overlay-poc/src-tauri/tauri.conf.json',
+          ]
+
+          manifest_path = Path('SOURCE_SHA256SUMS.txt')
+          records = {}
+          for line in manifest_path.read_text(encoding='utf-8').splitlines():
+              if not line.strip():
+                  continue
+              digest, path = line.split('  ', 1)
+              records[path] = digest
+
+          for path in changed_paths:
+              records[path] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+          manifest_path.write_text(
+              ''.join(f'{records[path]}  {path}\n' for path in sorted(records)),
+              encoding='utf-8',
+          )
+          PY
+
+          rm .github/workflows/fix-overlay-webview-deadlock.yml
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Windows WebView creation deadlock"
+          git push origin HEAD:agent/desktop-overlay-poc
