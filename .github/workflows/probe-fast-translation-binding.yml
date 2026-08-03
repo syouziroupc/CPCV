@@ -85,9 +85,15 @@ jobs:
 
           npx wrangler deploy --config .ai-binding-probe.toml > probe-records/00-deploy.txt 2>&1
           url="https://$PROBE_WORKER.syouziroupc.workers.dev/$PROBE_PATH"
-          http=$(curl --retry 8 --retry-all-errors --retry-delay 1 --silent --show-error \
-            --output probe-records/01-response.json --write-out '%{http_code}' "$url")
-          printf 'http=%s\n' "$http" > probe-records/02-result.txt
+          http=000
+          for attempt in $(seq 1 20); do
+            sleep 2
+            http=$(curl --silent --show-error --output probe-records/01-response.json --write-out '%{http_code}' "$url" || true)
+            printf 'attempt=%s http=%s\n' "$attempt" "$http" >> probe-records/02-result.txt
+            if [ "$http" = "200" ] || [ "$http" = "502" ]; then
+              break
+            fi
+          done
           test "$http" = "200"
 
           node - <<'NODE'
@@ -98,7 +104,7 @@ jobs:
             : result?.translated_text ?? result?.translation ?? result?.translatedText
               ?? result?.translation_text ?? result?.generated_text ?? result?.text ?? '';
           if (payload?.ok !== true || typeof translated !== 'string' || !translated.trim()) {
-            console.error(JSON.stringify({ ok: payload?.ok, elapsed_ms: payload?.elapsed_ms, result_type: typeof result, result_keys: result && typeof result === 'object' ? Object.keys(result) : [] }));
+            console.error(JSON.stringify({ ok: payload?.ok, elapsed_ms: payload?.elapsed_ms, result_type: typeof result, result_keys: result && typeof result === 'object' ? Object.keys(result) : [], error_name: payload?.error_name, error_message: payload?.error_message }));
             process.exit(1);
           }
           fs.appendFileSync('probe-records/02-result.txt', [
