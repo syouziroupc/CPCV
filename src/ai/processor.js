@@ -151,7 +151,7 @@ async function acquireQueueCapacity(env, queueKind) {
 }
 
 function capacityRetryDelaySeconds(queueKind) {
-  return queueKind === QUEUE_KIND_TRANSLATION ? 2 : 3;
+  return queueKind === QUEUE_KIND_TRANSLATION ? 10 : 20;
 }
 
 async function runWithConcurrency(items, parallelism, worker) {
