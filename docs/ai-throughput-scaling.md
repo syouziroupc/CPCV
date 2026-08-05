@@ -18,7 +18,7 @@ Workers AI currently applies task-level request limits. CPCV uses separate Rate 
 - translation: 700 calls per 60 seconds
 - moderation/text generation: 290 calls per 60 seconds
 
-If the local limiter is full, the Queue message is delayed without incrementing the AI job attempt count. Cloudflare Rate Limiting counters are permissive and location-local, so provider-side 429 responses remain authoritative. Provider rate limits, timeouts, and temporary unavailability are retried by the AI job pipeline.
+If the local limiter is full, the Queue message is delayed without incrementing the AI job attempt count. Cloudflare Rate Limiting counters are permissive and location-local, so provider-side 429 responses remain authoritative. Provider 429 rate limits are retried by the AI job pipeline. Timeouts and provider outages still fail open so they cannot occupy the Queue during a wider service failure.
 
 For translation, the original comment is released on the first provider backpressure failure. A later successful translation can still be attached to the already displayed comment.
 
