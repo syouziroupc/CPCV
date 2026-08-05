@@ -399,17 +399,11 @@ function shouldRetryAiJob(job, error, code) {
   if (!error?.retryable) return false;
   if (job?.job_type !== "translation") return true;
   return code === "AI_PERSISTENCE_FAILED"
-    || code === "AI_PROVIDER_RATE_LIMITED"
-    || code === "AI_PROVIDER_TIMEOUT"
-    || code === "AI_PROVIDER_UNAVAILABLE"
-    || code === "AI_PROVIDER_FAILED";
+    || code === "AI_PROVIDER_RATE_LIMITED";
 }
 
 function isTranslationBackpressure(code) {
-  return code === "AI_PROVIDER_RATE_LIMITED"
-    || code === "AI_PROVIDER_TIMEOUT"
-    || code === "AI_PROVIDER_UNAVAILABLE"
-    || code === "AI_PROVIDER_FAILED";
+  return code === "AI_PROVIDER_RATE_LIMITED";
 }
 
 function safeCode(error) {
