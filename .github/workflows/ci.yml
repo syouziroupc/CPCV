@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -18,9 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Checkout
+      - name: Checkout working branch
         uses: actions/checkout@v4
         with:
+          ref: agent/scale-ai-throughput
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -32,7 +33,7 @@ jobs:
       - name: Pin npm
         run: npm install --global npm@11.18.0
 
-      - name: Materialize patched dependency state
+      - name: Materialize final secure dependency state
         shell: bash
         run: |
           set -euo pipefail
@@ -45,18 +46,8 @@ jobs:
           git add SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Validate generated secure dependency state"
+          git commit -m "Pin patched Undici dependency"
           npm run verify:source-manifest
-          mkdir -p generated-dependency-state
-          cp package.json package-lock.json SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt generated-dependency-state/
-
-      - name: Upload patched dependency state
-        uses: actions/upload-artifact@v4
-        with:
-          name: cpcv-patched-undici-lock
-          path: generated-dependency-state/
-          if-no-files-found: error
-          retention-days: 7
 
       - name: Install dependencies
         shell: bash
@@ -89,3 +80,7 @@ jobs:
         run: |
           npm audit
           npm audit --omit=dev
+
+      - name: Publish validated generated files
+        shell: bash
+        run: git push origin HEAD:agent/scale-ai-throughput
