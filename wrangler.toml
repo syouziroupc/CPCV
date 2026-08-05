@@ -91,12 +91,12 @@ simple = { limit = 30, period = 60 }
 # an early backpressure layer; provider 429 responses still retry through Queues.
 [[ratelimits]]
 name = "AI_TRANSLATION_RATE_LIMITER"
-namespace_id = "826071905"
+namespace_id = "826071905" # AI capacity namespace; separate from auth/public boundary namespaces
 simple = { limit = 700, period = 60 }
 
 [[ratelimits]]
 name = "AI_MODERATION_RATE_LIMITER"
-namespace_id = "826071906"
+namespace_id = "826071906" # AI capacity namespace; separate from auth/public boundary namespaces
 simple = { limit = 290, period = 60 }
 
 [vars]
