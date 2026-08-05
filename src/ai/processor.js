@@ -46,26 +46,27 @@ export async function dispatchAiJobs(env, jobs) {
   }
 
   const legacyQueue = env?.AI_JOBS_QUEUE;
-  let dispatched = 0;
-  dispatched += await dispatchQueueGroup(
-    env?.AI_TRANSLATION_QUEUE,
-    legacyQueue,
-    groups[QUEUE_KIND_TRANSLATION],
-    QUEUE_KIND_TRANSLATION
-  );
-  dispatched += await dispatchQueueGroup(
-    env?.AI_MODERATION_QUEUE,
-    legacyQueue,
-    groups[QUEUE_KIND_MODERATION],
-    QUEUE_KIND_MODERATION
-  );
-  dispatched += await dispatchQueueGroup(
-    legacyQueue,
-    null,
-    groups[QUEUE_KIND_LEGACY],
-    QUEUE_KIND_LEGACY
-  );
-  return dispatched;
+  const dispatched = await Promise.all([
+    dispatchQueueGroup(
+      env?.AI_TRANSLATION_QUEUE,
+      legacyQueue,
+      groups[QUEUE_KIND_TRANSLATION],
+      QUEUE_KIND_TRANSLATION
+    ),
+    dispatchQueueGroup(
+      env?.AI_MODERATION_QUEUE,
+      legacyQueue,
+      groups[QUEUE_KIND_MODERATION],
+      QUEUE_KIND_MODERATION
+    ),
+    dispatchQueueGroup(
+      legacyQueue,
+      null,
+      groups[QUEUE_KIND_LEGACY],
+      QUEUE_KIND_LEGACY
+    )
+  ]);
+  return dispatched.reduce((total, count) => total + count, 0);
 }
 
 async function dispatchQueueGroup(primaryQueue, fallbackQueue, messages, label) {
