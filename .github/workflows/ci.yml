@@ -43,6 +43,9 @@ jobs:
           git add package.json package-lock.json .github/workflows/ci.yml
           npm run manifest:source
           git add SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Validate generated secure dependency state"
           npm run verify:source-manifest
           mkdir -p generated-dependency-state
           cp package.json package-lock.json SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt generated-dependency-state/
