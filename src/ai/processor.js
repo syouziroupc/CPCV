@@ -17,6 +17,10 @@ import {
   skipAiJob
 } from "./repository.js";
 
+const QUEUE_KIND_TRANSLATION = "translation";
+const QUEUE_KIND_MODERATION = "moderation";
+const QUEUE_KIND_LEGACY = "legacy";
+
 export async function scheduleAiForComment(env, input, options = {}) {
   if (!env?.DB_V2) return { jobs: [], dispatched: 0 };
   const jobs = await createAiJobsForComment(env.DB_V2, input);
@@ -26,48 +30,99 @@ export async function scheduleAiForComment(env, input, options = {}) {
 
 export async function dispatchAiJobs(env, jobs) {
   if (!Array.isArray(jobs) || !jobs.length) return 0;
-  const queue = env?.AI_JOBS_QUEUE;
-  if (!queue || (typeof queue.send !== "function" && typeof queue.sendBatch !== "function")) return 0;
 
-  const messages = jobs
-    .map((job) => normalizeJobId(job?.id))
-    .filter(Boolean)
-    .map((jobId) => ({ body: { jobId } }));
+  const groups = {
+    [QUEUE_KIND_TRANSLATION]: [],
+    [QUEUE_KIND_MODERATION]: [],
+    [QUEUE_KIND_LEGACY]: []
+  };
+  for (const job of jobs) {
+    const jobId = normalizeJobId(job?.id);
+    if (!jobId) continue;
+    const message = { body: { jobId } };
+    if (job?.jobType === QUEUE_KIND_TRANSLATION) groups[QUEUE_KIND_TRANSLATION].push(message);
+    else if (job?.jobType === QUEUE_KIND_MODERATION) groups[QUEUE_KIND_MODERATION].push(message);
+    else groups[QUEUE_KIND_LEGACY].push(message);
+  }
+
+  const legacyQueue = env?.AI_JOBS_QUEUE;
+  const dispatched = await Promise.all([
+    dispatchQueueGroup(
+      env?.AI_TRANSLATION_QUEUE,
+      legacyQueue,
+      groups[QUEUE_KIND_TRANSLATION],
+      QUEUE_KIND_TRANSLATION
+    ),
+    dispatchQueueGroup(
+      env?.AI_MODERATION_QUEUE,
+      legacyQueue,
+      groups[QUEUE_KIND_MODERATION],
+      QUEUE_KIND_MODERATION
+    ),
+    dispatchQueueGroup(
+      legacyQueue,
+      null,
+      groups[QUEUE_KIND_LEGACY],
+      QUEUE_KIND_LEGACY
+    )
+  ]);
+  return dispatched.reduce((total, count) => total + count, 0);
+}
+
+async function dispatchQueueGroup(primaryQueue, fallbackQueue, messages, label) {
   if (!messages.length) return 0;
+  const primary = await sendQueueMessages(primaryQueue, messages, label);
+  if (!primary.unsent.length || !fallbackQueue || fallbackQueue === primaryQueue) return primary.sent;
+  const fallback = await sendQueueMessages(fallbackQueue, primary.unsent, `${label}-fallback`);
+  return primary.sent + fallback.sent;
+}
+
+async function sendQueueMessages(queue, messages, label) {
+  if (!queue || (typeof queue.send !== "function" && typeof queue.sendBatch !== "function")) {
+    return { sent: 0, unsent: messages };
+  }
 
   if (typeof queue.sendBatch === "function") {
     try {
       await queue.sendBatch(messages);
-      return messages.length;
+      return { sent: messages.length, unsent: [] };
     } catch (error) {
-      console.error("AI queue batch dispatch failed", safeCode(error));
+      console.error(`AI ${label} queue batch dispatch failed`, safeCode(error));
     }
   }
 
-  if (typeof queue.send !== "function") return 0;
-  const results = await Promise.allSettled(
-    messages.map((message) => queue.send(message.body))
-  );
-  let dispatched = 0;
-  for (const result of results) {
-    if (result.status === "fulfilled") dispatched += 1;
-    else console.error("AI queue dispatch failed", safeCode(result.reason));
+  if (typeof queue.send !== "function") return { sent: 0, unsent: messages };
+  const results = await Promise.allSettled(messages.map((message) => queue.send(message.body)));
+  const unsent = [];
+  let sent = 0;
+  for (let index = 0; index < results.length; index += 1) {
+    const result = results[index];
+    if (result.status === "fulfilled") sent += 1;
+    else {
+      unsent.push(messages[index]);
+      console.error(`AI ${label} queue dispatch failed`, safeCode(result.reason));
+    }
   }
-  return dispatched;
+  return { sent, unsent };
 }
 
 export async function processAiQueueBatch(batch, env) {
   const messages = Array.from(batch?.messages || []);
   if (!messages.length) return;
-  const parallelism = normalizeParallelism(env?.AI_QUEUE_PARALLELISM, messages.length);
-  await runWithConcurrency(messages, parallelism, (message) => processAiQueueMessage(message, env));
+  const queueKind = queueKindFromName(batch?.queue);
+  const parallelism = queueParallelism(env, queueKind, messages.length);
+  await runWithConcurrency(messages, parallelism, (message) => processAiQueueMessage(message, env, queueKind));
 }
 
-async function processAiQueueMessage(message, env) {
+async function processAiQueueMessage(message, env, queueKind) {
   try {
     const jobId = normalizeJobId(message?.body?.jobId ?? message?.body);
     if (!jobId) {
       message?.ack?.();
+      return;
+    }
+    if (!await acquireQueueCapacity(env, queueKind)) {
+      message?.retry?.({ delaySeconds: capacityRetryDelaySeconds(queueKind) });
       return;
     }
     const outcome = await processAiJob(env, jobId);
@@ -77,6 +132,26 @@ async function processAiQueueMessage(message, env) {
     console.error("AI queue message failed", safeCode(error));
     message?.retry?.({ delaySeconds: 30 });
   }
+}
+
+async function acquireQueueCapacity(env, queueKind) {
+  const limiter = queueKind === QUEUE_KIND_TRANSLATION
+    ? env?.AI_TRANSLATION_RATE_LIMITER
+    : queueKind === QUEUE_KIND_MODERATION
+      ? env?.AI_MODERATION_RATE_LIMITER
+      : null;
+  if (!limiter || typeof limiter.limit !== "function") return true;
+  try {
+    const result = await limiter.limit({ key: `workers-ai-${queueKind}` });
+    return result?.success !== false;
+  } catch (error) {
+    console.error(`AI ${queueKind} capacity limiter failed open`, safeCode(error));
+    return true;
+  }
+}
+
+function capacityRetryDelaySeconds(queueKind) {
+  return queueKind === QUEUE_KIND_TRANSLATION ? 10 : 20;
 }
 
 async function runWithConcurrency(items, parallelism, worker) {
@@ -90,12 +165,29 @@ async function runWithConcurrency(items, parallelism, worker) {
   await Promise.all(runners);
 }
 
-function normalizeParallelism(value, batchSize) {
+function queueParallelism(env, queueKind, batchSize) {
+  if (queueKind === QUEUE_KIND_TRANSLATION) {
+    return normalizeParallelism(env?.AI_TRANSLATION_QUEUE_PARALLELISM, batchSize, 6);
+  }
+  if (queueKind === QUEUE_KIND_MODERATION) {
+    return normalizeParallelism(env?.AI_MODERATION_QUEUE_PARALLELISM, batchSize, 5);
+  }
+  return normalizeParallelism(env?.AI_QUEUE_PARALLELISM, batchSize, 5);
+}
+
+function normalizeParallelism(value, batchSize, fallbackLimit = 5) {
   const parsed = Number(value);
-  const fallback = Math.min(5, Math.max(1, Number(batchSize) || 1));
-  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 10
+  const fallback = Math.min(fallbackLimit, Math.max(1, Number(batchSize) || 1));
+  return Number.isInteger(parsed) && parsed >= 1 && parsed <= 100
     ? Math.min(parsed, Math.max(1, batchSize))
     : fallback;
+}
+
+function queueKindFromName(value) {
+  const name = String(value || "").toLowerCase();
+  if (name.includes("translation")) return QUEUE_KIND_TRANSLATION;
+  if (name.includes("moderation")) return QUEUE_KIND_MODERATION;
+  return QUEUE_KIND_LEGACY;
 }
 
 export async function processAiJob(env, jobId, options = {}) {
@@ -229,10 +321,12 @@ export async function processAiJob(env, jobId, options = {}) {
     const code = String(error?.aiCode || error?.code || "AI_PROVIDER_FAILED").slice(0, 80);
     const retryable = shouldRetryAiJob(job, error, code);
     const failed = await failOrRetryAiJob(env.DB_V2, job, code, retryable, now);
-    if (!failed.retry && job.job_type === "translation") {
+    if (failed.retry && job.job_type === "translation" && Number(job.attempt_count) === 1 && isTranslationBackpressure(code)) {
+      await dispatchTranslationUnavailable(env, job, "TRANSLATION_DELAYED", now);
+    } else if (!failed.retry && job.job_type === "translation") {
       await dispatchTranslationUnavailable(env, job, code, now);
     }
-    return failed;
+    return { ...failed, errorCode: code };
   }
 }
 
@@ -304,7 +398,12 @@ function parseFilterContext(value) {
 function shouldRetryAiJob(job, error, code) {
   if (!error?.retryable) return false;
   if (job?.job_type !== "translation") return true;
-  return code === "AI_PERSISTENCE_FAILED";
+  return code === "AI_PERSISTENCE_FAILED"
+    || code === "AI_PROVIDER_RATE_LIMITED";
+}
+
+function isTranslationBackpressure(code) {
+  return code === "AI_PROVIDER_RATE_LIMITED";
 }
 
 function safeCode(error) {
