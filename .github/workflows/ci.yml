@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -29,6 +31,29 @@ jobs:
 
       - name: Pin npm
         run: npm install --global npm@11.18.0
+
+      - name: Materialize patched dependency state
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm pkg set 'overrides.undici=7.29.0'
+          npm install --package-lock-only --ignore-scripts
+          git checkout origin/master -- .github/workflows/ci.yml
+          git rm -f .github/workflows/update-undici-lock.yml
+          git add package.json package-lock.json .github/workflows/ci.yml
+          npm run manifest:source
+          git add SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt
+          npm run verify:source-manifest
+          mkdir -p generated-dependency-state
+          cp package.json package-lock.json SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt generated-dependency-state/
+
+      - name: Upload patched dependency state
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-patched-undici-lock
+          path: generated-dependency-state/
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Install dependencies
         shell: bash
