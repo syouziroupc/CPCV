@@ -4,22 +4,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>アカウント設定 | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui4">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav1">
 </head>
 <body class="page account-page">
   <a class="skip-link" href="#mainContent">本文へ移動</a>
   <main id="mainContent" class="wide account-shell">
-    <header class="app-header row between wrap">
-      <div><p class="eyebrow">CPCV</p><h1>アカウント設定</h1></div>
-      <a class="button" href="/admin">授業管理へ</a>
+    <header class="app-header app-topbar">
+      <a class="app-brand-link" href="/admin"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>アカウント設定</small></span></a>
+      <nav class="app-nav" aria-label="管理メニュー">
+        <a href="/admin">授業管理</a>
+        <a aria-current="page" href="/account">アカウント設定</a>
+        <a href="/master">組織管理</a>
+        <a href="/">ホーム</a>
+      </nav>
     </header>
 
     <section id="loadingSection" class="section"><p class="status">読み込んでいます。</p></section>
     <section id="accountSection" class="hidden">
       <nav class="account-section-nav" aria-label="設定項目">
         <a href="#organizationSettings">AI・辞書</a>
-        <a href="#emailSettings">メール変更</a>
-        <a href="#loginSettings">ログアウト</a>
+        <a href="#emailSettings">メール</a>
+        <a href="#loginSettings">ログイン状態</a>
         <a href="#deleteSettings">アカウント削除</a>
       </nav>
 

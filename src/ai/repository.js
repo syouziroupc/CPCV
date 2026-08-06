@@ -42,7 +42,8 @@ export async function getSessionAiSettings(db, organizationId, liveSessionId) {
   await ensureSessionAiSettings(db, organizationId, liveSessionId);
   const row = await db.prepare(
     `SELECT s.organization_id, s.live_session_id, s.moderation_enabled,
-            s.translation_enabled, s.target_language, s.updated_by_user_id,
+            s.translation_enabled, s.target_language,
+            COALESCE(s.translation_quality, 'balanced') AS translation_quality, s.updated_by_user_id,
             s.created_at, s.updated_at,
             COALESCE(o.enabled, 0) AS organization_enabled
      FROM session_ai_settings s
@@ -59,12 +60,13 @@ export async function updateSessionAiSettings(db, input) {
   const result = await db.prepare(
     `UPDATE session_ai_settings
      SET moderation_enabled = ?1, translation_enabled = ?2,
-         target_language = ?3, updated_by_user_id = ?4, updated_at = ?5
-     WHERE organization_id = ?6 AND live_session_id = ?7`
+         target_language = ?3, translation_quality = ?4, updated_by_user_id = ?5, updated_at = ?6
+     WHERE organization_id = ?7 AND live_session_id = ?8`
   ).bind(
     input.moderationEnabled ? 1 : 0,
     input.translationEnabled ? 1 : 0,
     input.targetLanguage,
+    input.translationQuality || "balanced",
     input.actorUserId,
     nowIso,
     input.organizationId,
@@ -208,6 +210,7 @@ export async function loadAiJobContext(db, jobId, now = Date.now()) {
             COALESCE(sas.moderation_enabled, 0) AS session_moderation_enabled,
             COALESCE(sas.translation_enabled, 0) AS session_translation_enabled,
             COALESCE(sas.target_language, 'ja') AS session_target_language,
+            COALESCE(sas.translation_quality, 'balanced') AS session_translation_quality,
             COALESCE(scfs.enabled, 0) AS session_filter_enabled,
             COALESCE(scfs.ai_routing_mode, 'ambiguous') AS session_filter_ai_routing_mode,
             COALESCE(scfs.translation_filter_enabled, 1) AS translation_filter_enabled,
@@ -453,6 +456,34 @@ export async function failOrRetryAiJob(db, job, code, retryable, now = Date.now(
   return { retry: !finalFailure, delaySeconds: Math.max(0, Math.ceil((Date.parse(runAfter) - nowMs) / 1000)) };
 }
 
+export async function requeueSessionTranslationJobs(db, input) {
+  const nowIso = new Date(input.now ?? Date.now()).toISOString();
+  const limit = Math.max(1, Math.min(100, Number(input.limit) || 100));
+  const rows = rowsOf(await db.prepare(
+    `SELECT j.id
+     FROM ai_jobs j
+     JOIN comments c ON c.id = j.comment_id AND c.organization_id = j.organization_id
+       AND c.live_session_id = j.live_session_id
+     WHERE j.organization_id = ?1 AND j.live_session_id = ?2
+       AND j.job_type = 'translation' AND c.moderation_state = 'visible'
+       AND c.retained_until > ?3
+     ORDER BY c.created_at DESC, c.id DESC LIMIT ?4`
+  ).bind(input.organizationId, input.liveSessionId, nowIso, limit).all());
+  if (!rows.length) return [];
+  const ids = rows.map((row) => row.id);
+  const placeholders = ids.map((_, index) => `?${index + 2}`).join(', ');
+  await db.prepare(
+    `UPDATE ai_jobs SET status = 'queued', attempt_count = 0, run_after = ?1,
+       claimed_at = NULL, finished_at = NULL, last_error_code = NULL, updated_at = ?1
+     WHERE id IN (${placeholders})`
+  ).bind(nowIso, ...ids).run();
+  const result = await db.prepare(
+    `SELECT id, job_type, target_language, status FROM ai_jobs
+     WHERE id IN (${placeholders}) ORDER BY created_at ASC, id ASC`
+  ).bind(nowIso, ...ids).all();
+  return rowsOf(result).map(jobDispatchResponse);
+}
+
 export async function retryAiJobsForComment(db, input) {
   const types = normalizeAiJobTypes(input.jobTypes);
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
@@ -599,9 +630,9 @@ async function ensureSessionAiSettings(db, organizationId, liveSessionId) {
   await db.prepare(
     `INSERT OR IGNORE INTO session_ai_settings (
        organization_id, live_session_id, moderation_enabled, translation_enabled,
-       target_language, updated_by_user_id, created_at, updated_at
+       target_language, translation_quality, updated_by_user_id, created_at, updated_at
      )
-     SELECT organization_id, id, 0, 0, 'ja', created_by_user_id, created_at, created_at
+     SELECT organization_id, id, 0, 0, 'ja', 'balanced', created_by_user_id, created_at, created_at
      FROM live_sessions WHERE organization_id = ?1 AND id = ?2`
   ).bind(organizationId, liveSessionId).run();
 }
@@ -668,6 +699,7 @@ function sessionSettingsResponse(row) {
     moderationEnabled: Boolean(row.moderation_enabled),
     translationEnabled: Boolean(row.translation_enabled),
     targetLanguage: row.target_language,
+    translationQuality: row.translation_quality || "balanced",
     updatedByUserId: row.updated_by_user_id || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at

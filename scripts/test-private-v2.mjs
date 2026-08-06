@@ -282,7 +282,7 @@ async function createHarness() {
     "0005_comment_content_guards.sql",
     "0006_manual_moderation.sql",
     "0007_realtime.sql",
-    "0008_email_auth.sql", "0009_account_lifecycle.sql", "0010_ai_moderation_translation.sql", "0011_dictionary_content_filter.sql", "0012_multilingual_filter_usability.sql", "0013_bilingual_filter_translation_safety.sql",
+    "0008_email_auth.sql", "0009_account_lifecycle.sql", "0010_ai_moderation_translation.sql", "0018_ai_translation_quality.sql", "0011_dictionary_content_filter.sql", "0012_multilingual_filter_usability.sql", "0013_bilingual_filter_translation_safety.sql",
     "0014_filter_pack_expansion.sql"
   ]) {
     v2Sqlite.exec(readFileSync(resolve(ROOT, "migrations-v2", name), "utf8"));

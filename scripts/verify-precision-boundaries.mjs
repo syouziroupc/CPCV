@@ -7,14 +7,20 @@ const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const results = [];
 
 const migrationFiles = readdirSync(resolve(ROOT, "migrations-v2")).sort();
-check("precision migrations are append-only", JSON.stringify(migrationFiles) === JSON.stringify([
+const expectedMigrationFiles = [
   "0001_initial_schema.sql", "0002_auth_security.sql", "0003_comments.sql",
   "0004_precision_hardening.sql", "0005_comment_content_guards.sql",
   "0006_manual_moderation.sql", "0007_realtime.sql", "0008_email_auth.sql", "0009_account_lifecycle.sql",
-  "0010_ai_moderation_translation.sql", "0011_dictionary_content_filter.sql", "0012_multilingual_filter_usability.sql", "0013_bilingual_filter_translation_safety.sql",
-    "0014_filter_pack_expansion.sql", "0015_pdf_page_analytics.sql", "0016_stage08_precision_hardening.sql",
-    "0017_final_integrity_hardening.sql"
-]), migrationFiles);
+  "0010_ai_moderation_translation.sql", "0011_dictionary_content_filter.sql", "0012_multilingual_filter_usability.sql",
+  "0013_bilingual_filter_translation_safety.sql", "0014_filter_pack_expansion.sql", "0015_pdf_page_analytics.sql",
+  "0016_stage08_precision_hardening.sql", "0017_final_integrity_hardening.sql", "0018_ai_translation_quality.sql"
+];
+check(
+  "precision migrations are append-only",
+  migrationFiles.length === expectedMigrationFiles.length
+    && expectedMigrationFiles.every((file, index) => migrationFiles[index] === file),
+  migrationFiles
+);
 const csrfMigration = text("migrations-v2/0004_precision_hardening.sql");
 check("secondary CSRF table has session cascade", csrfMigration.includes("CREATE TABLE auth_session_csrf_tokens") && csrfMigration.includes("ON DELETE CASCADE"));
 check("secondary CSRF expiry index exists", csrfMigration.includes("idx_auth_session_csrf_tokens_expiry"));

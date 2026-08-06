@@ -12,7 +12,7 @@ const check = (name, condition, detail = "") => {
 };
 
 const migrationNames = readdirSync(resolve(ROOT, "migrations-v2")).filter((name) => /^\d+_.*\.sql$/.test(name)).sort();
-check("Stage 7 migration 0010 remains present", migrationNames.includes("0010_ai_moderation_translation.sql"), migrationNames);
+check("Stage 7 migration 0010 remains present", migrationNames.includes("0010_ai_moderation_translation.sql", "0018_ai_translation_quality.sql"), migrationNames);
 const migration = text("migrations-v2/0010_ai_moderation_translation.sql");
 for (const table of ["organization_ai_settings", "session_ai_settings", "ai_jobs", "ai_results", "translations", "ai_usage_events"]) {
   check(`Stage 7 table exists: ${table}`, migration.includes(`CREATE TABLE ${table}`));

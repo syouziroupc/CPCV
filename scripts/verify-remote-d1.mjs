@@ -53,7 +53,8 @@ const migrationChecks = [
   ["0014_filter_pack_expansion", "Stage 7.8 migration 0014_filter_pack_expansion"],
   ["0015_pdf_page_analytics", "Stage 8 migration 0015_pdf_page_analytics"],
   ["0016_stage08_precision_hardening", "Stage 8.1 migration 0016_stage08_precision_hardening"],
-  ["0017_final_integrity_hardening", "Stage 8.2 migration 0017_final_integrity_hardening"]
+  ["0017_final_integrity_hardening", "Stage 8.2 migration 0017_final_integrity_hardening"],
+  ["0018_ai_translation_quality", "AI translation quality migration 0018_ai_translation_quality"]
 ];
 const migrationRows = query(`SELECT name FROM d1_migrations WHERE ${migrationChecks.map(([prefix]) => `name LIKE '${prefix}%'`).join(" OR ")} ORDER BY name;`);
 const migrationNames = new Set(migrationRows.map((row) => String(row.name || "")));
