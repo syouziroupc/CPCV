@@ -1,0 +1,74 @@
+name: Monitor responsive AI deployment
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/monitor-responsive-ai-deploy-20260807.yml'
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: cpcv-responsive-ai-monitor-20260807
+  cancel-in-progress: true
+
+env:
+  TARGET_HEAD_SHA: 4643a48a1462d5f4e234e1709f4e916601058d07
+  TARGET_WORKFLOW: deploy-responsive-ai-fix-20260807.yml
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 200
+    steps:
+      - name: Wait for deployment workflow
+        id: monitor
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_id=""
+          for attempt in $(seq 1 60); do
+            run_id=$(gh api "repos/$REPO/actions/workflows/$TARGET_WORKFLOW/runs?branch=master&event=push&per_page=20" --jq ".workflow_runs[] | select(.head_sha == \"$TARGET_HEAD_SHA\") | .id" | head -n1 || true)
+            [ -z "$run_id" ] || break
+            sleep 10
+          done
+          test -n "$run_id"
+          echo "run_id=$run_id" | tee -a "$GITHUB_OUTPUT"
+          echo "Deployment workflow run: $run_id"
+          for attempt in $(seq 1 1080); do
+            status=$(gh api "repos/$REPO/actions/runs/$run_id" --jq '.status')
+            conclusion=$(gh api "repos/$REPO/actions/runs/$run_id" --jq '.conclusion // ""')
+            echo "status=$status conclusion=$conclusion"
+            if [ "$status" = "completed" ]; then
+              echo "conclusion=$conclusion" >> "$GITHUB_OUTPUT"
+              [ "$conclusion" = "success" ]
+              exit
+            fi
+            sleep 10
+          done
+          echo 'Deployment workflow did not complete within the monitor timeout.' >&2
+          exit 1
+
+      - name: Download deployment evidence
+        if: steps.monitor.outputs.conclusion == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p monitored-evidence
+          gh run download "${{ steps.monitor.outputs.run_id }}" --repo "${{ github.repository }}" --dir monitored-evidence
+
+      - name: Upload monitored evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: monitored-responsive-ai-deployment-${{ steps.monitor.outputs.run_id }}
+          path: monitored-evidence/
+          if-no-files-found: warn
+          retention-days: 90
