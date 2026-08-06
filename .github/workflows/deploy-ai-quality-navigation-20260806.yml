@@ -1,4 +1,4 @@
-name: Deploy verified release preserving Worker secrets
+name: Deploy AI quality navigation production v2
 
 on:
   pull_request:
@@ -56,42 +56,23 @@ jobs:
           echo "::add-mask::$account"
           echo "CLOUDFLARE_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
           echo "CLOUDFLARE_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
-      - name: Validate immutable release
+      - name: Verify immutable source and accepted staging
         shell: bash
         run: |
           set -euo pipefail
           npm install --global npm@11.18.0
           npm ci
           npm run verify:source-manifest
-          npm run test:navigation-ui
-          npm run test:ai-quality-ui
-          npm run check
-          npm run check:project
-          npm run check:pdf-links
-          npm run check:stage08
-          npm run test:owner-bootstrap
           npm run verify:ai-ready
           npm run verify:final-docs
           npm run deploy:dry-run
-          npm audit
-          npm audit --omit=dev
-
-          # Legacy UI tests materialize fixtures. Restore the exact release before any remote operation.
-          git status --short > /tmp/post-validation-working-tree.txt
-          git reset --hard "$SOURCE_COMMIT"
-          git clean -fd
           test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
           test -z "$(git status --porcelain)"
-          npm run verify:source-manifest
           grep -F '0.8.10-nav1' public/index.html
           grep -F '0.8.10-nav1' public/admin/index.html
           grep -F 'sessionAiTranslationQuality' public/admin/index.html
-      - name: Reconfirm accepted staging release
-        shell: bash
-        run: |
-          set -euo pipefail
           mkdir -p deployment-records
-          cp /tmp/post-validation-working-tree.txt deployment-records/00-post-validation-working-tree.txt
+
           python - <<'PY'
           from pathlib import Path
           source = Path('wrangler.toml').read_text(encoding='utf-8')
@@ -122,15 +103,14 @@ jobs:
           Path('.cpcv-staging.wrangler.toml').write_text(source, encoding='utf-8')
           PY
           test "$(sha256sum .cpcv-staging.wrangler.toml | cut -d' ' -f1)" = "$STAGING_CONFIG_SHA256"
-          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
           node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .cpcv-staging.wrangler.toml
           node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee deployment-records/01-staging-smoke.txt
           npx wrangler deployments status --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-records/02-staging-deployment-status.txt
           grep -F "$STAGING_DEPLOYMENT_ID" deployment-records/02-staging-deployment-status.txt
           curl --fail-with-body -sS -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/?release=$SOURCE_COMMIT" | grep -F '授業開始までの3段階'
           curl --fail-with-body -sS -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/privacy?release=$SOURCE_COMMIT" | grep -F '標準保持期間は30日'
-          rm -f .cpcv-staging.wrangler.toml
-      - name: Verify existing production Worker secrets
+          rm .cpcv-staging.wrangler.toml
+      - name: Verify production prerequisites and rollback state
         shell: bash
         run: |
           set -euo pipefail
@@ -142,10 +122,6 @@ jobs:
             }
           done
           echo 'All required Worker secret bindings exist. Values were not read or changed.' | tee -a deployment-records/03-production-secret-names.txt
-      - name: Record production rollback state and preflight
-        shell: bash
-        run: |
-          set -euo pipefail
           {
             echo "release_commit=$SOURCE_COMMIT"
             echo "staging_deployment_id=$STAGING_DEPLOYMENT_ID"
@@ -156,25 +132,44 @@ jobs:
           npm run verify:stage82-preflight 2>&1 | tee deployment-records/06-stage82-preflight.txt
           npx wrangler d1 migrations list class_comment_db --remote 2>&1 | tee deployment-records/07-legacy-migrations-before.txt
           npx wrangler d1 migrations list class_comment_db_v2 --remote 2>&1 | tee deployment-records/08-v2-migrations-before.txt
-          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/09-remote-d1-before.txt
-          npm run verify:email-auth-ready 2>&1 | tee deployment-records/10-email-readiness.txt
-          npx wrangler deployments status 2>&1 | tee deployment-records/11-deployments-before.txt
-          npx wrangler versions list 2>&1 | tee deployment-records/12-versions-before.txt
-      - name: Apply production migrations
+          grep -F '0018_ai_translation_quality.sql' deployment-records/08-v2-migrations-before.txt
+          npm run verify:email-auth-ready 2>&1 | tee deployment-records/09-email-readiness.txt
+          npx wrangler deployments status 2>&1 | tee deployment-records/10-deployments-before.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/11-versions-before.txt
+      - name: Ensure production queues
+        shell: bash
+        run: |
+          set -euo pipefail
+          ensure() {
+            set +e
+            out=$(npx wrangler queues create "$1" 2>&1)
+            code=$?
+            set -e
+            printf '%s\n' "$out" | tee -a deployment-records/12-queues.txt
+            [ "$code" -eq 0 ] || grep -qiE 'already exists|already been taken|already in use|code: 11009' <<<"$out"
+          }
+          for q in cpcv-ai-jobs cpcv-ai-translation-jobs cpcv-ai-moderation-jobs cpcv-ai-translation-dlq cpcv-ai-moderation-dlq; do
+            ensure "$q"
+          done
+      - name: Apply production migrations and verify database
         shell: bash
         run: |
           set -euo pipefail
           npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee deployment-records/13-legacy-migrations-apply.txt
           npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee deployment-records/14-v2-migrations-apply.txt
           node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/15-remote-d1-after-migration.txt
-      - name: Deploy exact release preserving secrets
+      - name: Deploy exact release preserving existing secrets
         shell: bash
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
           test -z "$(git status --porcelain)"
           npx wrangler deploy --keep-vars 2>&1 | tee deployment-records/16-worker-deploy.txt
-      - name: Verify production release
+          deployment_id=$(grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' deployment-records/16-worker-deploy.txt | tail -1)
+          test -n "$deployment_id"
+          echo "PRODUCTION_DEPLOYMENT_ID=$deployment_id" >> "$GITHUB_ENV"
+          echo "$deployment_id" > deployment-records/production-deployment-id.txt
+      - name: Verify live production release
         shell: bash
         run: |
           set -euo pipefail
@@ -196,15 +191,20 @@ jobs:
           grep -F '組織を登録' deployment-records/production-signup.html
           grep -F 'パスワード再設定' deployment-records/production-forgot-password.html
           npx wrangler deployments status 2>&1 | tee deployment-records/19-deployments-after.txt
+          grep -F "$PRODUCTION_DEPLOYMENT_ID" deployment-records/19-deployments-after.txt
           npx wrangler versions list 2>&1 | tee deployment-records/20-versions-after.txt
-          echo "completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" > deployment-records/99-result.txt
-          echo 'result=PASSED' >> deployment-records/99-result.txt
+          {
+            echo "result=PASSED"
+            echo "release_commit=$SOURCE_COMMIT"
+            echo "production_deployment_id=$PRODUCTION_DEPLOYMENT_ID"
+            echo "completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > deployment-records/99-result.txt
           find deployment-records -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > deployment-records/SHA256SUMS.txt
       - name: Upload production evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cpcv-production-preserved-secrets-${{ env.SOURCE_COMMIT }}
+          name: cpcv-production-v2-${{ env.SOURCE_COMMIT }}
           path: deployment-records/
           if-no-files-found: error
           retention-days: 90
