@@ -1,0 +1,162 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+: "${SOURCE_COMMIT:?SOURCE_COMMIT is required}"
+: "${STAGING_ORIGIN:?STAGING_ORIGIN is required}"
+: "${PRODUCTION_ORIGIN:?PRODUCTION_ORIGIN is required}"
+: "${STAGING_DEPLOYMENT_ID:?STAGING_DEPLOYMENT_ID is required}"
+: "${STAGING_CONFIG_SHA256:?STAGING_CONFIG_SHA256 is required}"
+: "${CLOUDFLARE_API_TOKEN:?CLOUDFLARE_API_TOKEN is required}"
+: "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required}"
+
+mkdir -p deployment-records
+
+record() {
+  printf '%s\n' "$*" | tee -a deployment-records/00-progress.txt
+}
+
+record "release_commit=$SOURCE_COMMIT"
+test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+test -z "$(git status --porcelain)"
+
+npm install --global npm@11.18.0
+npm ci
+npm run verify:source-manifest
+npm run verify:ai-ready
+npm run verify:final-docs
+npm run deploy:dry-run
+
+test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+test -z "$(git status --porcelain)"
+grep -F '0.8.10-nav1' public/index.html
+grep -F '0.8.10-nav1' public/admin/index.html
+grep -F 'sessionAiTranslationQuality' public/admin/index.html
+record 'immutable source verified'
+
+python - <<'PY'
+from pathlib import Path
+source = Path('wrangler.toml').read_text(encoding='utf-8')
+replacements = {
+  'name = "class-pdf-comment-viewer-v01"': 'name = "class-pdf-comment-viewer-v01-staging"',
+  'database_name = "class_comment_db"': 'database_name = "class_comment_db_staging"',
+  'database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"': 'database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"',
+  'database_name = "class_comment_db_v2"': 'database_name = "class_comment_db_v2_staging"',
+  'database_id = "8315a076-67ad-44e6-8286-11887af52ad3"': 'database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"',
+  'queue = "cpcv-ai-jobs"': 'queue = "cpcv-ai-jobs-staging"',
+  'queue = "cpcv-ai-translation-jobs"': 'queue = "cpcv-ai-translation-jobs-staging"',
+  'dead_letter_queue = "cpcv-ai-translation-dlq"': 'dead_letter_queue = "cpcv-ai-translation-dlq-staging"',
+  'queue = "cpcv-ai-moderation-jobs"': 'queue = "cpcv-ai-moderation-jobs-staging"',
+  'dead_letter_queue = "cpcv-ai-moderation-dlq"': 'dead_letter_queue = "cpcv-ai-moderation-dlq-staging"',
+  '826071901': '826071801',
+  '826071902': '826071802',
+  '826071903': '826071803',
+  '826071904': '826071804',
+  '826071905': '826071805',
+  '826071906': '826071806',
+  'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev': 'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev',
+  'TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"': 'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"'
+}
+for old, new in replacements.items():
+    if old not in source:
+        raise SystemExit(f'missing staging replacement: {old}')
+    source = source.replace(old, new)
+Path('.cpcv-staging.wrangler.toml').write_text(source, encoding='utf-8')
+PY
+
+test "$(sha256sum .cpcv-staging.wrangler.toml | cut -d' ' -f1)" = "$STAGING_CONFIG_SHA256"
+node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .cpcv-staging.wrangler.toml
+node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee deployment-records/01-staging-smoke.txt
+npx wrangler deployments status --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-records/02-staging-deployment-status.txt
+grep -F "$STAGING_DEPLOYMENT_ID" deployment-records/02-staging-deployment-status.txt
+curl --fail-with-body -sS -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/?release=$SOURCE_COMMIT" | grep -F '授業開始までの3段階'
+curl --fail-with-body -sS -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/privacy?release=$SOURCE_COMMIT" | grep -F '標準保持期間は30日'
+rm .cpcv-staging.wrangler.toml
+record 'accepted staging release reconfirmed'
+
+npx wrangler secret list --config wrangler.toml 2>&1 | tee deployment-records/03-production-secret-names.txt
+for name in AUTH_RATE_LIMIT_PEPPER PUBLIC_RATE_LIMIT_PEPPER TURNSTILE_SECRET_KEY; do
+  grep -F "$name" deployment-records/03-production-secret-names.txt >/dev/null || {
+    echo "Required existing Worker secret is absent: $name" >&2
+    exit 1
+  }
+done
+echo 'All required Worker secret bindings exist. Values were not read or changed.' | tee -a deployment-records/03-production-secret-names.txt
+
+{
+  echo "release_commit=$SOURCE_COMMIT"
+  echo "staging_deployment_id=$STAGING_DEPLOYMENT_ID"
+  echo "staging_config_sha256=$STAGING_CONFIG_SHA256"
+  echo "started_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > deployment-records/04-metadata.txt
+
+npx wrangler d1 time-travel info class_comment_db_v2 2>&1 | tee deployment-records/05-d1-time-travel.txt
+npm run verify:stage82-preflight 2>&1 | tee deployment-records/06-stage82-preflight.txt
+npx wrangler d1 migrations list class_comment_db --remote 2>&1 | tee deployment-records/07-legacy-migrations-before.txt
+npx wrangler d1 migrations list class_comment_db_v2 --remote 2>&1 | tee deployment-records/08-v2-migrations-before.txt
+npm run verify:email-auth-ready 2>&1 | tee deployment-records/09-email-readiness.txt
+npx wrangler deployments status 2>&1 | tee deployment-records/10-deployments-before.txt
+npx wrangler versions list 2>&1 | tee deployment-records/11-versions-before.txt
+record 'production rollback state and existing-data preflight recorded'
+
+ensure_queue() {
+  local queue="$1"
+  local out code
+  set +e
+  out=$(npx wrangler queues create "$queue" 2>&1)
+  code=$?
+  set -e
+  printf '%s\n' "$out" | tee -a deployment-records/12-queues.txt
+  if [ "$code" -ne 0 ]; then
+    grep -qiE 'already exists|already been taken|already in use|code: 11009' <<<"$out"
+  fi
+}
+for queue in cpcv-ai-jobs cpcv-ai-translation-jobs cpcv-ai-moderation-jobs cpcv-ai-translation-dlq cpcv-ai-moderation-dlq; do
+  ensure_queue "$queue"
+done
+record 'production queues verified'
+
+npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee deployment-records/13-legacy-migrations-apply.txt
+npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee deployment-records/14-v2-migrations-apply.txt
+node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/15-remote-d1-after-migration.txt
+record 'production migrations and database verification completed'
+
+test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+test -z "$(git status --porcelain)"
+npx wrangler deploy --keep-vars 2>&1 | tee deployment-records/16-worker-deploy.txt
+production_deployment_id=$(grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' deployment-records/16-worker-deploy.txt | tail -1)
+test -n "$production_deployment_id"
+echo "$production_deployment_id" > deployment-records/production-deployment-id.txt
+record "production_deployment_id=$production_deployment_id"
+
+node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/17-remote-d1-after-deploy.txt
+node scripts/smoke-production.mjs --origin "$PRODUCTION_ORIGIN" 2>&1 | tee deployment-records/18-production-smoke.txt
+fetch() {
+  curl --fail-with-body -sS --retry 5 --retry-delay 2 --retry-all-errors -H 'Cache-Control: no-cache' "$1"
+}
+for path in '' about guide privacy admin account master signup forgot-password; do
+  fetch "$PRODUCTION_ORIGIN/${path}?release=$SOURCE_COMMIT" > "deployment-records/production-${path:-home}.html"
+done
+
+grep -F '学生の反応を' deployment-records/production-home.html
+grep -F '授業開始までの3段階' deployment-records/production-home.html
+grep -F '3つの画面で動く' deployment-records/production-about.html
+grep -F '利用者別の操作手順' deployment-records/production-guide.html
+grep -F '標準保持期間は30日' deployment-records/production-privacy.html
+grep -F 'sessionAiTranslationQuality' deployment-records/production-admin.html
+grep -F '>アカウント設定<' deployment-records/production-admin.html
+grep -F '>組織管理<' deployment-records/production-account.html
+grep -F '>授業管理<' deployment-records/production-master.html
+grep -F '組織を登録' deployment-records/production-signup.html
+grep -F 'パスワード再設定' deployment-records/production-forgot-password.html
+npx wrangler deployments status 2>&1 | tee deployment-records/19-deployments-after.txt
+grep -F "$production_deployment_id" deployment-records/19-deployments-after.txt
+npx wrangler versions list 2>&1 | tee deployment-records/20-versions-after.txt
+
+{
+  echo 'result=PASSED'
+  echo "release_commit=$SOURCE_COMMIT"
+  echo "production_deployment_id=$production_deployment_id"
+  echo "completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > deployment-records/99-result.txt
+find deployment-records -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > deployment-records/SHA256SUMS.txt
+record 'production deployment and live verification passed'
