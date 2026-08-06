@@ -1,0 +1,574 @@
+/* CPCV responsive layout hardening.
+   Loaded after app.css so later feature styles cannot reintroduce overflow. */
+
+html,
+body {
+  width: 100%;
+  max-width: 100%;
+}
+
+body,
+.page,
+.site-page,
+.internal-page,
+.viewer-body {
+  min-width: 0;
+}
+
+img,
+svg,
+video,
+canvas,
+iframe {
+  max-width: 100%;
+}
+
+img,
+video,
+canvas {
+  height: auto;
+}
+
+input,
+select,
+textarea,
+button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.input,
+.select,
+.textarea,
+.button,
+.auth-form,
+.auth-form > *,
+.field-control,
+.field-control > *,
+.row,
+.grid,
+.section,
+.card,
+.workspace-panel,
+.workspace-detail,
+.detail-body,
+.teacher-item,
+.info-box,
+.toggle-row,
+.state-tile,
+.app-header,
+.app-nav,
+.site-header,
+.site-nav,
+.compact-public-header,
+.clear-public-main,
+.internal-content,
+.admin-shell,
+.account-shell,
+.internal-shell,
+.admin-home-grid,
+.session-workspace,
+.session-command-center,
+.lesson-live-column,
+.lesson-settings-column,
+.account-summary-grid,
+.account-settings-grid,
+.internal-two-column {
+  min-width: 0;
+  max-width: 100%;
+}
+
+p,
+li,
+dd,
+dt,
+label,
+small,
+strong,
+span,
+a,
+button,
+th,
+td,
+summary {
+  overflow-wrap: anywhere;
+}
+
+.mono,
+.selectable,
+.session-code,
+.one-time-password {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Authentication screens */
+.admin-page.auth-view {
+  width: 100%;
+  place-items: center;
+  align-content: center;
+  padding: clamp(16px, 4vw, 40px);
+}
+
+.admin-page.auth-view .admin-shell {
+  width: min(100%, 1040px);
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.admin-page.auth-view .admin-shell > :not(.app-header) {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.admin-page.auth-view .admin-login-shell,
+.site-page .auth-shell,
+.clear-auth-page .auth-shell {
+  width: min(960px, 100%);
+  max-width: 960px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  padding: 0;
+  border: 2px solid var(--border);
+  background: #fff;
+  box-shadow: 8px 8px 0 rgba(17, 17, 17, .12);
+  overflow: visible;
+}
+
+.clear-auth-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  place-items: start stretch;
+  padding: 0;
+}
+
+.clear-auth-page > .compact-public-header {
+  align-self: start;
+}
+
+.clear-auth-page > .auth-shell {
+  align-self: center;
+  justify-self: center;
+  margin-block: clamp(24px, 6vh, 64px);
+}
+
+.auth-intro,
+.auth-form-panel {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: clamp(24px, 4vw, 40px);
+}
+
+.auth-intro {
+  border-right: 2px solid var(--border);
+}
+
+.auth-intro h1,
+.admin-login-shell .auth-intro h1 {
+  max-width: 100%;
+  margin: 8px 0 16px;
+  font-size: clamp(2rem, 3.5vw, 3rem);
+  line-height: 1.08;
+  letter-spacing: -.035em;
+  word-break: keep-all;
+  overflow-wrap: normal;
+  text-wrap: balance;
+}
+
+.auth-form-panel .auth-form,
+.auth-form-panel .auth-form > label,
+.auth-form-panel .auth-form > input,
+.auth-form-panel .auth-form > select,
+.auth-form-panel .auth-form > textarea,
+.auth-form-panel .auth-form > button,
+.auth-form-panel .auth-form > div {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.auth-form-panel .input,
+.auth-form-panel .select,
+.auth-form-panel .textarea,
+.auth-form-panel .auth-submit {
+  display: block;
+  box-sizing: border-box;
+}
+
+.auth-form-panel .label .muted {
+  display: inline;
+  white-space: normal;
+}
+
+.auth-links,
+.auth-intro-links,
+.auth-footer {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  white-space: normal;
+}
+
+.auth-links a,
+.auth-intro-links a,
+.auth-footer a {
+  min-width: 0;
+  white-space: normal;
+}
+
+.auth-challenge,
+.auth-challenge > div,
+.auth-challenge iframe {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+}
+
+.status {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Navigation and shared shells */
+.compact-public-header,
+.clear-site-header,
+.app-topbar {
+  width: 100%;
+  max-width: 100%;
+}
+
+.compact-public-header nav,
+.clear-site-header .site-nav,
+.app-nav {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-brand-link,
+.brand,
+.site-brand {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.app-brand-link > span:last-child,
+.brand > span:last-child {
+  min-width: 0;
+}
+
+.app-nav a,
+.app-nav button,
+.compact-public-header nav a,
+.clear-site-header .site-nav a {
+  flex: 0 0 auto;
+}
+
+.admin-shell,
+.account-shell,
+.internal-shell {
+  width: min(100%, 1440px);
+}
+
+.admin-home-grid,
+.session-workspace,
+#accountSection,
+.internal-content {
+  width: min(1240px, calc(100% - 40px));
+}
+
+/* Application controls */
+.settings-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.settings-grid > *,
+.ai-translation-settings > *,
+.live-state-grid > *,
+.session-settings-savebar > *,
+.primary-actions > *,
+.moderation-bulk-actions > *,
+.analytics-export-row > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.field-control .input,
+.field-control .select,
+.field-control .textarea,
+.settings-grid .input,
+.settings-grid .select {
+  width: 100%;
+}
+
+.session-settings-savebar {
+  max-width: 100%;
+}
+
+.session-settings-savebar .button {
+  max-width: 100%;
+}
+
+.teacher-item > div,
+.row > * {
+  min-width: 0;
+}
+
+.teacher-item .mono {
+  max-width: 100%;
+}
+
+.moderation-table-wrap,
+.filter-table-wrap,
+.local-log-table-wrap,
+.analytics-table-wrap {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.moderation-message,
+.ai-result-cell,
+.moderation-actions,
+.ai-result-badge,
+.ai-result-detail,
+.ai-translation-text,
+.filter-display-message,
+.filter-evidence {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* Public information pages */
+.clear-hero,
+.home-join-panel,
+.clear-feature-grid,
+.plain-comparison,
+.data-summary-grid,
+.retention-table,
+.clear-definition-list,
+.compact-definition-list {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.clear-hero > *,
+.home-join-panel > *,
+.clear-feature-grid > *,
+.plain-comparison > *,
+.data-summary-grid > *,
+.retention-table > *,
+.clear-definition-list > *,
+.compact-definition-list > * {
+  min-width: 0;
+}
+
+.clear-join-form,
+.join-form {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.clear-join-form .input,
+.join-form .input {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Viewer controls intentionally scroll inside their own bar, not the page. */
+.viewer-topbar {
+  max-width: calc(100vw - 24px);
+}
+
+.viewer-topbar > * {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 900px) {
+  .admin-page.auth-view .admin-login-shell,
+  .site-page .auth-shell,
+  .clear-auth-page .auth-shell {
+    width: min(680px, 100%);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-intro {
+    border-right: 0;
+    border-bottom: 2px solid var(--border);
+  }
+
+  .auth-intro h1,
+  .admin-login-shell .auth-intro h1 {
+    font-size: clamp(1.9rem, 6vw, 2.6rem);
+  }
+
+  .session-command-center,
+  .internal-two-column,
+  .account-summary-grid,
+  .account-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .page,
+  .admin-page.auth-view {
+    padding: 12px;
+  }
+
+  .clear-auth-page {
+    padding: 0;
+  }
+
+  .clear-auth-page > .auth-shell {
+    width: calc(100% - 24px);
+    margin-block: 20px 28px;
+  }
+
+  .admin-page.auth-view .admin-login-shell {
+    width: 100%;
+  }
+
+  .auth-intro,
+  .auth-form-panel {
+    padding: 22px;
+  }
+
+  .auth-intro h1,
+  .admin-login-shell .auth-intro h1 {
+    font-size: clamp(1.85rem, 8vw, 2.35rem);
+  }
+
+  .compact-public-header,
+  .clear-site-header,
+  .app-topbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .compact-public-header nav,
+  .clear-site-header .site-nav,
+  .app-nav {
+    width: 100%;
+    display: flex;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding-bottom: 4px;
+  }
+
+  .admin-home-grid,
+  .session-workspace,
+  #accountSection,
+  .internal-content,
+  .clear-public-main {
+    width: min(100% - 24px, 1240px);
+  }
+
+  .settings-grid,
+  .ai-translation-settings,
+  .live-state-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .session-settings-savebar,
+  .settings-save-row,
+  .analytics-export-row,
+  .internal-page-heading,
+  .clear-bottom-cta,
+  .clear-footer {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .session-settings-savebar .button,
+  .settings-save-row .button,
+  .analytics-export-row .button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .teacher-item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .teacher-item .row,
+  .moderation-bulk-actions {
+    width: 100%;
+  }
+
+  .moderation-bulk-actions .button,
+  .teacher-item .button {
+    flex: 1 1 140px;
+  }
+}
+
+@media (max-width: 420px) {
+  .page,
+  .admin-page.auth-view {
+    padding: 8px;
+  }
+
+  .clear-auth-page {
+    padding: 0;
+  }
+
+  .clear-auth-page > .auth-shell {
+    width: calc(100% - 16px);
+    margin-block: 12px 20px;
+  }
+
+  .auth-intro,
+  .auth-form-panel {
+    padding: 18px 16px;
+  }
+
+  .auth-intro h1,
+  .admin-login-shell .auth-intro h1 {
+    font-size: clamp(1.72rem, 8.8vw, 2.05rem);
+    letter-spacing: -.025em;
+  }
+
+  .auth-links,
+  .auth-intro-links,
+  .auth-footer {
+    gap: 10px 14px;
+  }
+
+  .button {
+    padding-inline: 12px;
+  }
+
+  .admin-home-grid,
+  .session-workspace,
+  #accountSection,
+  .internal-content,
+  .clear-public-main {
+    width: min(100% - 16px, 1240px);
+  }
+
+  .moderation-table td,
+  .filter-table td {
+    grid-template-columns: 78px minmax(0, 1fr);
+  }
+}
