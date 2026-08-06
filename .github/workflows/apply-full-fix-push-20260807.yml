@@ -1,4 +1,5 @@
 name: Apply full fix from branch push
+run-name: Apply CPCV responsive and translation repairs
 
 on:
   push:
