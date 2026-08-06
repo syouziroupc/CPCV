@@ -1,0 +1,39 @@
+name: Fix AI quality navigation acceptance label
+
+on:
+  pull_request:
+    branches: [master]
+    paths: [.github/workflows/fix-ai-quality-navigation-acceptance.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.head_ref == 'agent/deploy-ai-quality-navigation-20260806'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/deploy-ai-quality-navigation-20260806
+          fetch-depth: 0
+      - name: Align password reset acceptance text
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/workflows/deploy-ai-quality-navigation-20260806.yml')
+          text = path.read_text(encoding='utf-8')
+          old = "grep -F 'パスワードを再設定' deployment-evidence/staging/forgot-password.html"
+          new = "grep -F 'パスワード再設定' deployment-evidence/staging/forgot-password.html"
+          if text.count(old) != 1:
+              raise SystemExit('password reset acceptance anchor not found exactly once')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          rm .github/workflows/fix-ai-quality-navigation-acceptance.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Align staging password reset acceptance text'
+          git push origin HEAD:agent/deploy-ai-quality-navigation-20260806
