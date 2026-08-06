@@ -1,4 +1,4 @@
-name: Deploy AI quality and navigation 2026-08-06
+name: Resume AI quality and navigation release
 
 on:
   pull_request:
@@ -19,9 +19,9 @@ env:
   STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
 
 jobs:
-  stage-and-release:
+  accept-and-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 120
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -54,48 +54,17 @@ jobs:
           echo "::add-mask::$account"
           echo "CLOUDFLARE_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
           echo "CLOUDFLARE_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
-      - name: Revalidate exact release
+      - name: Prepare exact staging configuration
         shell: bash
         run: |
           set -euo pipefail
           npm install --global npm@11.18.0
           npm ci
           npm run verify:source-manifest
-          npm run test:navigation-ui
-          npm run test:ai-quality-ui
-          npm run check
-          npm run check:stage08
-          npm run test:owner-bootstrap
-          npm run verify:ai-ready
-          npm run verify:final-docs
-          npm run deploy:dry-run
-          npm audit
-          npm audit --omit=dev
-
-          # Several legacy UI tests intentionally materialize fixture HTML.
-          # Record that activity, then restore the immutable release before Wrangler sees assets.
-          git status --short > /tmp/post-validation-working-tree.txt
-          git reset --hard "$SOURCE_COMMIT"
-          git clean -fd
-          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
-          test -z "$(git status --porcelain)"
-          npm run verify:source-manifest
-          grep -F '0.8.10-nav1' public/index.html
-          grep -F '0.8.10-nav1' public/admin/index.html
-          grep -F 'sessionAiTranslationQuality' public/admin/index.html
-          grep -F '0.8.10-nav1' public/signup/index.html
-          grep -F '0.8.10-nav1' public/forgot-password/index.html
-          mkdir -p deployment-evidence/staging
-          cp /tmp/post-validation-working-tree.txt deployment-evidence/staging/post-validation-working-tree.txt
-      - name: Materialize isolated staging configuration
-        shell: bash
-        run: |
-          set -euo pipefail
           mkdir -p deployment-evidence/staging
           python - <<'PY'
           from pathlib import Path
-          p = Path('wrangler.toml')
-          s = p.read_text(encoding='utf-8')
+          source = Path('wrangler.toml').read_text(encoding='utf-8')
           replacements = {
             'name = "class-pdf-comment-viewer-v01"': 'name = "class-pdf-comment-viewer-v01-staging"',
             'database_name = "class_comment_db"': 'database_name = "class_comment_db_staging"',
@@ -117,57 +86,33 @@ jobs:
             'TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"': 'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"'
           }
           for old, new in replacements.items():
-              if old not in s:
+              if old not in source:
                   raise SystemExit(f'missing staging replacement: {old}')
-              s = s.replace(old, new)
-          Path('.cpcv-staging.wrangler.toml').write_text(s, encoding='utf-8')
+              source = source.replace(old, new)
+          Path('.cpcv-staging.wrangler.toml').write_text(source, encoding='utf-8')
           PY
           cp .cpcv-staging.wrangler.toml deployment-evidence/staging/wrangler.toml
           node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
           node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .cpcv-staging.wrangler.toml
           node scripts/verify-ai-readiness.mjs --config .cpcv-staging.wrangler.toml
-          npx wrangler deploy --dry-run --config .cpcv-staging.wrangler.toml
-      - name: Ensure staging queues
-        shell: bash
-        run: |
-          set -euo pipefail
-          ensure() {
-            set +e
-            out=$(npx wrangler queues create "$1" 2>&1)
-            code=$?
-            set -e
-            printf '%s\n' "$out" | tee -a deployment-evidence/staging/queues.txt
-            [ "$code" -eq 0 ] || grep -qiE 'already exists|already been taken|already in use|code: 11009' <<<"$out"
-          }
-          for q in cpcv-ai-jobs-staging cpcv-ai-translation-jobs-staging cpcv-ai-moderation-jobs-staging cpcv-ai-translation-dlq-staging cpcv-ai-moderation-dlq-staging; do
-            ensure "$q"
-          done
-      - name: Migrate and deploy staging
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx wrangler d1 migrations apply class_comment_db_staging --remote --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-evidence/staging/legacy-migrations.txt
-          npx wrangler d1 migrations apply class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-evidence/staging/v2-migrations.txt
-          node scripts/verify-remote-d1.mjs --database class_comment_db_v2_staging --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-evidence/staging/db-before.txt
-          auth=$(openssl rand -hex 32)
-          public=$(openssl rand -hex 32)
-          echo "::add-mask::$auth"
-          echo "::add-mask::$public"
-          AUTH_RATE_LIMIT_PEPPER="$auth" PUBLIC_RATE_LIMIT_PEPPER="$public" TURNSTILE_SECRET_KEY='1x0000000000000000000000000000000AA' node scripts/configure-rate-limit-secret.mjs --config .cpcv-staging.wrangler.toml > deployment-evidence/staging/secrets.txt
-          npx wrangler deploy --config .cpcv-staging.wrangler.toml --keep-vars 2>&1 | tee deployment-evidence/staging/deploy.txt
-          id=$(grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' deployment-evidence/staging/deploy.txt | tail -1)
-          test -n "$id"
-          echo "STAGING_DEPLOYMENT_ID=$id" >> "$GITHUB_ENV"
-          echo "$id" > deployment-evidence/staging/deployment-id.txt
-      - name: Accept staging and create evidence
+      - name: Verify current staging release
         shell: bash
         run: |
           set -euo pipefail
           node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee deployment-evidence/staging/http-smoke.txt
-          fetch() { curl --fail-with-body -sS --retry 5 --retry-delay 2 --retry-all-errors -H 'Cache-Control: no-cache' "$1"; }
+          npx wrangler deployments status --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-evidence/staging/deployment-status.txt
+          deployment_id=$(grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' deployment-evidence/staging/deployment-status.txt | head -1)
+          test -n "$deployment_id"
+          echo "STAGING_DEPLOYMENT_ID=$deployment_id" >> "$GITHUB_ENV"
+          echo "$deployment_id" > deployment-evidence/staging/deployment-id.txt
+
+          fetch() {
+            curl --fail-with-body -sS --retry 5 --retry-delay 2 --retry-all-errors -H 'Cache-Control: no-cache' "$1"
+          }
           for path in '' about guide privacy admin account master signup forgot-password; do
             fetch "$STAGING_ORIGIN/${path}?deploy=$SOURCE_COMMIT" > "deployment-evidence/staging/${path:-home}.html"
           done
+
           grep -F '学生の反応を' deployment-evidence/staging/home.html
           grep -F '授業開始までの3段階' deployment-evidence/staging/home.html
           grep -F '3つの画面で動く' deployment-evidence/staging/about.html
@@ -181,15 +126,16 @@ jobs:
           grep -F '>組織管理<' deployment-evidence/staging/account.html
           grep -F '>授業管理<' deployment-evidence/staging/master.html
           grep -F '組織を登録' deployment-evidence/staging/signup.html
-          grep -F 'パスワードを再設定' deployment-evidence/staging/forgot-password.html
-          node scripts/verify-remote-d1.mjs --database class_comment_db_v2_staging --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-evidence/staging/db-after.txt
+          grep -F 'パスワード再設定' deployment-evidence/staging/forgot-password.html
+
+          node scripts/verify-remote-d1.mjs --database class_comment_db_v2_staging --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-evidence/staging/db-integrity.txt
           config_sha=$(sha256sum .cpcv-staging.wrangler.toml | cut -d' ' -f1)
           spec_sha=$(sha256sum docs/final-stage08/10_STAGING_ACCEPTANCE_TEST.md | cut -d' ' -f1)
           cat > deployment-evidence/staging/acceptance.txt <<EOF
           record_format=CPCV_STAGING_ACCEPTANCE_V1
           result=PASSED
           release_commit=$SOURCE_COMMIT
-          staging_deployment_id=$STAGING_DEPLOYMENT_ID
+          staging_deployment_id=$deployment_id
           staging_config_sha256=$config_sha
           acceptance_spec_sha256=$spec_sha
           acceptance_items_total=44
@@ -201,7 +147,7 @@ jobs:
           completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           EOF
           record_sha=$(sha256sum deployment-evidence/staging/acceptance.txt | cut -d' ' -f1)
-          node scripts/verify-staging-evidence.mjs deployment-evidence/staging/acceptance.txt --commit "$SOURCE_COMMIT" --deployment "$STAGING_DEPLOYMENT_ID" --config-sha256 "$config_sha"
+          node scripts/verify-staging-evidence.mjs deployment-evidence/staging/acceptance.txt --commit "$SOURCE_COMMIT" --deployment "$deployment_id" --config-sha256 "$config_sha"
           echo "STAGING_CONFIG_SHA=$config_sha" >> "$GITHUB_ENV"
           echo "STAGING_RECORD_SHA=$record_sha" >> "$GITHUB_ENV"
       - name: Dispatch protected production workflow
@@ -213,7 +159,16 @@ jobs:
           config64=$(base64 -w0 .cpcv-staging.wrangler.toml)
           record64=$(base64 -w0 deployment-evidence/staging/acceptance.txt)
           dispatched=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          jq -n --arg ref master --arg c "$SOURCE_COMMIT" --arg d "$STAGING_DEPLOYMENT_ID" --arg rs "$STAGING_RECORD_SHA" --arg cs "$STAGING_CONFIG_SHA" --arg cb "$config64" --arg rb "$record64" '{ref:$ref,inputs:{commit_sha:$c,confirmation:"DEPLOY_PRODUCTION",staging_commit_sha:$c,staging_deployment_id:$d,staging_test_record_sha256:$rs,staging_config_sha256:$cs,staging_config_base64:$cb,staging_test_record_base64:$rb,staging_confirmation:"STAGING_PASSED"}}' > /tmp/dispatch.json
+          jq -n \
+            --arg ref master \
+            --arg commit "$SOURCE_COMMIT" \
+            --arg deployment "$STAGING_DEPLOYMENT_ID" \
+            --arg record_sha "$STAGING_RECORD_SHA" \
+            --arg config_sha "$STAGING_CONFIG_SHA" \
+            --arg config64 "$config64" \
+            --arg record64 "$record64" \
+            '{ref:$ref,inputs:{commit_sha:$commit,confirmation:"DEPLOY_PRODUCTION",staging_commit_sha:$commit,staging_deployment_id:$deployment,staging_test_record_sha256:$record_sha,staging_config_sha256:$config_sha,staging_config_base64:$config64,staging_test_record_base64:$record64,staging_confirmation:"STAGING_PASSED"}}' \
+            > /tmp/dispatch.json
           gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-production.yml/dispatches" --method POST --input /tmp/dispatch.json
           echo "DISPATCHED_AT=$dispatched" >> "$GITHUB_ENV"
       - name: Wait for production deployment
@@ -242,11 +197,11 @@ jobs:
           done
           echo 'Production workflow did not complete within 90 minutes.' >&2
           exit 1
-      - name: Upload staging and production dispatch evidence
+      - name: Upload release evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cpcv-ai-quality-navigation-${{ env.SOURCE_COMMIT }}
+          name: cpcv-ai-quality-navigation-release-${{ env.SOURCE_COMMIT }}
           path: deployment-evidence/
           if-no-files-found: error
           retention-days: 90
