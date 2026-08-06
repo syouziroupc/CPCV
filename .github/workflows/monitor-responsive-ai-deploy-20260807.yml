@@ -1,4 +1,5 @@
 name: Monitor responsive AI deployment
+run-name: Verify responsive and AI deployment completion
 
 on:
   pull_request:
