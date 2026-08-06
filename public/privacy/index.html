@@ -3,64 +3,58 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CPCVが送信する情報と送信しない情報を説明します。">
-  <title>プライバシー | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui4">
+  <meta name="description" content="CPCVが送信する情報、送信しない情報、保持期間を説明します。">
+  <title>情報の扱い | CPCV</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav1">
 </head>
-<body class="site-page privacy-page">
-  <header class="site-header">
-    <a class="brand" href="/"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業の反応</small></span></a>
+<body class="site-page clear-public-page">
+  <header class="site-header clear-site-header">
+    <a class="brand" href="/"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業コメント</small></span></a>
     <nav class="site-nav" aria-label="メインメニュー">
-      <a href="/about">CPCVとは</a>
+      <a href="/">ホーム</a>
       <a href="/guide">使い方</a>
-      <a aria-current="page" href="/privacy">プライバシー</a>
-      <a class="nav-cta" href="/admin">先生用</a>
+      <a href="/about">機能概要</a>
+      <a aria-current="page" href="/privacy">情報の扱い</a>
+      <a class="nav-cta" href="/admin">先生ログイン</a>
     </nav>
   </header>
 
-  <main>
-    <section class="public-hero privacy-hero">
-      <p class="eyebrow">プライバシー境界</p>
-      <h1>送らない情報を<br>先に決める。</h1>
-      <p class="hero-lead">CPCVはPDFを教員のブラウザ内で処理します。授業参加に必要な情報だけをサーバーへ送る設計です。</p>
+  <main class="clear-public-main">
+    <section class="clear-page-heading">
+      <p class="eyebrow">情報の扱い</p>
+      <h1>送る情報と送らない情報</h1>
+      <p>PDF本体は先生のブラウザ内で処理します。授業運営に必要な情報だけをサーバーへ送信します。</p>
     </section>
 
-    <section class="data-map-section">
-      <div class="section-intro"><p class="section-kicker">データの境界</p><h2>データの境界</h2></div>
-      <div class="data-map-grid">
-        <article class="data-local"><span>端末内</span><h3>送信しない</h3><ul><li>PDF本体</li><li>PDFファイル名</li><li>ページ本文と画像</li><li>注釈と埋込メタデータ全文</li></ul></article>
-        <article><span>サーバー</span><h3>授業運営に必要</h3><ul><li>文書識別用SHA-256</li><li>ページ数とファイルサイズ</li><li>現在のページ番号</li><li>匿名コメント</li><li>授業と参加状態</li></ul></article>
-        <article><span>追加機能</span><h3>追加機能を使う場合</h3><ul><li>匿名の参加度回答</li><li>ページ移動イベント</li><li>集計スナップショット</li><li>AIへ送るコメント本文</li></ul></article>
+    <section class="clear-section">
+      <div class="data-summary-grid">
+        <article class="safe-data"><p class="role-label">送信しない</p><h2>PDFの内容</h2><ul><li>PDF本体</li><li>ファイル名</li><li>ページ本文と画像</li><li>注釈や埋込内容</li></ul></article>
+        <article><p class="role-label">授業運営に送信</p><h2>必要な情報</h2><ul><li>匿名コメント</li><li>授業と参加状態</li><li>現在のページ番号</li><li>文書識別用SHA-256、ページ数、サイズ</li></ul></article>
+        <article><p class="role-label">機能を有効にした場合</p><h2>追加情報</h2><ul><li>匿名の参加度回答</li><li>ページ移動イベント</li><li>AI判定・翻訳対象のコメント本文</li></ul></article>
       </div>
     </section>
 
-    <section class="privacy-detail-section">
-      <div><p class="section-kicker">PDF</p><h2>PDFの扱い</h2></div>
-      <div><p>PDFは投影画面で選択します。ブラウザが文書のSHA-256。補助識別子。ページ数。ファイルサイズ。現在ページを送信します。PDFのバイト列。ファイル名。ページ本文は送信しません。</p></div>
+    <section class="clear-section">
+      <div class="clear-section-heading"><p class="section-kicker">AI</p><h2>AI判定と翻訳</h2></div>
+      <p class="plain-note">AI機能は授業ごとにON・OFFできます。有効な場合だけコメント本文をCloudflare Workers AIへ送ります。PDFの内容は送りません。辞書判定だけで運用することもできます。</p>
     </section>
 
-    <section class="privacy-detail-section alt">
-      <div><p class="section-kicker">匿名データ</p><h2>匿名コメントと分析</h2></div>
-      <div><p>コメントと匿名の参加状態は授業単位で保存します。ページ別分析を有効にした場合も CSVへ参加者ID。表示名。コメント本文。メールアドレス。PDF本文を出力しません。</p><p>理解度の内訳と匿名参加者数は 少人数から個人を推測しにくくするため3人未満では表示しません。</p></div>
-    </section>
-
-    <section class="privacy-detail-section">
-      <div><p class="section-kicker">AI</p><h2>AI補助</h2></div>
-      <div><p>AI判定と翻訳は追加機能です。有効にした授業ではコメント本文をCloudflare Workers AIへ送信します。PDF内容は送りません。AIを使わず、辞書判定だけで運用することもできます。</p></div>
-    </section>
-
-    <section class="retention-section">
-      <div><p class="section-kicker">保持期間</p><h2>期限後は<br>通常表示しない。</h2></div>
-      <div class="retention-grid">
-        <article><strong>コメント</strong><p>コメントの標準保持期間は30日です。設定された期限を超えたコメントは、削除処理前でも通常の一覧や投影対象から除外します。</p></article>
-        <article><strong>追加分析</strong><p>参加度回答。ページイベント。分析スナップショットの保持期限は180日です。</p></article>
-        <article><strong>端末内データ</strong><p>投影画面のブラウザには受信コメントを最大2,000件保存します。共用端末では授業後にログを消去してください。</p></article>
+    <section class="clear-section">
+      <div class="clear-section-heading"><p class="section-kicker">保持期間</p><h2>標準の保持期間</h2></div>
+      <p class="plain-note">コメントの標準保持期間は30日です。参加度・ページ分析は180日、端末内の受信ログは最大2,000件まで保持します。</p>
+      <div class="retention-table" role="table" aria-label="保持期間">
+        <div role="row"><strong role="cell">コメント</strong><span role="cell">30日</span><p role="cell">期限後は通常の一覧と投影対象から除外します。</p></div>
+        <div role="row"><strong role="cell">参加度・ページ分析</strong><span role="cell">180日</span><p role="cell">個人を特定する一覧は作成しません。</p></div>
+        <div role="row"><strong role="cell">端末内受信ログ</strong><span role="cell">最大2,000件</span><p role="cell">共用端末では授業後に消去してください。</p></div>
       </div>
     </section>
 
-    <section class="about-cta"><p>動作と保存範囲を<br>確認してから使う。</p><a class="button primary large" href="/guide">使い方を見る</a></section>
+    <section class="clear-bottom-cta">
+      <div><h2>操作方法を確認する</h2><p>先生と学生の手順を利用者別に確認できます。</p></div>
+      <a class="button primary" href="/guide">使い方を見る</a>
+    </section>
   </main>
-  <footer class="site-footer"><span>CPCV</span><span>授業コメントビューアー</span><nav aria-label="フッター"><a href="/">ホーム</a><a href="/about">CPCVとは</a><a href="/guide">使い方</a></nav></footer>
+
+  <footer class="site-footer clear-footer"><span>CPCV</span><nav aria-label="フッター"><a href="/">ホーム</a><a href="/guide">使い方</a><a href="/about">機能概要</a></nav></footer>
 </body>
 </html>
-

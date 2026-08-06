@@ -4,51 +4,51 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>授業管理 | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ai-quality-ui">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav1">
 </head>
 <body class="page admin-page auth-view">
   <a class="skip-link" href="#mainContent">本文へ移動</a>
   <main id="mainContent" class="admin-shell">
-    <header class="app-header row between wrap">
-      <div>
-        <p class="eyebrow">CPCV</p>
-        <h1>授業管理</h1>
-      </div>
-      <nav class="row wrap" aria-label="管理メニュー">
-        <a id="organizationManageLink" class="button hidden" href="/master">メンバー管理</a>
-        <a class="button" href="/account">アカウント設定</a>
+    <header class="app-header app-topbar">
+      <a class="app-brand-link" href="/admin"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業管理</small></span></a>
+      <nav class="app-nav" aria-label="管理メニュー">
+        <a aria-current="page" href="/admin">授業管理</a>
+        <a href="/account">アカウント設定</a>
+        <a id="organizationManageLink" class="hidden" href="/master">組織管理</a>
+        <a href="/">ホーム</a>
         <button id="logoutButton" class="button hidden">ログアウト</button>
       </nav>
     </header>
 
     <section id="loginSection" class="auth-shell admin-login-shell" aria-labelledby="teacherLoginHeading">
-    <header class="auth-header">
-      <p class="eyebrow">CPCV</p>
-      <h1 id="teacherLoginHeading">授業管理へログイン</h1>
-      <p class="muted">登録したメールアドレスとパスワードを入力してください。</p>
-    </header>
-    <form id="teacherLoginForm" class="auth-form">
-      <label class="label" for="teacherLoginId">メールアドレス<span class="muted">（移行前はログインID）</span></label>
-      <input id="teacherLoginId" class="input" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" required>
-      <label class="label" for="teacherPassword">パスワード</label>
-      <input id="teacherPassword" class="input" type="password" autocomplete="current-password" required>
-      <div id="teacherOrganizationGroup" class="hidden">
-        <label class="label" for="teacherOrganization">組織</label>
-        <select id="teacherOrganization" class="select"></select>
+      <div class="auth-intro">
+        <p class="eyebrow">先生用</p>
+        <h1 id="teacherLoginHeading">授業管理へログイン</h1>
+        <p>授業の作成、参加リンクの共有、投影、承認、翻訳をここから操作します。</p>
+        <div class="auth-intro-links"><a href="/">ホーム</a><a href="/guide#teacher">先生の使い方</a></div>
       </div>
-      <button id="loginButton" class="button primary auth-submit" type="submit">ログイン</button>
-    </form>
-    <p id="loginStatus" class="status" aria-live="polite"></p>
-    <nav class="auth-links auth-footer" aria-label="ログイン補助">
-      <a href="/forgot-password">パスワードを忘れた</a>
-      <a href="/signup">組織を登録</a>
-    </nav>
-  </section>
+      <div class="auth-form-panel">
+        <form id="teacherLoginForm" class="auth-form">
+          <label class="label" for="teacherLoginId">メールアドレス<span class="muted">（移行前はログインID）</span></label>
+          <input id="teacherLoginId" class="input" type="text" inputmode="email" autocomplete="username" autocapitalize="none" spellcheck="false" required>
+          <label class="label" for="teacherPassword">パスワード</label>
+          <input id="teacherPassword" class="input" type="password" autocomplete="current-password" required>
+          <div id="teacherOrganizationGroup" class="hidden">
+            <label class="label" for="teacherOrganization">組織</label>
+            <select id="teacherOrganization" class="select"></select>
+          </div>
+          <button id="loginButton" class="button primary auth-submit" type="submit">ログイン</button>
+        </form>
+        <p id="loginStatus" class="status" aria-live="polite"></p>
+        <nav class="auth-links auth-footer" aria-label="ログイン補助"><a href="/forgot-password">パスワードを忘れた</a><a href="/signup">組織を登録</a></nav>
+      </div>
+    </section>
 
     <div id="adminHome" class="admin-home-grid">
       <section id="createSection" class="section hidden admin-create-panel">
-        <p class="eyebrow">新規</p>
-        <h2>授業を始める</h2>
+        <p class="eyebrow">新しい授業</p>
+        <h2>授業を作成</h2>
+        <p class="muted small-text">授業名を入力すると、学生用リンクと合言葉を発行します。</p>
         <label class="label" for="newTitle">授業名</label>
         <input id="newTitle" class="input" placeholder="例: 観光文化論 第4回">
         <button id="createButton" class="button primary full-button">授業を作成</button>
@@ -57,8 +57,8 @@
       <section id="activeSessionsSection" class="section hidden admin-session-list-panel">
         <div class="row between wrap">
           <div>
-            <p class="eyebrow">進行中</p>
-            <h2>授業一覧</h2>
+            <p class="eyebrow">授業</p>
+            <h2>進行中の授業</h2>
           </div>
           <p class="muted small-text">作成から6時間で自動終了</p>
         </div>
@@ -268,6 +268,6 @@
 
     <p id="adminStatus" class="status" aria-live="polite"></p>
   </main>
-  <script src="/assets/admin.js?v=0.8.10-ai-quality-ui" type="module"></script>
+  <script src="/assets/admin.js?v=0.8.10-nav1" type="module"></script>
 </body>
 </html>

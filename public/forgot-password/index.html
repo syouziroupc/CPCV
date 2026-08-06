@@ -3,27 +3,30 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>パスワード再設定</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui4">
+  <title>パスワード再設定 | CPCV</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav1">
   <link rel="preconnect" href="https://challenges.cloudflare.com">
   <script src="/assets/turnstile-bootstrap.js?v=0.8.10"></script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=cpcvTurnstileReady&amp;render=explicit" defer></script>
 </head>
-<body class="page auth-page">
+<body class="page auth-page clear-auth-page">
+  <header class="compact-public-header"><a class="brand" href="/"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業コメント</small></span></a><nav><a href="/">ホーム</a><a href="/guide">使い方</a><a href="/admin">ログイン</a></nav></header>
   <main class="auth-shell">
-    <header class="auth-header">
-      <p class="eyebrow">CPCV</p>
+    <section class="auth-intro">
+      <p class="eyebrow">ログイン補助</p>
       <h1>パスワード再設定</h1>
-      <p class="muted">登録済みの場合に限り再設定メールを送信します。</p>
-    </header>
-    <form id="forgotForm" class="auth-form">
-      <label class="label" for="email">メールアドレス</label>
-      <input id="email" class="input" type="email" autocomplete="email" maxlength="254" required>
-      <div id="turnstileWidget" class="auth-challenge"></div>
-      <button id="submitButton" class="button primary auth-submit" type="submit" disabled>再設定メールを送る</button>
-    </form>
-    <p id="status" class="status" aria-live="polite"></p>
-    <p class="auth-footer"><a href="/admin">ログインへ戻る</a></p>
+      <p>登録済みのメールアドレスへ再設定リンクを送ります。メールが届かない場合は入力内容と迷惑メールを確認してください。</p>
+      <a class="button" href="/admin">ログインへ戻る</a>
+    </section>
+    <section class="auth-form-panel">
+      <form id="forgotForm" class="auth-form">
+        <label class="label" for="email">メールアドレス</label>
+        <input id="email" class="input" type="email" autocomplete="email" maxlength="254" required>
+        <div id="turnstileWidget" class="auth-challenge"></div>
+        <button id="submitButton" class="button primary auth-submit" type="submit" disabled>再設定メールを送る</button>
+      </form>
+      <p id="status" class="status" aria-live="polite"></p>
+    </section>
   </main>
   <script type="module" src="/assets/forgot-password.js?v=0.8.10"></script>
 </body>
