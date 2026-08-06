@@ -1,0 +1,62 @@
+name: Responsive and AI translation regression
+# Permanent gate for layout overflow and translation fallback behavior.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "public/**/*.html"
+      - "public/assets/*.css"
+      - "src/ai/provider*.js"
+      - "scripts/audit-responsive-layout.py"
+      - "scripts/test-ai-translation-resilience.mjs"
+      - ".github/workflows/responsive-and-ai-regression.yml"
+  pull_request:
+    paths:
+      - "public/**/*.html"
+      - "public/assets/*.css"
+      - "src/ai/provider*.js"
+      - "scripts/audit-responsive-layout.py"
+      - "scripts/test-ai-translation-resilience.mjs"
+      - ".github/workflows/responsive-and-ai-regression.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: responsive-ai-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          npm ci
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Test AI translation fallback paths
+        run: node scripts/test-ai-translation-resilience.mjs
+      - name: Audit every public HTML at five viewport widths
+        run: python scripts/audit-responsive-layout.py
+      - name: Upload visual evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: responsive-ai-${{ github.sha }}
+          path: artifacts/responsive-layout-audit/
+          if-no-files-found: error
+          retention-days: 30

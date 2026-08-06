@@ -1,0 +1,142 @@
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+
+from playwright.async_api import async_playwright
+
+ROOT = Path(__file__).resolve().parent.parent
+PUBLIC = ROOT / "public"
+OUT = ROOT / "artifacts" / "responsive-layout-audit"
+VIEWPORTS = (
+    ("phone-320", 320, 720),
+    ("phone-375", 375, 812),
+    ("tablet-768", 768, 1024),
+    ("desktop-1024", 1024, 768),
+    ("desktop-1440", 1440, 1000),
+)
+KEY_PAGES = {
+    "_admin_spa.html", "admin/index.html", "signup/index.html",
+    "forgot-password/index.html", "account/index.html", "master/index.html",
+}
+
+
+async def inspect(page, source: str, width: int) -> dict:
+    return await page.evaluate(
+        """({source, width}) => {
+          const visible = (el) => {
+            const s = getComputedStyle(el);
+            const r = el.getBoundingClientRect();
+            return s.display !== 'none' && s.visibility !== 'hidden' &&
+              Number(s.opacity || 1) !== 0 && r.width > .5 && r.height > .5;
+          };
+          const scrollAncestor = (el) => {
+            for (let node = el.parentElement; node; node = node.parentElement) {
+              const s = getComputedStyle(node);
+              if (/(auto|scroll)/.test(s.overflowX) && node.scrollWidth > node.clientWidth + 1) return true;
+            }
+            return false;
+          };
+          const describe = (el) => ({
+            tag: el.tagName,
+            id: el.id || '',
+            classes: typeof el.className === 'string' ? el.className.slice(0, 100) : '',
+            text: String(el.textContent || el.getAttribute('aria-label') || '')
+              .trim().replace(/\s+/g, ' ').slice(0, 90)
+          });
+          const elements = [...document.body.querySelectorAll('*')].filter(visible);
+          const outside = [];
+          for (const el of elements) {
+            if (scrollAncestor(el)) continue;
+            const r = el.getBoundingClientRect();
+            if (r.left < -1 || r.right > width + 1) {
+              outside.push({...describe(el), left: r.left, right: r.right, elementWidth: r.width});
+              if (outside.length >= 25) break;
+            }
+          }
+          const authFailures = [];
+          for (const shell of document.querySelectorAll('.auth-shell, .admin-login-shell')) {
+            if (!visible(shell)) continue;
+            const sr = shell.getBoundingClientRect();
+            if (sr.left < -1 || sr.right > width + 1) {
+              authFailures.push({kind: 'shell-outside', ...describe(shell), left: sr.left, right: sr.right});
+            }
+            for (const control of shell.querySelectorAll('input, select, textarea, button, iframe')) {
+              if (!visible(control)) continue;
+              const r = control.getBoundingClientRect();
+              if (r.left < sr.left - 1 || r.right > sr.right + 1) {
+                authFailures.push({
+                  kind: 'control-outside-shell', ...describe(control),
+                  left: r.left, right: r.right, shellLeft: sr.left, shellRight: sr.right
+                });
+              }
+            }
+          }
+          return {
+            source,
+            viewportWidth: width,
+            documentWidth: document.documentElement.scrollWidth,
+            bodyWidth: document.body.scrollWidth,
+            outside,
+            authFailures
+          };
+        }""",
+        {"source": source, "width": width},
+    )
+
+
+async def main() -> None:
+    OUT.mkdir(parents=True, exist_ok=True)
+    html_files = sorted(PUBLIC.rglob("*.html"))
+    failures: list[dict] = []
+    checks = 0
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+        context = await browser.new_context(java_script_enabled=False)
+        page = await context.new_page()
+        for path in html_files:
+            relative = path.relative_to(PUBLIC).as_posix()
+            for viewport_name, width, height in VIEWPORTS:
+                checks += 1
+                await page.set_viewport_size({"width": width, "height": height})
+                await page.goto(path.resolve().as_uri(), wait_until="load")
+                await page.wait_for_timeout(80)
+                result = await inspect(page, relative, width)
+                result["viewport"] = viewport_name
+                result["ok"] = (
+                    result["documentWidth"] <= width + 1
+                    and result["bodyWidth"] <= width + 1
+                    and not result["outside"]
+                    and not result["authFailures"]
+                )
+                if not result["ok"]:
+                    failures.append(result)
+                    safe = relative.replace("/", "__")
+                    await page.screenshot(path=str(OUT / f"FAIL-{safe}-{viewport_name}.png"), full_page=True)
+                elif relative in KEY_PAGES and viewport_name in {"phone-320", "desktop-1024"}:
+                    safe = relative.replace("/", "__")
+                    await page.screenshot(path=str(OUT / f"PASS-{safe}-{viewport_name}.png"), full_page=True)
+        await browser.close()
+
+    summary = {
+        "ok": not failures,
+        "htmlFiles": len(html_files),
+        "viewports": len(VIEWPORTS),
+        "checks": checks,
+        "failureCount": len(failures),
+        "failures": failures,
+    }
+    (OUT / "summary.json").write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(json.dumps({k: summary[k] for k in ("ok", "htmlFiles", "viewports", "checks", "failureCount")}))
+    if failures:
+        for failure in failures[:10]:
+            print(json.dumps(failure, ensure_ascii=False))
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
