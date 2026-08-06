@@ -50,6 +50,22 @@ jobs:
               text = path.read_text(encoding='utf-8').replace('>アカウント</a>', '>アカウント設定</a>')
               path.write_text(text, encoding='utf-8')
           Path('public/_admin_spa.html').write_text(Path('public/admin/index.html').read_text(encoding='utf-8'), encoding='utf-8')
+
+          privacy = Path('public/privacy/index.html')
+          text = privacy.read_text(encoding='utf-8')
+          anchor = '<div class="clear-section-heading"><p class="section-kicker">保持期間</p><h2>標準の保持期間</h2></div>'
+          replacement = anchor + '\n      <p class="plain-note">コメントの標準保持期間は30日です。参加度・ページ分析は180日、端末内の受信ログは最大2,000件まで保持します。</p>'
+          if anchor not in text:
+              raise SystemExit('privacy retention anchor not found')
+          privacy.write_text(text.replace(anchor, replacement, 1), encoding='utf-8')
+
+          guide = Path('public/guide/index.html')
+          text = guide.read_text(encoding='utf-8')
+          anchor = '<div><h2>先生用画面へ進む</h2><p>ログイン後、授業一覧と新規作成画面が表示されます。</p></div>'
+          replacement = '<div><h2>先生用画面へ進む</h2><p>ログイン後、授業一覧と新規作成画面が表示されます。メール、パスワード、組織共通の辞書やAI上限は「アカウント設定」で変更します。</p></div>'
+          if anchor not in text:
+              raise SystemExit('guide account settings anchor not found')
+          guide.write_text(text.replace(anchor, replacement, 1), encoding='utf-8')
           PY
           rm -f .github/workflows/agent-navigation-refinement.yml .github/workflows/agent-navigation-finalize.yml
           git add -A
