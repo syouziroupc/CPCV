@@ -35,9 +35,14 @@ jobs:
           node /tmp/refine.mjs
           rm -f .github/workflows/agent-refine-ai-quality-ui.yml .github/workflows/agent-refine-ai-quality-ui-pr.yml
           git add -A
-      - name: Regenerate source manifest
+      - name: Regenerate and commit source manifest
+        shell: bash
         run: |
           npm run manifest:source
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Refine AI translation quality and admin UI'
           npm run verify:source-manifest
       - name: Validate feature and full system
         run: |
@@ -50,11 +55,5 @@ jobs:
           npm run deploy:dry-run
           npm audit
           npm audit --omit=dev
-      - name: Commit verified changes
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'Refine AI translation quality and admin UI'
-          git push origin HEAD:agent/refine-ai-quality-admin-ui
+      - name: Push verified changes
+        run: git push origin HEAD:agent/refine-ai-quality-admin-ui
