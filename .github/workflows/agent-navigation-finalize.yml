@@ -1,0 +1,78 @@
+name: Finalize navigation refinement
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/agent-navigation-finalize.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.head_ref == 'agent/refine-ai-quality-admin-ui'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/refine-ai-quality-admin-ui
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Apply and finalize navigation refinement
+        shell: bash
+        run: |
+          sed -n "/cat > \/tmp\/refine-navigation.py.gz.b64 <<'PATCH'/,/^[[:space:]]*PATCH$/p" .github/workflows/agent-navigation-refinement.yml | sed '1d;$d' | tr -d '[:space:]' > /tmp/refine-navigation.py.gz.b64
+          base64 -d /tmp/refine-navigation.py.gz.b64 | gzip -d > /tmp/refine-navigation.py
+          python -m py_compile /tmp/refine-navigation.py
+          python /tmp/refine-navigation.py
+          python - <<'PY'
+          from pathlib import Path
+
+          for name in ('signup', 'forgot-password'):
+              path = Path(f'public/{name}/index.html')
+              text = path.read_text(encoding='utf-8')
+              text = text.replace('class="auth-shell clear-auth-shell"', 'class="auth-shell"')
+              path.write_text(text, encoding='utf-8')
+
+          css = Path('public/assets/app.css')
+          text = css.read_text(encoding='utf-8').replace('.clear-auth-shell', '.site-page .auth-shell')
+          css.write_text(text, encoding='utf-8')
+
+          for name in ('admin', 'account', 'master'):
+              path = Path(f'public/{name}/index.html')
+              text = path.read_text(encoding='utf-8').replace('>アカウント</a>', '>アカウント設定</a>')
+              path.write_text(text, encoding='utf-8')
+          Path('public/_admin_spa.html').write_text(Path('public/admin/index.html').read_text(encoding='utf-8'), encoding='utf-8')
+          PY
+          rm -f .github/workflows/agent-navigation-refinement.yml .github/workflows/agent-navigation-finalize.yml
+          git add -A
+      - name: Regenerate and commit source manifest
+        shell: bash
+        run: |
+          npm run manifest:source
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Clarify public pages and internal navigation'
+          npm run verify:source-manifest
+      - name: Validate navigation and full system
+        run: |
+          npm run test:navigation-ui
+          npm run test:ai-quality-ui
+          npm run check
+          npm run check:stage08
+          npm run test:owner-bootstrap
+          npm run verify:ai-ready
+          npm run verify:final-docs
+          npm run deploy:dry-run
+          npm audit
+          npm audit --omit=dev
+      - name: Push verified changes
+        run: git push origin HEAD:agent/refine-ai-quality-admin-ui
