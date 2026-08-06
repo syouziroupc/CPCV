@@ -24,18 +24,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
       - name: Apply and inspect refinement
         shell: bash
         run: |
           sed -n '/^[[:space:]]*H4sI/,/^[[:space:]]*PATCH$/p' .github/workflows/agent-refine-ai-quality-ui.yml | sed '$d' | tr -d '[:space:]' > /tmp/refine.gz.b64
           base64 -d /tmp/refine.gz.b64 | gzip -d > /tmp/refine.mjs
           node /tmp/refine.mjs
-          echo '--- focused test ---'
-          nl -ba scripts/test-ai-quality-ui-refinement.mjs | sed -n '1,100p'
-          echo '--- provider fallback ---'
-          nl -ba src/ai/provider.js | sed -n '230,330p'
-          echo '--- provider parsing ---'
-          nl -ba src/ai/provider.js | sed -n '330,430p'
+          nl -ba src/ai/provider.js | sed -n '1,150p'
           exit 1
