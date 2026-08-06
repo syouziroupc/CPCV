@@ -1,4 +1,5 @@
 name: Responsive and AI translation regression
+# Permanent gate for layout overflow and translation fallback behavior.
 
 on:
   push:
