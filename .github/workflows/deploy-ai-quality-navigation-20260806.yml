@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: cpcv-ai-quality-navigation-production
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   SOURCE_COMMIT: a4211f6b52f81d6e2f3ef4d43e0b8c84bf9abbf5
