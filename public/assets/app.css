@@ -1754,3 +1754,49 @@ body { background: var(--bg); }
   .filter-control-panel { padding-left: 14px; }
   .filter-preset-button, .policy-batch-item { padding: 14px; }
 }
+
+/* AI quality and administration layout refinement */
+.admin-shell, .session-workspace, .session-command-center,
+.lesson-live-column, .lesson-settings-column, .workspace-panel,
+.settings-panel, .workspace-detail, .detail-body { min-width: 0; max-width: 100%; }
+.session-command-center { grid-template-columns: minmax(300px, .78fr) minmax(0, 1.32fr); align-items: start; gap: 24px; }
+.lesson-live-column, .lesson-settings-column { width: 100%; }
+.workspace-panel { width: 100%; overflow: visible; }
+.live-state-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.state-tile { min-width: 0; overflow-wrap: anywhere; }
+.primary-actions { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.primary-actions .button { width: 100%; }
+.settings-grid > *, .settings-save-row > * { min-width: 0; }
+.ai-translation-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.session-settings-savebar { margin-top: 22px; padding: 16px 0 0; border-top: 2px solid var(--border); display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.session-settings-savebar div { min-width: 0; display: grid; gap: 4px; }
+.session-settings-savebar small { color: var(--muted); line-height: 1.45; }
+.session-settings-savebar .button { flex: 0 0 auto; min-width: 180px; }
+.session-settings-status { margin: 8px 0 0; }
+.moderation-table-wrap { width: 100%; max-width: 100%; overflow: auto; scrollbar-gutter: stable both-edges; overscroll-behavior: contain; }
+.moderation-table { width: max(100%, 1120px); min-width: 1120px; table-layout: fixed; }
+.moderation-table th:nth-child(1) { width: 40px; }
+.moderation-table th:nth-child(2) { width: 116px; }
+.moderation-table th:nth-child(3) { width: 72px; }
+.moderation-table th:nth-child(4) { width: 300px; }
+.moderation-table th:nth-child(5) { width: 78px; }
+.moderation-table th:nth-child(6) { width: 150px; }
+.moderation-table th:nth-child(7) { width: 230px; }
+.moderation-table th:nth-child(8) { width: 134px; }
+.moderation-message, .moderation-actions, .ai-result-cell { min-width: 0; max-width: none; overflow-wrap: anywhere; }
+.moderation-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 6px; }
+.moderation-actions .button { width: 100%; padding-inline: 7px; }
+.ai-result-badge, .ai-translation-text, .ai-result-detail { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 1180px) {
+  .session-command-center { grid-template-columns: minmax(0, 1fr); }
+  .lesson-live-column, .lesson-settings-column { width: 100%; }
+}
+@media (max-width: 920px) {
+  .moderation-table { width: 100%; min-width: 0; table-layout: auto; }
+}
+@media (max-width: 720px) {
+  .ai-translation-settings { grid-template-columns: 1fr; }
+  .session-settings-savebar { align-items: stretch; flex-direction: column; }
+  .session-settings-savebar .button { width: 100%; min-width: 0; }
+  .live-state-grid { grid-template-columns: 1fr; }
+}

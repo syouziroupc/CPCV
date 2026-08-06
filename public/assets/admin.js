@@ -73,6 +73,9 @@ const sessionAiModerationEnabled = document.getElementById('sessionAiModerationE
 const sessionAiTranslationEnabled = document.getElementById('sessionAiTranslationEnabled');
 const sessionAiTargetLanguage = document.getElementById('sessionAiTargetLanguage');
 const saveSessionAiButton = document.getElementById('saveSessionAiButton');
+const sessionAiTranslationQuality = document.getElementById('sessionAiTranslationQuality');
+const saveSessionSettingsButton = document.getElementById('saveSessionSettingsButton');
+const sessionSettingsStatus = document.getElementById('sessionSettingsStatus');
 const sessionAiStatus = document.getElementById('sessionAiStatus');
 const organizationFilterSection = document.getElementById('organizationFilterSection');
 const filterTermInput = document.getElementById('filterTermInput');
@@ -744,10 +747,11 @@ function appendAiModerationCell(row, comment) {
     cell.classList.add('muted');
     return;
   }
-  const label = { allow: '問題なし', review: '要確認', hide: '非表示推奨' }[result.recommendation] || aiStatusLabel(result.status);
+  const label = { allow: '問題なし', review: '要確認', hide: '非表示推奨' }[result.recommendation] || aiStatusLabel(result.status, result.error);
   const badge = document.createElement('span');
   badge.className = `ai-result-badge ai-${result.recommendation || result.status || 'unknown'}`;
   badge.textContent = `AI参考: ${label}`;
+  if (result.error) badge.title = `失敗理由: ${result.error}`;
   cell.appendChild(badge);
   if (Number.isFinite(result.confidence)) {
     const confidence = document.createElement('small');
@@ -1313,7 +1317,7 @@ function simpleModeFromSessionSettings(settings) {
   return 'recommended';
 }
 
-async function saveSessionFilterSimpleSettings() {
+function applySessionFilterSimpleMode() {
   const mode = sessionFilterSimpleMode.value;
   const mapped = {
     off: { enabled: false, aiRoutingMode: 'off', unsupportedLanguageMode: 'review_only' },
@@ -1325,7 +1329,7 @@ async function saveSessionFilterSimpleSettings() {
   sessionFilterAiRouting.value = mapped.aiRoutingMode;
   sessionUnsupportedLanguageMode.value = mapped.unsupportedLanguageMode;
   sessionTranslationFilterEnabled.checked = true;
-  await saveSessionFilterSettings(saveSessionFilterSimpleButton, '設定を保存');
+  markSessionSettingsDirty();
 }
 
 async function saveSessionFilterSettings(button = saveSessionFilterButton, label = '詳細設定を保存') {
@@ -1398,13 +1402,15 @@ async function loadSessionAiSettings() {
     sessionAiModerationEnabled.checked = Boolean(data.settings.moderationEnabled);
     sessionAiTranslationEnabled.checked = Boolean(data.settings.translationEnabled);
     sessionAiTargetLanguage.value = data.settings.targetLanguage || 'ja';
+    sessionAiTranslationQuality.value = data.settings.translationQuality || 'balanced';
     sessionAiStatus.textContent = data.settings.organizationEnabled
       ? '組織AIは有効です。設定を保存すると既存コメントも最大100件処理します。'
       : '組織AIが無効です。授業設定を保存しても外部AIは実行されません。';
     sessionAiModerationEnabled.disabled = !data.settings.organizationEnabled;
     sessionAiTranslationEnabled.disabled = !data.settings.organizationEnabled;
     sessionAiTargetLanguage.disabled = !data.settings.organizationEnabled || !data.settings.translationEnabled;
-    saveSessionAiButton.disabled = !data.settings.organizationEnabled;
+    sessionAiTranslationQuality.disabled = !data.settings.organizationEnabled || !data.settings.translationEnabled;
+    saveSessionSettingsButton.disabled = false;
   } catch (error) {
     displayError(error, (text) => { sessionAiStatus.textContent = text; });
   }
@@ -1419,13 +1425,73 @@ async function saveSessionAiSettings() {
         body: JSON.stringify({
           moderationEnabled: sessionAiModerationEnabled.checked,
           translationEnabled: sessionAiTranslationEnabled.checked,
-          targetLanguage: sessionAiTargetLanguage.value
+          targetLanguage: sessionAiTargetLanguage.value,
+          translationQuality: sessionAiTranslationQuality.value
         })
       });
       sessionAiStatus.textContent = `保存しました。AI処理を${data.queuedJobs}件投入しました。`;
       await loadModerationComments();
     } catch (error) {
       displayError(error, (text) => { sessionAiStatus.textContent = text; });
+    }
+  });
+}
+
+function updateSessionAiControlState() {
+  const enabled = sessionAiTranslationEnabled.checked && !saveSessionSettingsButton.disabled;
+  sessionAiTargetLanguage.disabled = !enabled;
+  sessionAiTranslationQuality.disabled = !enabled;
+  markSessionSettingsDirty();
+}
+
+function markSessionSettingsDirty() {
+  if (sessionSettingsStatus) sessionSettingsStatus.textContent = '未保存の変更があります。';
+}
+
+async function saveAllSessionSettings() {
+  await withButton(saveSessionSettingsButton, '授業設定を保存', async () => {
+    try {
+      const mapped = {
+        off: { enabled: false, aiRoutingMode: 'off', unsupportedLanguageMode: 'review_only' },
+        recommended: { enabled: true, aiRoutingMode: 'ambiguous', unsupportedLanguageMode: 'ai_review' },
+        dictionary: { enabled: true, aiRoutingMode: 'off', unsupportedLanguageMode: 'review_only' },
+        all: { enabled: true, aiRoutingMode: 'all', unsupportedLanguageMode: 'ai_review' }
+      }[sessionFilterSimpleMode.value];
+      if (mapped) {
+        sessionFilterEnabled.checked = mapped.enabled;
+        sessionFilterAiRouting.value = mapped.aiRoutingMode;
+        sessionUnsupportedLanguageMode.value = mapped.unsupportedLanguageMode;
+      }
+      const displayPayload = {
+        postingEnabled: currentSession.postingEnabled, commentsVisible: currentSession.commentsVisible,
+        commentDisplaySeconds: Number(commentDisplaySeconds.value),
+        commentDisplayMode: normalizeDisplayMode(commentDisplayMode.value),
+        moderationMode: moderationMode.value, status: currentSession.status
+      };
+      await api(`/api/private/sessions/${encodeURIComponent(sessionId)}/settings`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(displayPayload)
+      });
+      await api(`/api/private/sessions/${encodeURIComponent(sessionId)}/filter-settings`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          enabled: sessionFilterEnabled.checked, aiRoutingMode: sessionFilterAiRouting.value,
+          maskCharacter: sessionFilterMaskCharacter.value, translationFilterEnabled: sessionTranslationFilterEnabled.checked,
+          unsupportedLanguageMode: sessionUnsupportedLanguageMode.value
+        })
+      });
+      const ai = await api(`/api/private/sessions/${encodeURIComponent(sessionId)}/ai-settings`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          moderationEnabled: sessionAiModerationEnabled.checked, translationEnabled: sessionAiTranslationEnabled.checked,
+          targetLanguage: sessionAiTargetLanguage.value, translationQuality: sessionAiTranslationQuality.value
+        })
+      });
+      currentSession = { ...currentSession, ...displayPayload };
+      renderSession();
+      sessionSettingsStatus.textContent = `保存しました。AI処理を${ai.queuedJobs || 0}件投入しました。`;
+      await Promise.all([loadSessionAiSettings(), loadSessionFilterSettings(), loadModerationComments()]);
+    } catch (error) {
+      displayError(error, (text, failed = true) => setStatusElement(sessionSettingsStatus, text, failed));
     }
   });
 }
@@ -1513,13 +1579,9 @@ installJapaneseContextFilterPackButton?.addEventListener('click', () => installF
 installEnglishContextFilterPackButton?.addEventListener('click', () => installFilterPack('en-context-v1', installEnglishContextFilterPackButton));
 exportFilterTermsButton?.addEventListener('click', exportFilterTermsCsv);
 saveFilterPoliciesButton?.addEventListener('click', saveFilterPolicies);
-saveSessionFilterSimpleButton?.addEventListener('click', saveSessionFilterSimpleSettings);
-saveSessionFilterButton?.addEventListener('click', () => saveSessionFilterSettings());
-saveOrganizationAiButton?.addEventListener('click', saveOrganizationAiSettings);
-saveSessionAiButton?.addEventListener('click', saveSessionAiSettings);
-sessionAiTranslationEnabled?.addEventListener('change', () => {
-  sessionAiTargetLanguage.disabled = !sessionAiTranslationEnabled.checked || saveSessionAiButton.disabled;
-});
+sessionFilterSimpleMode?.addEventListener('change', applySessionFilterSimpleMode);
+saveSessionSettingsButton?.addEventListener('click', saveAllSessionSettings);
+sessionAiTranslationEnabled?.addEventListener('change', updateSessionAiControlState);
 
 refreshLocalLogButton?.addEventListener('click', loadLocalLogs);
 localLogChannel?.addEventListener('message', (event) => {
@@ -1578,33 +1640,9 @@ toggleCommentsButton.addEventListener('click', () => updateSettings(
   currentSession.commentsVisible ? 'コメントを隠す' : 'コメントを表示'
 ));
 
-commentDisplaySeconds.addEventListener('change', async () => {
-  commentDisplaySeconds.disabled = true;
-  try {
-    await updateSettings({ commentDisplaySeconds: Number(commentDisplaySeconds.value) }, null, '');
-  } finally {
-    commentDisplaySeconds.disabled = false;
-  }
-});
-
-commentDisplayMode.addEventListener('change', async () => {
-  commentDisplayMode.disabled = true;
-  updateDisplaySettingLabels();
-  try {
-    await updateSettings({ commentDisplayMode: normalizeDisplayMode(commentDisplayMode.value) }, null, '');
-  } finally {
-    commentDisplayMode.disabled = false;
-  }
-});
-
-moderationMode.addEventListener('change', async () => {
-  moderationMode.disabled = true;
-  try {
-    await updateSettings({ moderationMode: moderationMode.value }, null, '');
-  } finally {
-    moderationMode.disabled = false;
-  }
-});
+commentDisplaySeconds.addEventListener('change', markSessionSettingsDirty);
+commentDisplayMode.addEventListener('change', () => { updateDisplaySettingLabels(); markSessionSettingsDirty(); });
+moderationMode.addEventListener('change', markSessionSettingsDirty);
 
 refreshAnalyticsButton?.addEventListener('click', () => Promise.all([loadPdfState(), loadSessionAnalytics(), loadAnalyticsSnapshots()]));
 createAnalyticsSnapshotButton?.addEventListener('click', createAnalyticsSnapshot);

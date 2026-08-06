@@ -7,6 +7,7 @@ import { requireRole } from "../auth/permissions.js";
 import { assertOnlyFields, readJsonObject, rejectOrganizationSelector } from "../auth/request.js";
 import {
   backfillAiJobsForSession,
+  requeueSessionTranslationJobs,
   getOrganizationAiSettings,
   getSessionAiSettings,
   retryAiJobsForComment,
@@ -18,6 +19,7 @@ import {
   requireAiBoolean,
   requireAiDailyLimit,
   requireAiTargetLanguage,
+  requireAiTranslationQuality,
   normalizeAiJobTypes
 } from "../ai/validation.js";
 
@@ -77,7 +79,7 @@ export async function getPrivateSessionAiSettings(env, auth, session) {
 export async function updatePrivateSessionAiSettings(request, env, auth, session, ctx) {
   const input = await readJsonObject(request);
   rejectOrganizationSelector(request, input);
-  assertOnlyFields(input, ["moderationEnabled", "translationEnabled", "targetLanguage"]);
+  assertOnlyFields(input, ["moderationEnabled", "translationEnabled", "targetLanguage", "translationQuality"]);
   await requireUnsafeRequestProtection(request, env, auth);
   const current = await getSessionAiSettings(env.DB_V2, auth.organizationId, session.id);
   const settings = await updateSessionAiSettings(env.DB_V2, {
@@ -92,6 +94,9 @@ export async function updatePrivateSessionAiSettings(request, env, auth, session
     targetLanguage: Object.hasOwn(input, "targetLanguage")
       ? requireAiTargetLanguage(input.targetLanguage)
       : current.targetLanguage,
+    translationQuality: Object.hasOwn(input, "translationQuality")
+      ? requireAiTranslationQuality(input.translationQuality)
+      : current.translationQuality,
     actorUserId: auth.userId
   });
   await env.DB_V2.batch([
@@ -106,17 +111,25 @@ export async function updatePrivateSessionAiSettings(request, env, auth, session
       details: {
         moderationEnabled: settings.moderationEnabled,
         translationEnabled: settings.translationEnabled,
-        targetLanguage: settings.targetLanguage
+        targetLanguage: settings.targetLanguage,
+        translationQuality: settings.translationQuality
       }
     })
   ]);
   let jobs = [];
+  if (settings.organizationEnabled && settings.translationEnabled
+      && current.translationQuality !== settings.translationQuality) {
+    jobs.push(...await requeueSessionTranslationJobs(env.DB_V2, {
+      organizationId: auth.organizationId, liveSessionId: session.id, limit: 100
+    }));
+  }
   if (settings.organizationEnabled && (settings.moderationEnabled || settings.translationEnabled)) {
-    jobs = await backfillAiJobsForSession(env.DB_V2, {
+    jobs.push(...await backfillAiJobsForSession(env.DB_V2, {
       organizationId: auth.organizationId,
       liveSessionId: session.id,
       limit: 100
-    });
+    }));
+    jobs = [...new Map(jobs.map((job) => [job.id, job])).values()];
     const task = dispatchAiJobs(env, jobs);
     if (typeof ctx?.waitUntil === "function") ctx.waitUntil(task);
     else await task;
