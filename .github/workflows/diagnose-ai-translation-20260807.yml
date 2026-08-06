@@ -19,7 +19,7 @@ concurrency:
 jobs:
   diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -49,62 +49,87 @@ jobs:
           echo "CLOUDFLARE_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
       - name: Install dependencies
         run: npm ci
-      - name: Record translation job aggregates
+      - name: Record production and staging job aggregates
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p ai-diagnostic
           query() {
-            local name="$1"
-            local sql="$2"
-            npx wrangler d1 execute class_comment_db_v2 --remote --json --command "$sql" > "ai-diagnostic/$name.json"
+            local database="$1"
+            local prefix="$2"
+            local name="$3"
+            local sql="$4"
+            npx wrangler d1 execute "$database" --remote --json --command "$sql" > "ai-diagnostic/${prefix}-${name}.json"
           }
-          query job-status "SELECT job_type,status,COALESCE(last_error_code,'') AS last_error_code,COUNT(*) AS count,MIN(created_at) AS oldest,MAX(updated_at) AS newest FROM ai_jobs WHERE created_at >= datetime('now','-2 days') GROUP BY job_type,status,last_error_code ORDER BY job_type,status,last_error_code;"
-          query recent-translation-jobs "SELECT id,status,attempt_count,COALESCE(last_error_code,'') AS last_error_code,created_at,updated_at,run_after,claimed_at FROM ai_jobs WHERE job_type='translation' ORDER BY created_at DESC LIMIT 30;"
-          query translation-output-count "SELECT COUNT(*) AS translations_last_2_days,MAX(created_at) AS newest_translation FROM translations WHERE created_at >= datetime('now','-2 days');"
-          query usage-models "SELECT job_type,model,COUNT(*) AS count,MAX(created_at) AS newest FROM ai_usage_events WHERE created_at >= datetime('now','-2 days') GROUP BY job_type,model ORDER BY job_type,model;"
-          npx wrangler queues info cpcv-ai-translation-jobs > ai-diagnostic/queue-info.txt 2>&1 || true
-      - name: Call Workers AI models with fixed test text
+          for row in 'class_comment_db_v2 production' 'class_comment_db_v2_staging staging'; do
+            set -- $row
+            db="$1"; prefix="$2"
+            query "$db" "$prefix" job-status "SELECT job_type,status,COALESCE(last_error_code,'') AS last_error_code,COUNT(*) AS count,MIN(created_at) AS oldest,MAX(updated_at) AS newest FROM ai_jobs GROUP BY job_type,status,last_error_code ORDER BY job_type,status,last_error_code;"
+            query "$db" "$prefix" recent-translation-jobs "SELECT id,status,attempt_count,COALESCE(last_error_code,'') AS last_error_code,created_at,updated_at,run_after,claimed_at FROM ai_jobs WHERE job_type='translation' ORDER BY created_at DESC LIMIT 50;"
+            query "$db" "$prefix" translation-output-count "SELECT COUNT(*) AS translation_count,MAX(created_at) AS newest_translation FROM translations;"
+            query "$db" "$prefix" usage-models "SELECT job_type,model,COUNT(*) AS count,MAX(created_at) AS newest FROM ai_usage_events GROUP BY job_type,model ORDER BY job_type,model;"
+            query "$db" "$prefix" settings-count "SELECT COUNT(*) AS sessions, SUM(CASE WHEN translation_enabled=1 THEN 1 ELSE 0 END) AS translation_enabled_sessions FROM session_ai_settings;"
+          done
+          npx wrangler queues info cpcv-ai-translation-jobs > ai-diagnostic/production-queue-info.txt 2>&1 || true
+          npx wrangler queues info cpcv-ai-translation-jobs-staging > ai-diagnostic/staging-queue-info.txt 2>&1 || true
+      - name: Deploy isolated Workers AI binding probe
         shell: bash
         run: |
           set -euo pipefail
-          base="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run"
-          call_model() {
-            local name="$1"
-            local model="$2"
-            local body="$3"
-            local code
-            code=$(curl -sS -o "ai-diagnostic/$name.json" -w '%{http_code}' \
-              -X POST "$base/$model" \
-              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-              -H 'Content-Type: application/json' \
-              --data "$body")
-            printf '%s\n' "$code" > "ai-diagnostic/$name.http-status.txt"
-          }
-          call_model m2m100 '@cf/meta/m2m100-1.2b' '{"text":"This is a translation health check.","source_lang":"en","target_lang":"ja"}'
-          call_model glm '@cf/zai-org/glm-4.7-flash' '{"messages":[{"role":"system","content":"Translate into Japanese. Return only the translation."},{"role":"user","content":"This is a translation health check."}],"max_tokens":100,"temperature":0}'
-          call_model qwen '@cf/qwen/qwen3-30b-a3b-fp8' '{"messages":[{"role":"system","content":"Translate into Japanese. Return only the translation."},{"role":"user","content":"This is a translation health check."}],"max_tokens":100,"temperature":0}'
+          probe="cpcv-ai-probe-${GITHUB_RUN_ID}"
+          cat > /tmp/ai-probe.mjs <<'JS'
+          const models = {
+            m2m100: ['@cf/meta/m2m100-1.2b', { text: 'This is a translation health check.', source_lang: 'en', target_lang: 'ja' }],
+            glm: ['@cf/zai-org/glm-4.7-flash', { messages: [{ role: 'system', content: 'Translate into Japanese. Return only the translation.' }, { role: 'user', content: 'This is a translation health check.' }], max_completion_tokens: 100, temperature: 0, reasoning_effort: 'low' }],
+            qwenMessages: ['@cf/qwen/qwen3-30b-a3b-fp8', { messages: [{ role: 'system', content: 'Translate into Japanese. Return only the translation.' }, { role: 'user', content: 'This is a translation health check.' }], max_tokens: 100, temperature: 0 }],
+            qwenPrompt: ['@cf/qwen/qwen3-30b-a3b-fp8', { prompt: 'Translate the following sentence into Japanese. Return only the translation.\n\nThis is a translation health check.', max_tokens: 100, temperature: 0 }]
+          };
+          export default { async fetch(request, env) {
+            const name = new URL(request.url).pathname.slice(1);
+            if (!models[name]) return new Response('not found', { status: 404 });
+            const [model, input] = models[name];
+            const started = Date.now();
+            try {
+              const result = await env.AI.run(model, input);
+              return Response.json({ ok: true, name, model, durationMs: Date.now() - started, result });
+            } catch (error) {
+              return Response.json({ ok: false, name, model, durationMs: Date.now() - started, error: String(error?.message || error), status: Number(error?.status || error?.statusCode || 0) }, { status: 502 });
+            }
+          }};
+          JS
+          cat > /tmp/ai-probe.toml <<EOF
+          name = "$probe"
+          main = "/tmp/ai-probe.mjs"
+          compatibility_date = "2026-06-17"
+          workers_dev = true
+          [ai]
+          binding = "AI"
+          EOF
+          cleanup() { npx wrangler delete --config /tmp/ai-probe.toml --force >/dev/null 2>&1 || true; }
+          trap cleanup EXIT
+          npx wrangler deploy --config /tmp/ai-probe.toml > ai-diagnostic/probe-deploy.txt 2>&1
+          origin="https://${probe}.syouziroupc.workers.dev"
+          for name in m2m100 glm qwenMessages qwenPrompt; do
+            code=$(curl -sS --retry 4 --retry-delay 2 -o "ai-diagnostic/probe-${name}.json" -w '%{http_code}' "$origin/$name")
+            printf '%s\n' "$code" > "ai-diagnostic/probe-${name}.http-status.txt"
+          done
       - name: Summarize diagnostics
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== queue ==='
-          cat ai-diagnostic/queue-info.txt || true
-          echo '=== job status ==='
-          cat ai-diagnostic/job-status.json
-          echo '=== recent translation jobs ==='
-          cat ai-diagnostic/recent-translation-jobs.json
-          echo '=== model HTTP status ==='
-          for f in ai-diagnostic/*.http-status.txt; do echo "$f: $(cat "$f")"; done
-          echo '=== model response shapes ==='
-          node - <<'NODE'
-          const fs = require('fs');
-          for (const name of ['m2m100','glm','qwen']) {
-            const value = JSON.parse(fs.readFileSync(`ai-diagnostic/${name}.json`, 'utf8'));
-            const result = value?.result ?? value;
-            console.log(name, JSON.stringify({ success: value?.success, errors: value?.errors, resultType: Array.isArray(result) ? 'array' : typeof result, resultKeys: result && typeof result === 'object' && !Array.isArray(result) ? Object.keys(result) : [] }));
-          }
-          NODE
+          for file in ai-diagnostic/*job-status.json ai-diagnostic/*recent-translation-jobs.json ai-diagnostic/*translation-output-count.json ai-diagnostic/*usage-models.json ai-diagnostic/*settings-count.json; do
+            echo "=== $file ==="
+            cat "$file"
+          done
+          for file in ai-diagnostic/*queue-info.txt; do
+            echo "=== $file ==="
+            cat "$file" || true
+          done
+          echo '=== probe results ==='
+          for file in ai-diagnostic/probe-*.json; do
+            echo "--- $file ($(cat "${file%.json}.http-status.txt")) ---"
+            cat "$file"
+          done
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
