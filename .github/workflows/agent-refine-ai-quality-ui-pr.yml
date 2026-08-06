@@ -46,11 +46,25 @@ jobs:
 
           verifier = Path('scripts/verify-precision-boundaries.mjs')
           text = verifier.read_text(encoding='utf-8')
-          old = '    "0017_final_integrity_hardening.sql"\n]), migrationFiles);'
-          new = '    "0017_final_integrity_hardening.sql", "0018_ai_translation_quality.sql"\n]), migrationFiles);'
-          if old not in text:
-              raise SystemExit('append-only migration verification anchor not found')
-          verifier.write_text(text.replace(old, new, 1), encoding='utf-8')
+          start = text.index('const migrationFiles = readdirSync(resolve(ROOT, "migrations-v2")).sort();')
+          end = text.index('const csrfMigration = text("migrations-v2/0004_precision_hardening.sql");', start)
+          block = '''const migrationFiles = readdirSync(resolve(ROOT, "migrations-v2")).sort();
+          const expectedMigrationFiles = [
+            "0001_initial_schema.sql", "0002_auth_security.sql", "0003_comments.sql",
+            "0004_precision_hardening.sql", "0005_comment_content_guards.sql",
+            "0006_manual_moderation.sql", "0007_realtime.sql", "0008_email_auth.sql", "0009_account_lifecycle.sql",
+            "0010_ai_moderation_translation.sql", "0011_dictionary_content_filter.sql", "0012_multilingual_filter_usability.sql",
+            "0013_bilingual_filter_translation_safety.sql", "0014_filter_pack_expansion.sql", "0015_pdf_page_analytics.sql",
+            "0016_stage08_precision_hardening.sql", "0017_final_integrity_hardening.sql", "0018_ai_translation_quality.sql"
+          ];
+          check(
+            "precision migrations are append-only",
+            migrationFiles.length === expectedMigrationFiles.length
+              && expectedMigrationFiles.every((file, index) => migrationFiles[index] === file),
+            migrationFiles
+          );
+          '''
+          verifier.write_text(text[:start] + block + text[end:], encoding='utf-8')
           PY
           rm -f .github/workflows/agent-refine-ai-quality-ui.yml .github/workflows/agent-refine-ai-quality-ui-pr.yml
           git add -A
