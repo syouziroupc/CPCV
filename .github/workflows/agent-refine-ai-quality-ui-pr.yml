@@ -34,6 +34,7 @@ jobs:
           node --check /tmp/refine.mjs
           node /tmp/refine.mjs
           rm -f .github/workflows/agent-refine-ai-quality-ui.yml .github/workflows/agent-refine-ai-quality-ui-pr.yml
+          git add -A
       - name: Regenerate source manifest
         run: |
           npm run manifest:source
