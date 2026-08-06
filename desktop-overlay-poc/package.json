@@ -1,0 +1,16 @@
+{
+  "name": "cpcv-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "dev:staging": "tauri dev -- --staging",
+    "build:debug": "tauri build --debug --no-bundle",
+    "check:ui": "node --check ui/app.js"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}

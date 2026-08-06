@@ -1,0 +1,56 @@
+name: CPCV Desktop
+
+on:
+  pull_request:
+    paths:
+      - "desktop-overlay-poc/**"
+      - "docs/desktop-overlay-stage2-plan.md"
+      - ".github/workflows/desktop-overlay-poc.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: desktop-overlay-poc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Install Tauri CLI
+        run: npm install
+
+      - name: Check bundled fallback JavaScript
+        run: npm run check:ui
+
+      - name: Format Rust source
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml
+
+      - name: Run Rust unit tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Compile Rust application
+        run: cargo check --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Windows debug executable
+        run: npm run build:debug
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-desktop-v0.2-windows-debug
+          path: desktop-overlay-poc/src-tauri/target/debug/cpcv-desktop.exe
+          if-no-files-found: error
+          retention-days: 14
