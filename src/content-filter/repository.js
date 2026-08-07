@@ -10,7 +10,11 @@ import { FILTER_CATEGORIES } from "./validation.js";
 const TERM_LIMIT = 2000;
 
 export async function evaluateCommentFilter(db, input) {
-  const context = await getFilterContext(db, input.organizationId, input.liveSessionId);
+  const settingsRow = await getSessionFilterSettingsRow(db, input.organizationId, input.liveSessionId);
+  const settings = settingsRow ? sessionSettingsResponse(settingsRow) : defaultSessionFilterSettings();
+  const context = settings.enabled
+    ? await getFilterContext(db, input.organizationId, input.liveSessionId, { settingsRow })
+    : { settings, policies: [], terms: [], version: Date.parse(settingsRow?.updated_at || "") || 1 };
   const language = detectCommentLanguage(input.message);
   const decision = evaluateFilterMessage(input.message, context);
   const matchedLanguage = inferMatchedLanguage(decision.matches, context.terms);
@@ -35,10 +39,9 @@ export async function evaluateCommentFilter(db, input) {
 }
 
 export async function evaluateTranslationFilter(db, input) {
-  const context = await getFilterContext(db, input.organizationId, input.liveSessionId, {
-    languageCodes: [input.targetLanguage, "und"]
-  });
-  if (!context.settings.translationFilterEnabled) {
+  const settingsRow = await getSessionFilterSettingsRow(db, input.organizationId, input.liveSessionId);
+  const settings = settingsRow ? sessionSettingsResponse(settingsRow) : defaultSessionFilterSettings();
+  if (!settings.translationFilterEnabled) {
     return {
       enabled: false,
       action: "allow",
@@ -50,6 +53,10 @@ export async function evaluateTranslationFilter(db, input) {
       matches: []
     };
   }
+  const context = await getFilterContext(db, input.organizationId, input.liveSessionId, {
+    languageCodes: [input.targetLanguage, "und"],
+    settingsRow
+  });
   const decision = evaluateFilterMessage(input.translatedText, context);
   return {
     ...decision,
@@ -58,14 +65,9 @@ export async function evaluateTranslationFilter(db, input) {
 }
 
 export async function getFilterContext(db, organizationId, liveSessionId, options = {}) {
-  const settingsRow = await db.prepare(
-    `SELECT enabled, ai_routing_mode, mask_character,
-            COALESCE(translation_filter_enabled, 1) AS translation_filter_enabled,
-            COALESCE(unsupported_language_mode, 'ai_review') AS unsupported_language_mode,
-            updated_at
-     FROM session_content_filter_settings
-     WHERE organization_id = ?1 AND live_session_id = ?2 LIMIT 1`
-  ).bind(organizationId, liveSessionId).first();
+  const settingsRow = Object.prototype.hasOwnProperty.call(options, "settingsRow")
+    ? options.settingsRow
+    : await getSessionFilterSettingsRow(db, organizationId, liveSessionId);
   const policiesResult = await db.prepare(
     `SELECT category, enabled, review_min_severity, mask_min_severity, reject_min_severity
      FROM organization_content_filter_policies
@@ -90,16 +92,31 @@ export async function getFilterContext(db, organizationId, liveSessionId, option
   const terms = rowsOf(termsResult);
   if (terms.length > TERM_LIMIT) throw new AuthError(409, "FILTER_TERM_LIMIT_REACHED");
   return {
-    settings: settingsRow ? sessionSettingsResponse(settingsRow) : {
-      enabled: false,
-      aiRoutingMode: "ambiguous",
-      maskCharacter: "＊",
-      translationFilterEnabled: true,
-      unsupportedLanguageMode: "ai_review"
-    },
+    settings: settingsRow ? sessionSettingsResponse(settingsRow) : defaultSessionFilterSettings(),
     policies: rowsOf(policiesResult).map(policyResponse),
     terms: terms.map(termResponse),
     version: Date.parse(settingsRow?.updated_at || "") || 1
+  };
+}
+
+async function getSessionFilterSettingsRow(db, organizationId, liveSessionId) {
+  return db.prepare(
+    `SELECT enabled, ai_routing_mode, mask_character,
+            COALESCE(translation_filter_enabled, 1) AS translation_filter_enabled,
+            COALESCE(unsupported_language_mode, 'ai_review') AS unsupported_language_mode,
+            updated_at
+     FROM session_content_filter_settings
+     WHERE organization_id = ?1 AND live_session_id = ?2 LIMIT 1`
+  ).bind(organizationId, liveSessionId).first();
+}
+
+function defaultSessionFilterSettings() {
+  return {
+    enabled: false,
+    aiRoutingMode: "ambiguous",
+    maskCharacter: "＊",
+    translationFilterEnabled: true,
+    unsupportedLanguageMode: "ai_review"
   };
 }
 
