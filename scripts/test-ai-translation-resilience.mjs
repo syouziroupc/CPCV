@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { runTranslationModel } from "../src/ai/provider.js";
+import { readFileSync } from "node:fs";
+import { runModerationModel, runTranslationModel } from "../src/ai/provider.js";
 
 const M2M = "@cf/meta/m2m100-1.2b";
 const GLM = "@cf/zai-org/glm-4.7-flash";
@@ -11,7 +12,11 @@ await balancedFallsBackAfterDedicatedOutage();
 await unknownLanguageUsesMultilingualModelAndSharedCapacity();
 await localCapacityRejectionDoesNotCallWorkersAi();
 await provider429DoesNotAmplifyIntoFallbackCalls();
-console.log("AI translation resilience tests passed");
+await translationLimiterFailureFailsClosed();
+await moderationFallbackConsumesCapacityPerProviderCall();
+await moderationLimiterFailureFailsClosed();
+moderationIsNotDoubleCountedAtQueueAdmission();
+console.log("AI capacity and translation resilience tests passed");
 
 async function accurateUsesPromptSchemaAndSharedCapacity() {
   const calls = [];
@@ -133,6 +138,60 @@ async function provider429DoesNotAmplifyIntoFallbackCalls() {
   );
   assert.deepEqual(calls, [GLM]);
   assert.deepEqual(limits, ["workers-ai-moderation"]);
+}
+
+
+async function translationLimiterFailureFailsClosed() {
+  let aiCalls = 0;
+  const env = environment(async () => { aiCalls += 1; return { response: "unexpected" }; });
+  env.AI_MODERATION_RATE_LIMITER.limit = async () => { throw new Error("limiter unavailable"); };
+  await assert.rejects(
+    runTranslationModel(env, { message: "Capacity control must fail closed.", sourceLanguage: "other", targetLanguage: "ja", quality: "balanced" }),
+    (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
+  );
+  assert.equal(aiCalls, 0);
+}
+
+async function moderationFallbackConsumesCapacityPerProviderCall() {
+  const models = [];
+  const limits = [];
+  const env = moderationEnvironment(async (model) => {
+    models.push(model);
+    if (model === GLM) { const error = new Error("temporary model outage"); error.status = 503; throw error; }
+    return { recommendation: "allow", confidence: 0.97, categories: [] };
+  }, limits);
+  const result = await runModerationModel(env, { message: "Ordinary classroom comment.", dictionaryCandidates: [] });
+  assert.equal(result.recommendation, "allow");
+  assert.deepEqual(models, [GLM, QWEN]);
+  assert.deepEqual(limits, ["workers-ai-moderation", "workers-ai-moderation"]);
+}
+
+async function moderationLimiterFailureFailsClosed() {
+  let aiCalls = 0;
+  const limits = [];
+  const env = moderationEnvironment(async () => { aiCalls += 1; return { recommendation: "allow", confidence: 1, categories: [] }; }, limits);
+  env.AI_MODERATION_RATE_LIMITER.limit = async ({ key }) => { limits.push(key); throw new Error("limiter unavailable"); };
+  await assert.rejects(
+    runModerationModel(env, { message: "Limiter failure check.", dictionaryCandidates: [] }),
+    (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
+  );
+  assert.equal(aiCalls, 0);
+  assert.deepEqual(limits, ["workers-ai-moderation"]);
+}
+
+function moderationIsNotDoubleCountedAtQueueAdmission() {
+  const processor = readFileSync(new URL("../src/ai/processor.js", import.meta.url), "utf8");
+  assert.match(processor, /if \(queueKind !== QUEUE_KIND_TRANSLATION\) return true;/);
+}
+
+function moderationEnvironment(run, limitCalls = []) {
+  return {
+    AI: { run },
+    AI_MODERATION_RATE_LIMITER: { async limit({ key }) { limitCalls.push(key); return { success: true }; } },
+    AI_MODERATION_MODEL: GLM,
+    AI_MODERATION_FALLBACK_MODEL: QWEN,
+    AI_TIMEOUT_MS: "12000"
+  };
 }
 
 function environment(run, limitCalls = [], capacity = true) {

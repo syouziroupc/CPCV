@@ -9,6 +9,7 @@ const DEFAULT_TRANSLATION_BALANCED_TIMEOUT_MS = 6_000;
 const DEFAULT_TRANSLATION_ACCURATE_TIMEOUT_MS = 12_000;
 const DEDICATED_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b";
 const DEDICATED_SOURCE_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);
+const SHARED_TEXT_GENERATION_KEY = "workers-ai-moderation";
 
 const MODERATION_SCHEMA = Object.freeze({
   type: "object",
@@ -268,6 +269,8 @@ async function runWithFallback(env, models, request, validator, options = {}) {
   let lastError;
   for (const model of models) {
     try {
+      const capacity = await acquireSharedTextGenerationCapacity(env);
+      if (!capacity) throw codedError("AI_PROVIDER_RATE_LIMITED", true);
       const usageEventId = typeof options.reserveUsage === "function"
         ? await options.reserveUsage(model)
         : null;
@@ -286,10 +289,23 @@ async function runWithFallback(env, models, request, validator, options = {}) {
     } catch (error) {
       if (error?.code === "AI_DAILY_LIMIT_REACHED") throw error;
       lastError = normalizeProviderError(error);
+      if (lastError.aiCode === "AI_PROVIDER_RATE_LIMITED") throw lastError;
       if (!lastError.retryable) break;
     }
   }
   throw lastError || codedError("AI_PROVIDER_FAILED", true);
+}
+
+async function acquireSharedTextGenerationCapacity(env) {
+  const limiter = env?.AI_MODERATION_RATE_LIMITER;
+  if (!limiter || typeof limiter.limit !== "function") return true;
+  try {
+    const result = await limiter.limit({ key: SHARED_TEXT_GENERATION_KEY });
+    return result?.success !== false;
+  } catch {
+    console.error("AI moderation capacity limiter failed closed");
+    return false;
+  }
 }
 
 function modelCandidates(env, primaryKey, fallbackKey) {
