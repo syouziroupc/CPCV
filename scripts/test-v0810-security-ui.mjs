@@ -72,7 +72,6 @@ const lifecycle = text('src/routes/account-lifecycle.js');
 check('account deletion anonymizes identifiers', lifecycle.includes('deletedLoginId') && lifecycle.includes('@invalid.example') && lifecycle.includes("display_name = 'Deleted user'"));
 check('account deletion replaces credential material', lifecycle.includes('deletedHash') && lifecycle.includes('deletedSalt'));
 
-
 const adminJs = text('public/assets/admin.js');
 check('admin session list avoids dynamic innerHTML', !adminJs.includes('.innerHTML ='));
 check('viewer opens without an opener reference', adminJs.includes("'noopener,noreferrer'") && adminJs.includes("target.origin !== location.origin"));
@@ -88,7 +87,7 @@ const adminSpa = text('public/_admin_spa.html');
 check('admin header uses a short account label', admin.includes('>アカウント設定<') && adminSpa.includes('>アカウント設定<'));
 check('lesson action labels state the action', admin.includes('>投稿を停止<') && admin.includes('>コメントを隠す<'));
 check('lesson control remains one two-column screen', admin.includes('session-command-center') && admin.includes('lesson-live-column') && admin.includes('lesson-settings-column'));
-const appCss = text('public/assets/app.css');
+const appCss = `${text('public/assets/app-base.css')}\n${text('public/assets/app.css')}`;
 const viewerJs = text('public/assets/viewer.js');
 const privacy = text('public/privacy/index.html');
 const guide = text('public/guide/index.html');
