@@ -234,8 +234,8 @@ async function acquireSharedTextGenerationCapacity(env) {
     const result = await limiter.limit({ key: SHARED_TEXT_GENERATION_KEY });
     return result?.success !== false;
   } catch (error) {
-    console.error("AI text-generation capacity limiter failed open", safeCode(error));
-    return true;
+    console.error("AI text-generation capacity limiter failed closed", safeCode(error));
+    return false;
   }
 }
 

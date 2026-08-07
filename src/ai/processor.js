@@ -135,18 +135,15 @@ async function processAiQueueMessage(message, env, queueKind) {
 }
 
 async function acquireQueueCapacity(env, queueKind) {
-  const limiter = queueKind === QUEUE_KIND_TRANSLATION
-    ? env?.AI_TRANSLATION_RATE_LIMITER
-    : queueKind === QUEUE_KIND_MODERATION
-      ? env?.AI_MODERATION_RATE_LIMITER
-      : null;
+  if (queueKind !== QUEUE_KIND_TRANSLATION) return true;
+  const limiter = env?.AI_TRANSLATION_RATE_LIMITER;
   if (!limiter || typeof limiter.limit !== "function") return true;
   try {
     const result = await limiter.limit({ key: `workers-ai-${queueKind}` });
     return result?.success !== false;
   } catch (error) {
-    console.error(`AI ${queueKind} capacity limiter failed open`, safeCode(error));
-    return true;
+    console.error(`AI ${queueKind} capacity limiter failed closed`, safeCode(error));
+    return false;
   }
 }
 
