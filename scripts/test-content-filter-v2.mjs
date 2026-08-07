@@ -11,6 +11,7 @@ const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const results = [];
 
 async function main() {
+  await testDisabledFilterFastPath();
   const h = createHarness();
   try {
     await testSchema(h);
@@ -25,6 +26,38 @@ async function main() {
   const failed = results.length - passed;
   console.log(`\nStage 7.6 content-filter summary: ${passed} passed, ${failed} failed, ${results.length} total.`);
   if (failed) process.exitCode = 1;
+}
+
+
+async function testDisabledFilterFastPath() {
+  const queries = [];
+  const db = {
+    prepare(sql) {
+      queries.push(sql);
+      if (/organization_content_filter_policies|content_filter_terms/.test(sql)) {
+        throw new Error("disabled filter performed an unnecessary policy or dictionary query");
+      }
+      return {
+        bind() { return this; },
+        async first() {
+          return {
+            enabled: 0,
+            ai_routing_mode: "ambiguous",
+            mask_character: "＊",
+            translation_filter_enabled: 1,
+            unsupported_language_mode: "ai_review",
+            updated_at: "2026-08-07T00:00:00.000Z"
+          };
+        }
+      };
+    }
+  };
+  const decision = await evaluateCommentFilter(db, {
+    organizationId: "org_fast",
+    liveSessionId: "sess_fast",
+    message: "ordinary classroom comment"
+  });
+  check("disabled filter skips policy and dictionary reads", decision.action === "allow" && queries.length === 1, { decision, queries });
 }
 
 async function testSchema(h) {
