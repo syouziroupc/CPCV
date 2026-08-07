@@ -78,15 +78,14 @@ function translationCandidates(env, quality, sourceLanguage) {
   const accurate = String(
     env?.AI_TRANSLATION_ACCURATE_MODEL || env?.AI_MODERATION_FALLBACK_MODEL || ""
   ).trim();
-  const dedicated = DEDICATED_LANGUAGES.has(sourceLanguage)
-    && fast === DEDICATED_MODEL
-    ? fast
-    : "";
+  const fastCandidate = fast === DEDICATED_MODEL
+    ? (DEDICATED_LANGUAGES.has(sourceLanguage) ? fast : "")
+    : fast;
   const ordered = quality === "accurate"
-    ? [accurate, balanced, dedicated]
+    ? [accurate, balanced, fastCandidate]
     : quality === "fast"
-      ? [dedicated, balanced, accurate]
-      : [dedicated, balanced, accurate];
+      ? [fastCandidate, balanced, accurate]
+      : [fastCandidate, balanced, accurate];
   const models = [...new Set(ordered.filter(Boolean))];
   if (!models.length) throw codedError("AI_MODEL_NOT_CONFIGURED", false);
   return models.map((model) => ({
