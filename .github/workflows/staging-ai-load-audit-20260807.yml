@@ -69,6 +69,11 @@ jobs:
           p = Path('scripts/staging-ai-load-test-v2.mjs')
           s = p.read_text()
           s = s.replace("'--remote', '--config', CONFIG", "'--remote', '--yes', '--config', CONFIG")
+          old = "const message = `This classroom translation load test ${marker} sentence ${String(i + 1).padStart(4, '0')} explains a simple topic about energy, markets, and public policy for students.`;"
+          new = "const message = `Load ${marker} ${String(i + 1).padStart(4, '0')}: Energy markets change.`;"
+          if old not in s:
+              raise SystemExit('load message template not found')
+          s = s.replace(old, new)
           p.write_text(s)
           PY
           node scripts/staging-ai-load-test-v2.mjs
