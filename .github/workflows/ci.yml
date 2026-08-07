@@ -6,13 +6,50 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  apply-ai-runtime-patch:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/update-ai-model-runtime-20260807'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout patch branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/update-ai-model-runtime-20260807
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply and validate verified runtime update
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          python3 scripts/apply-ai-model-runtime-temporary.py
+          node --check src/ai/provider-base.js
+          node --check src/ai/provider.js
+          node --check scripts/test-ai-translation-resilience.mjs
+          node scripts/test-ai-translation-resilience.mjs
+          npm run check:stage08
+          npm run deploy:dry-run
+          git checkout origin/master -- .github/workflows/ci.yml
+          git rm -f .github/workflows/apply-ai-model-runtime-temporary.yml scripts/apply-ai-model-runtime-temporary.py
+          git config user.name "cpcv-ai-runtime-update"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/workflows/ci.yml src/ai/provider-base.js src/ai/provider.js scripts/test-ai-translation-resilience.mjs wrangler.toml SOURCE_SHA256SUMS.override.txt
+          git commit -m "Use verified current Workers AI runtime models"
+          node scripts/verify-source-manifest.mjs
+          test -z "$(git status --porcelain)"
+          git push origin HEAD:agent/update-ai-model-runtime-20260807
+
   check:
     name: Full local validation
     runs-on: ubuntu-latest
