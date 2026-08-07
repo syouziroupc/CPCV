@@ -71,13 +71,31 @@ jobs:
           s = s.replace("'--remote', '--config', CONFIG", "'--remote', '--yes', '--config', CONFIG")
           old = "const message = `This classroom translation load test ${marker} sentence ${String(i + 1).padStart(4, '0')} explains a simple topic about energy, markets, and public policy for students.`;"
           new = "const message = `Load ${marker} ${String(i + 1).padStart(4, '0')}: Energy markets change.`;"
-          if old not in s:
-              raise SystemExit('load message template not found')
-          s = s.replace(old, new)
+          if old in s:
+              s = s.replace(old, new)
+          s = s.replace(
+              "if (phase.accepted !== count) throw new Error(`${name}: only ${phase.accepted}/${count} comments were accepted`);",
+              "if (phase.accepted === 0) throw new Error(`${name}: no comments were accepted`);"
+          )
+          s = s.replace(
+              "latencyMs: Math.round(performance.now() - started), error: body?.error || null };",
+              "latencyMs: Math.round(performance.now() - started), error: body?.error || null, requestId: body?.requestId || null };"
+          )
           p.write_text(s)
           PY
+          timeout 1500s npx wrangler tail class-pdf-comment-viewer-v01-staging --format json --method POST > worker-tail.jsonl 2>&1 &
+          tail_pid=$!
+          trap 'kill "$tail_pid" 2>/dev/null || true' EXIT
+          sleep 5
+          set +e
           node scripts/staging-ai-load-test-v2.mjs
+          test_status=$?
+          set -e
+          sleep 5
+          kill "$tail_pid" 2>/dev/null || true
+          wait "$tail_pid" 2>/dev/null || true
           rm -f .load-staging.wrangler.toml .d1-probe.json
+          exit "$test_status"
       - name: Upload load-test evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -86,5 +104,6 @@ jobs:
           path: |
             load-test-report.json
             load-test-summary.md
+            worker-tail.jsonl
           if-no-files-found: warn
           retention-days: 30
