@@ -1,0 +1,183 @@
+from pathlib import Path
+import hashlib
+
+KIMI='@cf/moonshotai/kimi-k2.6'
+LLAMA='@cf/meta/llama-4-scout-17b-16e-instruct'
+
+p=Path('src/ai/provider-base.js')
+s=p.read_text()
+s=s.replace('const MODERATION_PROMPT_VERSION = "moderation-v2-dictionary-context";', 'const MODERATION_PROMPT_VERSION = "moderation-v3-current-model-runtime";', 1)
+if '      uniqueItems: true,\n' not in s:
+    raise SystemExit('moderation uniqueItems keyword missing')
+s=s.replace('      uniqueItems: true,\n','',1)
+old='''      const response = await withTimeout(
+        Promise.resolve(env.AI.run(model, request, gateway)),
+        timeoutMs(env)
+      );'''
+new='''      const modelRequest = moderationRequestForModel(model, request);
+      const response = await withTimeout(
+        Promise.resolve(env.AI.run(model, modelRequest, gateway)),
+        timeoutMs(env)
+      );'''
+if old not in s:
+    raise SystemExit('moderation AI.run anchor missing')
+s=s.replace(old,new,1)
+anchor='async function acquireSharedTextGenerationCapacity(env) {'
+helper='''function moderationRequestForModel(model, request) {
+  const normalizedModel = String(model || "").trim();
+  if (normalizedModel.includes("moonshotai/kimi-k2.6")) {
+    const next = { ...request, max_completion_tokens: 320, chat_template_kwargs: { thinking: false } };
+    delete next.max_tokens;
+    return next;
+  }
+  return request;
+}
+
+'''
+if anchor not in s:
+    raise SystemExit('moderation helper anchor missing')
+s=s.replace(anchor,helper+anchor,1)
+p.write_text(s)
+
+p=Path('src/ai/provider.js')
+s=p.read_text()
+s=s.replace('const PROMPT_VERSION = "translation-v4-capacity-aware";', 'const PROMPT_VERSION = "translation-v5-current-model-runtime";', 1)
+old='''  return models.map((model) => ({
+    model,
+    kind: model === DEDICATED_MODEL
+      ? "dedicated"
+      : model.includes("/qwen/")
+        ? "prompt"
+        : "chat"
+  }));'''
+new='''  return models.map((model) => ({
+    model,
+    kind: model === DEDICATED_MODEL
+      ? "dedicated"
+      : model.includes("moonshotai/kimi-k2.6")
+        ? "kimi"
+        : model.includes("meta/llama-4-scout")
+          ? "llama"
+          : model.includes("/qwen/")
+            ? "prompt"
+            : "chat"
+  }));'''
+if old not in s:
+    raise SystemExit('translation candidate kind anchor missing')
+s=s.replace(old,new,1)
+old='''  if (candidate.kind === "prompt") {
+    return {
+      prompt: `${instruction}\\n\\nInput: ${payload}`,
+      max_tokens: 220,
+      temperature: 0,
+      top_p: 0.8
+    };
+  }
+  return {
+    messages: [
+      { role: "system", content: instruction },
+      { role: "user", content: payload }
+    ],
+    max_completion_tokens: 220,
+    temperature: 0,
+    reasoning_effort: "low"
+  };'''
+new='''  if (candidate.kind === "prompt") {
+    return {
+      prompt: `${instruction}\\n\\nInput: ${payload}`,
+      max_tokens: 220,
+      temperature: 0,
+      top_p: 0.8
+    };
+  }
+  const messages = [
+    { role: "system", content: instruction },
+    { role: "user", content: payload }
+  ];
+  if (candidate.kind === "kimi") {
+    return {
+      messages,
+      max_completion_tokens: 220,
+      temperature: 0,
+      chat_template_kwargs: { thinking: false }
+    };
+  }
+  return {
+    messages,
+    max_tokens: 220,
+    temperature: 0
+  };'''
+if old not in s:
+    raise SystemExit('translation request anchor missing')
+s=s.replace(old,new,1)
+p.write_text(s)
+
+p=Path('wrangler.toml')
+w=p.read_text()
+replacements={
+    'AI_MODERATION_MODEL = "@cf/zai-org/glm-4.7-flash"': f'AI_MODERATION_MODEL = "{KIMI}"',
+    'AI_MODERATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"': f'AI_MODERATION_FALLBACK_MODEL = "{LLAMA}"',
+    'AI_TRANSLATION_BALANCED_MODEL = "@cf/zai-org/glm-4.7-flash"': f'AI_TRANSLATION_BALANCED_MODEL = "{LLAMA}"',
+    'AI_TRANSLATION_ACCURATE_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"': f'AI_TRANSLATION_ACCURATE_MODEL = "{KIMI}"',
+}
+for oldv,newv in replacements.items():
+    if oldv not in w:
+        raise SystemExit(f'wrangler model setting missing: {oldv}')
+    w=w.replace(oldv,newv,1)
+p.write_text(w)
+
+p=Path('scripts/test-ai-translation-resilience.mjs')
+t=p.read_text()
+t=t.replace('const GLM = "@cf/zai-org/glm-4.7-flash";\nconst QWEN = "@cf/qwen/qwen3-30b-a3b-fp8";', f'const KIMI = "{KIMI}";\nconst LLAMA = "{LLAMA}";', 1)
+t=t.replace('await accurateUsesPromptSchemaAndSharedCapacity();','await accurateUsesKimiNoThinkingAndSharedCapacity();',1)
+t=t.replace('async function accurateUsesPromptSchemaAndSharedCapacity() {','async function accurateUsesKimiNoThinkingAndSharedCapacity() {',1)
+t=t.replace('    assert.equal(model, QWEN);\n    return { response: "これは翻訳の正常性確認です。" };', '''    assert.equal(model, KIMI);
+    assert.equal(request.max_completion_tokens, 220);
+    assert.equal(request.max_tokens, undefined);
+    assert.deepEqual(request.chat_template_kwargs, { thinking: false });
+    return { response: "これは翻訳の正常性確認です。" };''',1)
+t=t.replace('  assert.equal(typeof calls[0].request.prompt, "string");\n  assert.equal(calls[0].request.messages, undefined);','  assert.ok(Array.isArray(calls[0].request.messages));',1)
+t=t.replace('    assert.equal(model, GLM);\n    assert.equal(request.reasoning_effort, "low");\n    assert.equal(request.max_completion_tokens, 220);', '''    assert.equal(model, LLAMA);
+    assert.equal(request.max_tokens, 220);
+    assert.equal(request.max_completion_tokens, undefined);
+    assert.equal(request.reasoning_effort, undefined);''',1)
+t=t.replace('  assert.deepEqual(calls.map((call) => call.model), [M2M, GLM]);','  assert.deepEqual(calls.map((call) => call.model), [M2M, LLAMA]);',1)
+t=t.replace('    assert.equal(model, GLM);\n    return { response: "翻訳の精度が低い。" };','    assert.equal(model, LLAMA);\n    return { response: "翻訳の精度が低い。" };',1)
+t=t.replace('  assert.deepEqual(calls, [GLM]);','  assert.deepEqual(calls, [LLAMA]);',1)
+t=t.replace('    if (model === GLM) { const error = new Error("temporary model outage"); error.status = 503; throw error; }', '''    if (model === KIMI) {
+      assert.equal(request.max_completion_tokens, 320);
+      assert.equal(request.max_tokens, undefined);
+      assert.deepEqual(request.chat_template_kwargs, { thinking: false });
+      const error = new Error("temporary model outage"); error.status = 503; throw error;
+    }
+    assert.equal(model, LLAMA);
+    assert.equal(request.max_tokens, 180);
+    assert.equal(request.max_completion_tokens, undefined);''',1)
+t=t.replace('  assert.deepEqual(models, [GLM, QWEN]);','  assert.deepEqual(models, [KIMI, LLAMA]);',1)
+t=t.replace('    AI_MODERATION_MODEL: GLM,\n    AI_MODERATION_FALLBACK_MODEL: QWEN,','    AI_MODERATION_MODEL: KIMI,\n    AI_MODERATION_FALLBACK_MODEL: LLAMA,',1)
+t=t.replace('    AI_TRANSLATION_BALANCED_MODEL: GLM,\n    AI_TRANSLATION_ACCURATE_MODEL: QWEN,','    AI_TRANSLATION_BALANCED_MODEL: LLAMA,\n    AI_TRANSLATION_ACCURATE_MODEL: KIMI,',1)
+t=t.replace('  const env = moderationEnvironment(async (model) => {\n    models.push(model);', '  const env = moderationEnvironment(async (model, request) => {\n    models.push(model);',1)
+log='console.log("AI capacity and translation resilience tests passed");'
+guard='''const providerBaseSource = readFileSync(new URL("../src/ai/provider-base.js", import.meta.url), "utf8");
+assert.doesNotMatch(providerBaseSource, /uniqueItems\\s*:\\s*true/, "moderation schema must avoid unsupported uniqueItems");
+const wranglerSource = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+assert.match(wranglerSource, /AI_MODERATION_MODEL = "@cf\\/moonshotai\\/kimi-k2\\.6"/);
+assert.match(wranglerSource, /AI_MODERATION_FALLBACK_MODEL = "@cf\\/meta\\/llama-4-scout-17b-16e-instruct"/);
+assert.match(wranglerSource, /AI_TRANSLATION_BALANCED_MODEL = "@cf\\/meta\\/llama-4-scout-17b-16e-instruct"/);
+assert.match(wranglerSource, /AI_TRANSLATION_ACCURATE_MODEL = "@cf\\/moonshotai\\/kimi-k2\\.6"/);
+'''
+if log not in t:
+    raise SystemExit('test log anchor missing')
+t=t.replace(log,guard+log,1)
+p.write_text(t)
+
+manifest=Path('SOURCE_SHA256SUMS.override.txt')
+entries={}
+for line in manifest.read_text().splitlines():
+    if not line:
+        continue
+    digest,name=line.split('  ',1)
+    entries[name]=digest
+for name in ['src/ai/provider-base.js','src/ai/provider.js','scripts/test-ai-translation-resilience.mjs','wrangler.toml']:
+    entries[name]=hashlib.sha256(Path(name).read_bytes()).hexdigest()
+manifest.write_text('\n'.join(f'{entries[name]}  {name}' for name in sorted(entries))+'\n')
