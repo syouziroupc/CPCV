@@ -1,0 +1,72 @@
+name: Apply AI schema compatibility temporary
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/apply-ai-schema-compat-temporary.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-ai-schema-compat-20260807
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Remove unsupported schema keyword and verify normalization
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('src/ai/provider-base.js')
+          s=p.read_text()
+          needle='      uniqueItems: true,\n'
+          if needle not in s: raise SystemExit('moderation uniqueItems keyword not found')
+          s=s.replace(needle,'',1)
+          p.write_text(s)
+
+          p=Path('scripts/test-ai-translation-resilience.mjs')
+          t=p.read_text()
+          if 'moderation schema avoids unsupported uniqueItems' not in t:
+              if 'import { readFileSync } from "node:fs";' not in t:
+                  t=t.replace('import assert from "node:assert/strict";','import assert from "node:assert/strict";\nimport { readFileSync } from "node:fs";',1)
+              anchor='console.log("AI capacity and translation resilience tests passed");'
+              if anchor not in t: anchor='console.log("AI translation resilience tests passed");'
+              check='''const providerBaseSource = readFileSync(new URL("../src/ai/provider-base.js", import.meta.url), "utf8");
+          assert.doesNotMatch(providerBaseSource, /uniqueItems\s*:\s*true/, "moderation schema avoids unsupported uniqueItems");
+          '''
+              if anchor not in t: raise SystemExit('resilience log anchor missing')
+              t=t.replace(anchor,check+anchor,1)
+          p.write_text(t)
+
+          manifest=Path('SOURCE_SHA256SUMS.override.txt')
+          entries={}
+          for line in manifest.read_text().splitlines():
+              if not line: continue
+              digest,name=line.split('  ',1); entries[name]=digest
+          for name in ['src/ai/provider-base.js','scripts/test-ai-translation-resilience.mjs']:
+              entries[name]=hashlib.sha256(Path(name).read_bytes()).hexdigest()
+          manifest.write_text('\n'.join(f'{entries[name]}  {name}' for name in sorted(entries))+'\n')
+          PY
+          node --check src/ai/provider-base.js
+          node scripts/test-ai-translation-resilience.mjs
+          npm run check:stage08
+          git rm .github/workflows/apply-ai-schema-compat-temporary.yml
+          git config user.name "cpcv-ai-schema-fix"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/ai/provider-base.js scripts/test-ai-translation-resilience.mjs SOURCE_SHA256SUMS.override.txt
+          git commit -m "Remove unsupported moderation schema keyword"
+          node scripts/verify-source-manifest.mjs
+          test -z "$(git status --porcelain)"
+          git push origin HEAD:agent/fix-ai-schema-compat-20260807
