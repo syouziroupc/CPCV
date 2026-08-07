@@ -1,0 +1,127 @@
+name: Workers AI provider request diagnostic 2026-08-07
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/workers-ai-provider-diagnostic-20260807.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe current Workers AI models with safe synthetic input
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          account=""
+          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do
+            value="${!key:-}"
+            if [ -n "$value" ]; then account="$value"; break; fi
+          done
+          test -n "$TOKEN"
+          test -n "$account"
+          echo "::add-mask::$TOKEN"
+          echo "::add-mask::$account"
+          mkdir -p provider-diagnostic
+          cat > provider-diagnostic/simple.json <<'JSON'
+          {
+            "messages": [
+              {"role":"system","content":"You are a concise classifier."},
+              {"role":"user","content":"Reply with the word ok."}
+            ],
+            "max_tokens": 32,
+            "temperature": 0
+          }
+          JSON
+          cat > provider-diagnostic/schema.json <<'JSON'
+          {
+            "messages": [
+              {"role":"system","content":"Classify a classroom comment. Return only the required JSON."},
+              {"role":"user","content":"Ordinary classroom comment about energy markets."}
+            ],
+            "max_tokens": 180,
+            "temperature": 0,
+            "response_format": {
+              "type": "json_schema",
+              "json_schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["recommendation","confidence","categories"],
+                "properties": {
+                  "recommendation": {"type":"string","enum":["allow","review","hide"]},
+                  "confidence": {"type":"number","minimum":0,"maximum":1},
+                  "categories": {"type":"array","maxItems":9,"items":{"type":"string"}}
+                }
+              }
+            }
+          }
+          JSON
+          cat > provider-diagnostic/plain-json.json <<'JSON'
+          {
+            "messages": [
+              {"role":"system","content":"Classify a classroom comment. Return one JSON object only with recommendation, confidence, and categories."},
+              {"role":"user","content":"Ordinary classroom comment about energy markets."}
+            ],
+            "max_tokens": 180,
+            "temperature": 0
+          }
+          JSON
+          probe() {
+            model="$1"
+            label="$2"
+            payload="$3"
+            safe_model=$(printf '%s' "$model" | tr '/@.' '____')
+            out="provider-diagnostic/${safe_model}-${label}"
+            code=$(curl -sS -o "${out}.json" -w '%{http_code}' \
+              "https://api.cloudflare.com/client/v4/accounts/${account}/ai/run/${model}" \
+              -H "Authorization: Bearer ${TOKEN}" \
+              -H 'Content-Type: application/json' \
+              --data-binary "@${payload}")
+            printf '%s\n' "$code" > "${out}.status"
+            jq '{success,errors,messages,result}' "${out}.json" > "${out}.sanitized.json" || cp "${out}.json" "${out}.sanitized.json"
+            rm -f "${out}.json"
+          }
+          for model in '@cf/zai-org/glm-4.7-flash' '@cf/qwen/qwen3-30b-a3b-fp8'; do
+            probe "$model" simple provider-diagnostic/simple.json
+            probe "$model" schema provider-diagnostic/schema.json
+            probe "$model" plain-json provider-diagnostic/plain-json.json
+          done
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          rows=[]
+          for status in sorted(Path('provider-diagnostic').glob('*.status')):
+              stem=status.stem
+              body=Path('provider-diagnostic', stem+'.sanitized.json')
+              parsed=json.loads(body.read_text()) if body.exists() else {}
+              rows.append({
+                  'probe': stem,
+                  'httpStatus': int(status.read_text().strip()),
+                  'success': parsed.get('success'),
+                  'errors': parsed.get('errors'),
+                  'resultType': type(parsed.get('result')).__name__,
+                  'resultPreview': str(parsed.get('result'))[:600]
+              })
+          Path('provider-diagnostic/summary.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          print(json.dumps(rows,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cpcv-workers-ai-provider-diagnostic-${{ github.run_id }}
+          path: provider-diagnostic/
+          if-no-files-found: error
+          retention-days: 30
