@@ -36,14 +36,15 @@ max_batch_timeout = 0
 max_retries = 3
 
 # Translation and moderation scale independently. max_concurrency is intentionally
-# unset so Cloudflare Queues can autoscale consumers as backlog grows.
+# unset so Cloudflare Queues can autoscale consumers as backlog grows. Keep each
+# invocation small so a slow AI request does not hold a large batch and delay scale-out.
 [[queues.producers]]
 binding = "AI_TRANSLATION_QUEUE"
 queue = "cpcv-ai-translation-jobs"
 
 [[queues.consumers]]
 queue = "cpcv-ai-translation-jobs"
-max_batch_size = 12
+max_batch_size = 6
 max_batch_timeout = 0
 max_retries = 100
 dead_letter_queue = "cpcv-ai-translation-dlq"
@@ -54,7 +55,7 @@ queue = "cpcv-ai-moderation-jobs"
 
 [[queues.consumers]]
 queue = "cpcv-ai-moderation-jobs"
-max_batch_size = 10
+max_batch_size = 6
 max_batch_timeout = 0
 max_retries = 100
 dead_letter_queue = "cpcv-ai-moderation-dlq"
@@ -87,8 +88,9 @@ name = "AUTH_PUBLIC_EMAIL_LIMITER"
 namespace_id = "826071904"
 simple = { limit = 30, period = 60 }
 
-# Keep a small margin below Workers AI's default task limits. These counters are
-# an early backpressure layer; provider 429 responses still retry through Queues.
+# Keep a small margin below Workers AI's default task limits. Translation-model
+# calls use the translation limiter. Text-generation translation fallbacks share
+# the moderation limiter's counter so both workloads stay under the 300 RPM task limit.
 [[ratelimits]]
 name = "AI_TRANSLATION_RATE_LIMITER"
 namespace_id = "826071905" # AI capacity namespace; separate from auth/public boundary namespaces
@@ -96,7 +98,7 @@ simple = { limit = 700, period = 60 }
 
 [[ratelimits]]
 name = "AI_MODERATION_RATE_LIMITER"
-namespace_id = "826071906" # AI capacity namespace; separate from auth/public boundary namespaces
+namespace_id = "826071906" # shared Workers AI text-generation capacity namespace
 simple = { limit = 290, period = 60 }
 
 [vars]
@@ -109,12 +111,12 @@ AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"
 AI_TRANSLATION_BALANCED_MODEL = "@cf/zai-org/glm-4.7-flash"
 AI_TRANSLATION_ACCURATE_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
 AI_TIMEOUT_MS = "12000"
-AI_TRANSLATION_TIMEOUT_MS = "3000"
-AI_TRANSLATION_BALANCED_TIMEOUT_MS = "6000"
-AI_TRANSLATION_ACCURATE_TIMEOUT_MS = "12000"
+AI_TRANSLATION_TIMEOUT_MS = "8000"
+AI_TRANSLATION_BALANCED_TIMEOUT_MS = "18000"
+AI_TRANSLATION_ACCURATE_TIMEOUT_MS = "30000"
 AI_QUEUE_PARALLELISM = "5"
-AI_TRANSLATION_QUEUE_PARALLELISM = "6"
-AI_MODERATION_QUEUE_PARALLELISM = "5"
+AI_TRANSLATION_QUEUE_PARALLELISM = "3"
+AI_MODERATION_QUEUE_PARALLELISM = "3"
 AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 AUTH_EMAIL_FROM = "noreply@szworld.uk"
