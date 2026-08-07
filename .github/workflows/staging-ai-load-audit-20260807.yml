@@ -69,21 +69,53 @@ jobs:
           p = Path('scripts/staging-ai-load-test-v2.mjs')
           s = p.read_text()
           s = s.replace("'--remote', '--config', CONFIG", "'--remote', '--yes', '--config', CONFIG")
-          old = "const message = `This classroom translation load test ${marker} sentence ${String(i + 1).padStart(4, '0')} explains a simple topic about energy, markets, and public policy for students.`;"
-          new = "const message = `Load ${marker} ${String(i + 1).padStart(4, '0')}: Energy markets change.`;"
-          if old in s:
-              s = s.replace(old, new)
+
+          run_id = "const RUN_ID = `${Date.now()}-${randomBytes(3).toString('hex')}`;\n"
+          if run_id not in s:
+              raise SystemExit('RUN_ID declaration not found')
+          s = s.replace(run_id, run_id + "const RUN_TAG = [...randomBytes(6)].map((value) => String.fromCharCode(97 + (value % 26))).join('');\n", 1)
+
+          old_message = "const message = `This classroom translation load test ${marker} sentence ${String(i + 1).padStart(4, '0')} explains a simple topic about energy, markets, and public policy for students.`;"
+          safe_message = "const message = `Load ${marker} ${String(i + 1).padStart(4, '0')}: Energy markets change.`;"
+          if old_message in s:
+              s = s.replace(old_message, safe_message)
+
+          s = s.replace("const marker = `${name}-${RUN_ID}`;", "const marker = `${name}-${RUN_TAG}`;")
           s = s.replace(
-              "if (phase.accepted !== count) throw new Error(`${name}: only ${phase.accepted}/${count} comments were accepted`);",
-              "if (phase.accepted === 0) throw new Error(`${name}: no comments were accepted`);"
+              "async function runAiPhase({ name, quality, count, concurrency, timeoutMs }) {",
+              "async function runAiPhase({ name, quality, count, concurrency, timeoutMs, expectedJobsPerComment = 2 }) {"
+          )
+          s = s.replace(
+              "if (phase.accepted !== count) throw new Error(`${name}: only ${phase.accepted}/${count} comments were accepted`);\n  phase.ai = await waitForAi(marker, phase.accepted * 2, timeoutMs);\n  if (phase.ai.totalJobs !== phase.accepted * 2) throw new Error(`${name}: expected ${phase.accepted * 2} AI jobs, found ${phase.ai.totalJobs}`);",
+              "if (phase.accepted === 0) throw new Error(`${name}: no comments were accepted`);\n  if (expectedJobsPerComment === 0) {\n    await sleep(2500);\n    phase.ai = await aiSnapshot(marker);\n    if (phase.ai.totalJobs !== 0) throw new Error(`${name}: expected no AI jobs, found ${phase.ai.totalJobs}`);\n    return;\n  }\n  phase.ai = await waitForAi(marker, phase.accepted * expectedJobsPerComment, timeoutMs);\n  if (phase.ai.totalJobs !== phase.accepted * expectedJobsPerComment) throw new Error(`${name}: expected ${phase.accepted * expectedJobsPerComment} AI jobs, found ${phase.ai.totalJobs}`);"
+          )
+          s = s.replace(
+              "if (phase.ai.failed > 0) throw new Error(`${name}: ${phase.ai.failed} AI jobs failed`);",
+              "if (phase.ai.failed > 0) throw new Error(`${name}: ${phase.ai.failed} AI jobs failed`);\n  if (phase.ai.skipped > 0) throw new Error(`${name}: ${phase.ai.skipped} AI jobs were unexpectedly skipped`);"
+          )
+          s = s.replace(
+              "SUM(CASE WHEN j.status='failed' THEN 1 ELSE 0 END) AS failed,",
+              "SUM(CASE WHEN j.status='failed' THEN 1 ELSE 0 END) AS failed,\n      SUM(CASE WHEN j.status='skipped' THEN 1 ELSE 0 END) AS skipped,"
+          )
+          s = s.replace(
+              "failed: Number(r.failed || 0),\n    nonTerminal:",
+              "failed: Number(r.failed || 0), skipped: Number(r.skipped || 0),\n    nonTerminal:"
           )
           s = s.replace(
               "latencyMs: Math.round(performance.now() - started), error: body?.error || null };",
               "latencyMs: Math.round(performance.now() - started), error: body?.error || null, requestId: body?.requestId || null };"
           )
+
+          anchor = "  await assertPublicSession();\n"
+          baseline = "  await assertPublicSession();\n  await d1(`UPDATE organization_ai_settings SET enabled=0,updated_at=?2 WHERE organization_id=?1`, [ORG_ID, new Date().toISOString()]);\n  await runAiPhase({ name: 'baseline_no_ai', quality: 'fast', count: 40, concurrency: 10, timeoutMs: 30_000, expectedJobsPerComment: 0 });\n  await d1(`UPDATE organization_ai_settings SET enabled=1,updated_at=?2 WHERE organization_id=?1`, [ORG_ID, new Date().toISOString()]);\n"
+          if anchor not in s:
+              raise SystemExit('main phase anchor not found')
+          s = s.replace(anchor, baseline, 1)
           p.write_text(s)
           PY
-          timeout 1500s npx wrangler tail class-pdf-comment-viewer-v01-staging --format json --method POST > worker-tail.jsonl 2>&1 &
+          node --check scripts/staging-ai-load-test-v2.mjs
+
+          timeout 1500s npx wrangler tail class-pdf-comment-viewer-v01-staging --format json > worker-tail.jsonl 2>&1 &
           tail_pid=$!
           trap 'kill "$tail_pid" 2>/dev/null || true' EXIT
           sleep 5
@@ -94,6 +126,14 @@ jobs:
           sleep 5
           kill "$tail_pid" 2>/dev/null || true
           wait "$tail_pid" 2>/dev/null || true
+
+          set +e
+          npx wrangler d1 insights class_comment_db_v2_staging --config .load-staging.wrangler.toml --time-period 1h --sort-type sum --sort-by time --limit 30 --json > d1-insights-time.json 2> d1-insights-time.err
+          insight_time_status=$?
+          npx wrangler d1 insights class_comment_db_v2_staging --config .load-staging.wrangler.toml --time-period 1h --sort-type sum --sort-by count --limit 30 --json > d1-insights-count.json 2> d1-insights-count.err
+          insight_count_status=$?
+          set -e
+          printf 'time_status=%s\ncount_status=%s\n' "$insight_time_status" "$insight_count_status" > d1-insights-status.txt
           rm -f .load-staging.wrangler.toml .d1-probe.json
           exit "$test_status"
       - name: Upload load-test evidence
@@ -105,5 +145,10 @@ jobs:
             load-test-report.json
             load-test-summary.md
             worker-tail.jsonl
+            d1-insights-time.json
+            d1-insights-time.err
+            d1-insights-count.json
+            d1-insights-count.err
+            d1-insights-status.txt
           if-no-files-found: warn
           retention-days: 30
