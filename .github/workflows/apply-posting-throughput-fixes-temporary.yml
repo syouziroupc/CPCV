@@ -21,7 +21,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Patch measured hot paths and validate
+      - name: Skip policy and dictionary reads when filtering is disabled
         shell: bash
         run: |
           set -euo pipefail
@@ -30,10 +30,9 @@ jobs:
           from pathlib import Path
           import hashlib
 
-          # 1) Disabled filtering needs only the session setting row. Do not load the
-          # organization policy table and up to 2000 dictionary terms per comment.
           p = Path('src/content-filter/repository.js')
           s = p.read_text()
+
           old = '''export async function evaluateCommentFilter(db, input) {
             const context = await getFilterContext(db, input.organizationId, input.liveSessionId);
             const language = detectCommentLanguage(input.message);'''
@@ -44,53 +43,47 @@ jobs:
               ? await getFilterContext(db, input.organizationId, input.liveSessionId, { settingsRow })
               : { settings, policies: [], terms: [], version: Date.parse(settingsRow?.updated_at || "") || 1 };
             const language = detectCommentLanguage(input.message);'''
-          if 'const settingsRow = await getSessionFilterSettingsRow' not in s:
-              if old not in s: raise SystemExit('evaluateCommentFilter anchor missing')
-              s = s.replace(old, new, 1)
+          if old not in s: raise SystemExit('evaluateCommentFilter anchor missing')
+          s = s.replace(old, new, 1)
 
-          old = '''export async function evaluateTranslationFilter(db, input) {
-            const context = await getFilterContext(db, input.organizationId, input.liveSessionId, {
-              languageCodes: [input.targetLanguage, "und"]
-            });
-            if (!context.settings.translationFilterEnabled) {'''
-          new = '''export async function evaluateTranslationFilter(db, input) {
+          start = s.index('export async function evaluateTranslationFilter(db, input) {')
+          end = s.index('\nexport async function getFilterContext(', start)
+          translation = '''export async function evaluateTranslationFilter(db, input) {
             const settingsRow = await getSessionFilterSettingsRow(db, input.organizationId, input.liveSessionId);
             const settings = settingsRow ? sessionSettingsResponse(settingsRow) : defaultSessionFilterSettings();
-            if (!settings.translationFilterEnabled) {'''
-          if 'const settings = settingsRow ? sessionSettingsResponse(settingsRow) : defaultSessionFilterSettings();\n  if (!settings.translationFilterEnabled)' not in s:
-              if old not in s: raise SystemExit('evaluateTranslationFilter anchor missing')
-              s = s.replace(old, new, 1)
-              end_anchor = '''      matches: []
+            if (!settings.translationFilterEnabled) {
+              return {
+                enabled: false,
+                action: "allow",
+                displayMessage: null,
+                aiRequired: false,
+                ambiguous: false,
+                requiresReview: false,
+                version: 0,
+                matches: []
+              };
+            }
+            const context = await getFilterContext(db, input.organizationId, input.liveSessionId, {
+              languageCodes: [input.targetLanguage, "und"],
+              settingsRow
+            });
+            const decision = evaluateFilterMessage(input.translatedText, context);
+            return {
+              ...decision,
+              requiresReview: decision.action === "review"
             };
           }
-          const decision = evaluateFilterMessage(input.translatedText, context);'''
-              end_new = '''      matches: []
-            };
-          }
-          const context = await getFilterContext(db, input.organizationId, input.liveSessionId, {
-            languageCodes: [input.targetLanguage, "und"],
-            settingsRow
-          });
-          const decision = evaluateFilterMessage(input.translatedText, context);'''
-              if end_anchor not in s: raise SystemExit('translation context insert anchor missing')
-              s = s.replace(end_anchor, end_new, 1)
+          '''
+          s = s[:start] + translation + s[end:]
 
-          old = '''export async function getFilterContext(db, organizationId, liveSessionId, options = {}) {
-            const settingsRow = await db.prepare(
-              `SELECT enabled, ai_routing_mode, mask_character,
-                      COALESCE(translation_filter_enabled, 1) AS translation_filter_enabled,
-                      COALESCE(unsupported_language_mode, 'ai_review') AS unsupported_language_mode,
-                      updated_at
-               FROM session_content_filter_settings
-               WHERE organization_id = ?1 AND live_session_id = ?2 LIMIT 1`
-            ).bind(organizationId, liveSessionId).first();'''
-          new = '''export async function getFilterContext(db, organizationId, liveSessionId, options = {}) {
+          start = s.index('export async function getFilterContext(db, organizationId, liveSessionId, options = {}) {')
+          settings_select_end = s.index('  const policiesResult = await db.prepare(', start)
+          prefix = '''export async function getFilterContext(db, organizationId, liveSessionId, options = {}) {
             const settingsRow = Object.prototype.hasOwnProperty.call(options, "settingsRow")
               ? options.settingsRow
-              : await getSessionFilterSettingsRow(db, organizationId, liveSessionId);'''
-          if 'Object.prototype.hasOwnProperty.call(options, "settingsRow")' not in s:
-              if old not in s: raise SystemExit('getFilterContext settings anchor missing')
-              s = s.replace(old, new, 1)
+              : await getSessionFilterSettingsRow(db, organizationId, liveSessionId);
+          '''
+          s = s[:start] + prefix + s[settings_select_end:]
 
           old_default = '''    settings: settingsRow ? sessionSettingsResponse(settingsRow) : {
                 enabled: false,
@@ -99,12 +92,11 @@ jobs:
                 translationFilterEnabled: true,
                 unsupportedLanguageMode: "ai_review"
               },'''
-          new_default = '''    settings: settingsRow ? sessionSettingsResponse(settingsRow) : defaultSessionFilterSettings(),'''
-          if old_default in s: s = s.replace(old_default, new_default, 1)
+          if old_default not in s: raise SystemExit('default settings block missing')
+          s = s.replace(old_default, '    settings: settingsRow ? sessionSettingsResponse(settingsRow) : defaultSessionFilterSettings(),', 1)
 
-          helper_anchor = '\nexport async function listOrganizationFilter(db, organizationId) {'
-          if 'async function getSessionFilterSettingsRow(db, organizationId, liveSessionId)' not in s:
-              helpers = '''
+          anchor = '\nexport async function listOrganizationFilter(db, organizationId) {'
+          helpers = '''
           async function getSessionFilterSettingsRow(db, organizationId, liveSessionId) {
             return db.prepare(
               `SELECT enabled, ai_routing_mode, mask_character,
@@ -126,81 +118,14 @@ jobs:
             };
           }
           '''
-              if helper_anchor not in s: raise SystemExit('filter helper anchor missing')
-              s = s.replace(helper_anchor, helpers + helper_anchor, 1)
+          if anchor not in s: raise SystemExit('filter helper insertion anchor missing')
+          s = s.replace(anchor, helpers + anchor, 1)
           p.write_text(s)
 
-          # 2) New idempotency keys currently do DELETE + duplicate SELECT + conflict SELECT.
-          # Replace the normal path with one lookup. Expired collisions still delete lazily.
-          p = Path('src/comments/repository.js')
-          s = p.read_text()
-          old = '''  await releaseExpiredIdempotencyKey(db, input.liveSessionId, input.idempotencyKey, nowIso);
-            const existing = await findCommentByIdempotency(
-              db,
-              input.liveSessionId,
-              input.idempotencyKey,
-              input.participantTokenHash,
-              nowIso
-            );
-            if (existing) return { comment: commentResponse(existing), duplicate: true };
-            if (await activeIdempotencyKeyExists(db, input.liveSessionId, input.idempotencyKey, nowIso)) {
-              throw new AuthError(409, "IDEMPOTENCY_KEY_CONFLICT");
-            }'''
-          new = '''  const existingKey = await findIdempotencyRecord(
-              db,
-              input.liveSessionId,
-              input.idempotencyKey,
-              input.participantTokenHash
-            );
-            if (existingKey) {
-              if (Date.parse(existingKey.retained_until) <= now.getTime()) {
-                await db.prepare(
-                  `DELETE FROM comments WHERE id = ?1 AND retained_until <= ?2`
-                ).bind(existingKey.id, nowIso).run();
-              } else if (existingKey.participant_matches) {
-                return { comment: commentResponse(existingKey), duplicate: true };
-              } else {
-                throw new AuthError(409, "IDEMPOTENCY_KEY_CONFLICT");
-              }
-            }'''
-          if 'const existingKey = await findIdempotencyRecord' not in s:
-              if old not in s: raise SystemExit('idempotency preflight anchor missing')
-              s = s.replace(old, new, 1)
-
-          helper_anchor = '\nasync function findCommentByIdempotency(db, liveSessionId, key, participantTokenHash, nowIso) {'
-          if 'async function findIdempotencyRecord(db, liveSessionId, key, participantTokenHash)' not in s:
-              helper = '''
-          async function findIdempotencyRecord(db, liveSessionId, key, participantTokenHash) {
-            const pdfPageSelect = await pdfPageSelectExpression(db, "c");
-            return db.prepare(
-              `SELECT c.id, c.nickname, c.message, c.display_message, c.message_length, c.moderation_state,
-                      c.filter_action, c.filter_ai_required, c.filter_version,
-                      c.detected_language, c.language_confidence_milli, c.unsupported_language,
-                      c.created_at, c.updated_at, c.retained_until, c.deleted_at,
-                      ${pdfPageSelect} AS pdf_page_number,
-                      CASE WHEN p.token_hash = ?3 THEN 1 ELSE 0 END AS participant_matches
-               FROM comments c
-               LEFT JOIN participants p ON p.id = c.participant_id
-               WHERE c.live_session_id = ?1 AND c.idempotency_key = ?2
-               LIMIT 1`
-            ).bind(liveSessionId, key, participantTokenHash).first();
-          }
-          '''
-              if helper_anchor not in s: raise SystemExit('comments helper anchor missing')
-              s = s.replace(helper_anchor, helper + helper_anchor, 1)
-          # Unconditional delete helper is no longer part of the hot path.
-          start_text = '\nasync function releaseExpiredIdempotencyKey(db, liveSessionId, key, nowIso) {'
-          if start_text in s:
-              start = s.index(start_text)
-              end = s.index('\nasync function findCommentById(db, id) {', start)
-              s = s[:start] + '\n' + s[end:]
-          p.write_text(s)
-
-          # Add a focused regression proving the disabled filter does not touch policy/term tables.
           p = Path('scripts/test-content-filter-v2.mjs')
-          s = p.read_text()
-          if 'await testDisabledFilterFastPath();' not in s:
-              s = s.replace('async function main() {\n  const h = createHarness();', 'async function main() {\n  await testDisabledFilterFastPath();\n  const h = createHarness();', 1)
+          t = p.read_text()
+          if 'await testDisabledFilterFastPath();' not in t:
+              t = t.replace('async function main() {\n  const h = createHarness();', 'async function main() {\n  await testDisabledFilterFastPath();\n  const h = createHarness();', 1)
               anchor = '\nasync function testSchema(h) {'
               test = r'''
 
@@ -210,7 +135,7 @@ jobs:
               prepare(sql) {
                 queries.push(sql);
                 if (/organization_content_filter_policies|content_filter_terms/.test(sql)) {
-                  throw new Error("disabled filter performed an unnecessary dictionary/policy query");
+                  throw new Error("disabled filter performed an unnecessary policy or dictionary query");
                 }
                 return {
                   bind() { return this; },
@@ -235,16 +160,11 @@ jobs:
             check("disabled filter skips policy and dictionary reads", decision.action === "allow" && queries.length === 1, { decision, queries });
           }
           '''
-              if anchor not in s: raise SystemExit('content filter test anchor missing')
-              s = s.replace(anchor, test + anchor, 1)
-          p.write_text(s)
-
-          for path in ['src/content-filter/repository.js','src/comments/repository.js','scripts/test-content-filter-v2.mjs']:
-              data = Path(path).read_text()
-              if '\r' in data: raise SystemExit(f'CRLF unexpectedly introduced: {path}')
+              if anchor not in t: raise SystemExit('content filter test anchor missing')
+              t = t.replace(anchor, test + anchor, 1)
+          p.write_text(t)
           PY
           node --check src/content-filter/repository.js
-          node --check src/comments/repository.js
           node --check scripts/test-content-filter-v2.mjs
           node scripts/test-content-filter-v2.mjs
           node scripts/test-comments-v2.mjs
@@ -252,7 +172,7 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import hashlib
-          changed = ['src/content-filter/repository.js','src/comments/repository.js','scripts/test-content-filter-v2.mjs']
+          changed = ['src/content-filter/repository.js','scripts/test-content-filter-v2.mjs']
           path = Path('SOURCE_SHA256SUMS.override.txt')
           entries = {}
           for line in path.read_text().splitlines():
@@ -266,6 +186,6 @@ jobs:
           git rm .github/workflows/apply-posting-throughput-fixes-temporary.yml
           git config user.name "cpcv-throughput-fix"
           git config user.email "actions@users.noreply.github.com"
-          git add src/content-filter/repository.js src/comments/repository.js scripts/test-content-filter-v2.mjs SOURCE_SHA256SUMS.override.txt
-          git commit -m "Reduce posting D1 round trips"
+          git add src/content-filter/repository.js scripts/test-content-filter-v2.mjs SOURCE_SHA256SUMS.override.txt
+          git commit -m "Skip disabled filter dictionary reads"
           git push origin HEAD:agent/fix-posting-d1-throughput-20260807
