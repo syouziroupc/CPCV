@@ -1,0 +1,147 @@
+name: Workers AI binding diagnostic 2026-08-07
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/workers-ai-binding-diagnostic-20260807.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Deploy isolated diagnostic Worker and probe AI binding
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npm ci
+          account=""
+          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do
+            value="${!key:-}"
+            if [ -n "$value" ]; then account="$value"; break; fi
+          done
+          test -n "$TOKEN"; test -n "$account"
+          echo "::add-mask::$TOKEN"; echo "::add-mask::$account"
+          export CLOUDFLARE_API_TOKEN="$TOKEN"
+          export CLOUDFLARE_ACCOUNT_ID="$account"
+          mkdir -p binding-diagnostic
+          cat > .binding-diagnostic-worker.mjs <<'JS'
+          const MODELS = {
+            glm: '@cf/zai-org/glm-4.7-flash',
+            qwen: '@cf/qwen/qwen3-30b-a3b-fp8'
+          };
+          const SCHEMA = {
+            type: 'object',
+            additionalProperties: false,
+            required: ['recommendation','confidence','categories'],
+            properties: {
+              recommendation: { type: 'string', enum: ['allow','review','hide'] },
+              confidence: { type: 'number', minimum: 0, maximum: 1 },
+              categories: { type: 'array', maxItems: 9, items: { type: 'string' } }
+            }
+          };
+          function requestFor(kind) {
+            if (kind === 'simple') return {
+              messages: [{role:'system',content:'You are concise.'},{role:'user',content:'Reply with ok.'}],
+              max_tokens: 32, temperature: 0
+            };
+            const base = {
+              messages: [
+                {role:'system',content:'Classify a classroom comment. Return one JSON object only with recommendation, confidence, and categories.'},
+                {role:'user',content:'Ordinary classroom comment about energy markets.'}
+              ],
+              max_tokens: 180, temperature: 0
+            };
+            if (kind === 'schema') base.response_format = { type: 'json_schema', json_schema: SCHEMA };
+            return base;
+          }
+          export default {
+            async fetch(request, env) {
+              const parts = new URL(request.url).pathname.split('/').filter(Boolean);
+              const model = MODELS[parts[0]];
+              const kind = parts[1];
+              if (!model || !['simple','schema','plain'].includes(kind)) return new Response('not found',{status:404});
+              const started = Date.now();
+              try {
+                const result = await env.AI.run(model, requestFor(kind));
+                return Response.json({ok:true,model,kind,elapsedMs:Date.now()-started,result});
+              } catch (error) {
+                return Response.json({
+                  ok:false,model,kind,elapsedMs:Date.now()-started,
+                  error:{name:String(error?.name||''),message:String(error?.message||''),status:error?.status??null,code:error?.code??null,aiCode:error?.aiCode??null,retryable:error?.retryable??null}
+                },{status:502});
+              }
+            }
+          };
+          JS
+          cat > .binding-diagnostic.toml <<'TOML'
+          name = "cpcv-ai-binding-diagnostic-20260807"
+          main = ".binding-diagnostic-worker.mjs"
+          compatibility_date = "2026-06-17"
+          workers_dev = true
+          [ai]
+          binding = "AI"
+          TOML
+          npx wrangler deploy --config .binding-diagnostic.toml 2>&1 | tee binding-diagnostic/deploy.txt
+          origin=$(grep -Eo 'https://[^ ]+\.workers\.dev' binding-diagnostic/deploy.txt | tail -n1)
+          test -n "$origin"
+          echo "diagnostic_origin=$origin" > binding-diagnostic/origin.txt
+          for model in glm qwen; do
+            for kind in simple schema plain; do
+              curl -sS -w '\nHTTP_STATUS=%{http_code}\n' "$origin/$model/$kind" > "binding-diagnostic/${model}-${kind}.txt"
+            done
+          done
+          python3 - <<'PY'
+          from pathlib import Path
+          import json,re
+          rows=[]
+          for path in sorted(Path('binding-diagnostic').glob('*.txt')):
+              if path.name in {'deploy.txt','origin.txt'}: continue
+              text=path.read_text()
+              m=re.search(r'\nHTTP_STATUS=(\d+)\s*$',text)
+              status=int(m.group(1)) if m else None
+              body=text[:m.start()] if m else text
+              try: data=json.loads(body)
+              except Exception: data={'raw':body[:1000]}
+              rows.append({'probe':path.stem,'httpStatus':status,'body':data})
+          Path('binding-diagnostic/summary.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
+          print(json.dumps(rows,ensure_ascii=False,indent=2))
+          PY
+      - name: Delete isolated diagnostic Worker
+        if: always()
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set +e
+          account=""
+          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do value="${!key:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
+          export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$account"
+          npx wrangler delete --name cpcv-ai-binding-diagnostic-20260807 --force 2>&1 | tee binding-diagnostic/delete.txt
+          exit 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cpcv-workers-ai-binding-diagnostic-${{ github.run_id }}
+          path: binding-diagnostic/
+          if-no-files-found: error
+          retention-days: 30
