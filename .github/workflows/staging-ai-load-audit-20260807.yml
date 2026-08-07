@@ -1,0 +1,64 @@
+name: Staging AI load and integrity audit 2026-08-07
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/staging-ai-load-audit-20260807.yml
+      - scripts/staging-ai-load-test.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpcv-staging-ai-load-audit
+  cancel-in-progress: false
+
+jobs:
+  load-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install and validate test harness
+        run: |
+          npm ci
+          node --check scripts/staging-ai-load-test.mjs
+          node scripts/predeploy-check.mjs
+      - name: Execute real staging load test
+        env:
+          STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+          STAGING_DB_V2_ID: 7b30a11d-5b3c-49f5-bc54-9a1326818089
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          account=""
+          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do
+            value="${!key:-}"
+            if [ -n "$value" ]; then account="$value"; break; fi
+          done
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$account"
+          echo "::add-mask::$CLOUDFLARE_API_TOKEN"
+          echo "::add-mask::$account"
+          export CLOUDFLARE_ACCOUNT_ID="$account"
+          node scripts/staging-ai-load-test.mjs
+      - name: Upload load-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-staging-ai-load-audit-${{ github.run_id }}
+          path: |
+            load-test-report.json
+            load-test-summary.md
+          if-no-files-found: warn
+          retention-days: 30
