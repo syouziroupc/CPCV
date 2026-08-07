@@ -1,9 +1,0 @@
-name: Temporary provider checksum
-on:
-  pull_request:
-jobs:
-  hash:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: sha256sum src/ai/provider.js
