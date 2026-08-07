@@ -254,6 +254,10 @@ function withTimeout(promise, milliseconds) {
 
 function normalizeProviderError(error) {
   if (error?.aiCode) return error;
+  const directCode = String(error?.code || error?.message || error || "").trim();
+  if (directCode === "AI_RESPONSE_INVALID") {
+    return codedError("AI_RESPONSE_INVALID", false);
+  }
   const message = String(error?.message || error || "");
   const status = Number(error?.status || error?.statusCode || 0);
   if (status === 429 || /rate.?limit|too many requests/i.test(message)) {
@@ -262,7 +266,7 @@ function normalizeProviderError(error) {
   if (status >= 500 || /timeout|temporar|unavailable|network|capacity/i.test(message)) {
     return codedError("AI_PROVIDER_UNAVAILABLE", true);
   }
-  if (/schema|json|invalid response/i.test(message)) {
+  if (/schema|json|invalid[ _-]?response/i.test(message)) {
     return codedError("AI_RESPONSE_INVALID", false);
   }
   if (status >= 400 && status < 500) {
