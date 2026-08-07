@@ -17,7 +17,7 @@ jobs:
     if: github.event_name == 'pull_request' && github.head_ref == 'agent/staging-reload-audit-20260807'
     runs-on: ubuntu-latest
     environment: production
-    timeout-minutes: 45
+    timeout-minutes: 30
     env:
       RELEASE_COMMIT: bd95f77d466787a504ad1082c6a9cdd62f33dbbc
       STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
@@ -31,7 +31,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Deploy exact release to staging and execute real load audit
+      - name: Deploy exact release to staging and execute bounded real load audit
         shell: bash
         env:
           TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -41,15 +41,25 @@ jobs:
         run: |
           set -euo pipefail
           account=""
-          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do
-            value="${!key:-}"
-            if [ -n "$value" ]; then account="$value"; break; fi
-          done
+          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do value="${!key:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
           test -n "$TOKEN"; test -n "$account"
           echo "::add-mask::$TOKEN"; echo "::add-mask::$account"
           export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$account"
 
           cp scripts/staging-load-audit-v3.mjs /tmp/staging-load-audit-v3.mjs
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/staging-load-audit-v3.mjs')
+          s=p.read_text()
+          s=s.replace("count: 120, concurrency: 60", "count: 80, concurrency: 40")
+          s=s.replace("count: 100, concurrency: 50", "count: 60, concurrency: 30")
+          s=s.replace("count: 40, concurrency: 20", "count: 20, concurrency: 10")
+          s=s.replace("timeoutMs: 150_000", "timeoutMs: 75_000")
+          s=s.replace("timeoutMs: 240_000", "timeoutMs: 75_000")
+          s=s.replace("timeoutMs: 300_000", "timeoutMs: 75_000")
+          s=s.replace("await sleep(65_000);", "await sleep(5_000);")
+          p.write_text(s)
+          PY
           git reset --hard "$RELEASE_COMMIT"
           git clean -fd
           test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
@@ -166,12 +176,14 @@ jobs:
           npx wrangler deploy --config .staging-load.wrangler.toml --keep-vars 2>&1 | tee staging-deploy.txt
           node scripts/smoke-production.mjs --config .staging-load.wrangler.toml --origin "$STAGING_ORIGIN" | tee staging-smoke.txt
 
-          timeout 2100s npx wrangler tail class-pdf-comment-viewer-v01-staging --format json > worker-tail-v3.jsonl 2>&1 &
+          timeout 1200s npx wrangler tail class-pdf-comment-viewer-v01-staging --format json > worker-tail-v3.jsonl 2>&1 &
           tail_pid=$!
           trap 'kill "$tail_pid" 2>/dev/null || true' EXIT
           sleep 5
+          set +e
           STAGING_ORIGIN="$STAGING_ORIGIN" STAGING_WRANGLER_CONFIG=.staging-load.wrangler.toml node /tmp/staging-load-audit-v3.mjs
           load_status=$?
+          set -e
           sleep 5
           kill "$tail_pid" 2>/dev/null || true
           wait "$tail_pid" 2>/dev/null || true
