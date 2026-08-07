@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { runModerationModel, runTranslationModel } from "../src/ai/provider.js";
 
 const M2M = "@cf/meta/m2m100-1.2b";
-const GLM = "@cf/zai-org/glm-4.7-flash";
-const QWEN = "@cf/qwen/qwen3-30b-a3b-fp8";
+const KIMI = "@cf/moonshotai/kimi-k2.6";
+const LLAMA = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
-await accurateUsesPromptSchemaAndSharedCapacity();
+await accurateUsesKimiNoThinkingAndSharedCapacity();
 await balancedKnownLanguageUsesDedicatedTranslationFirst();
 await balancedFallsBackAfterDedicatedOutage();
 await unknownLanguageUsesMultilingualModelAndSharedCapacity();
@@ -16,14 +16,24 @@ await translationLimiterFailureFailsClosed();
 await moderationFallbackConsumesCapacityPerProviderCall();
 await moderationLimiterFailureFailsClosed();
 moderationIsNotDoubleCountedAtQueueAdmission();
+const providerBaseSource = readFileSync(new URL("../src/ai/provider-base.js", import.meta.url), "utf8");
+assert.doesNotMatch(providerBaseSource, /uniqueItems\s*:\s*true/, "moderation schema must avoid unsupported uniqueItems");
+const wranglerSource = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
+assert.match(wranglerSource, /AI_MODERATION_MODEL = "@cf\/moonshotai\/kimi-k2\.6"/);
+assert.match(wranglerSource, /AI_MODERATION_FALLBACK_MODEL = "@cf\/meta\/llama-4-scout-17b-16e-instruct"/);
+assert.match(wranglerSource, /AI_TRANSLATION_BALANCED_MODEL = "@cf\/meta\/llama-4-scout-17b-16e-instruct"/);
+assert.match(wranglerSource, /AI_TRANSLATION_ACCURATE_MODEL = "@cf\/moonshotai\/kimi-k2\.6"/);
 console.log("AI capacity and translation resilience tests passed");
 
-async function accurateUsesPromptSchemaAndSharedCapacity() {
+async function accurateUsesKimiNoThinkingAndSharedCapacity() {
   const calls = [];
   const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
-    assert.equal(model, QWEN);
+    assert.equal(model, KIMI);
+    assert.equal(request.max_completion_tokens, 220);
+    assert.equal(request.max_tokens, undefined);
+    assert.deepEqual(request.chat_template_kwargs, { thinking: false });
     return { response: "これは翻訳の正常性確認です。" };
   }, limits), {
     message: "This is a translation health check.",
@@ -32,8 +42,7 @@ async function accurateUsesPromptSchemaAndSharedCapacity() {
     quality: "accurate"
   });
   assert.equal(result.translatedText, "これは翻訳の正常性確認です。");
-  assert.equal(typeof calls[0].request.prompt, "string");
-  assert.equal(calls[0].request.messages, undefined);
+  assert.ok(Array.isArray(calls[0].request.messages));
   assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
 
@@ -67,9 +76,10 @@ async function balancedFallsBackAfterDedicatedOutage() {
       error.status = 503;
       throw error;
     }
-    assert.equal(model, GLM);
-    assert.equal(request.reasoning_effort, "low");
-    assert.equal(request.max_completion_tokens, 220);
+    assert.equal(model, LLAMA);
+    assert.equal(request.max_tokens, 220);
+    assert.equal(request.max_completion_tokens, undefined);
+    assert.equal(request.reasoning_effort, undefined);
     return { choices: [{ message: { content: "代替モデルで翻訳しました。" } }] };
   }, limits), {
     message: "Fallback translation.",
@@ -78,7 +88,7 @@ async function balancedFallsBackAfterDedicatedOutage() {
     quality: "balanced"
   });
   assert.equal(result.translatedText, "代替モデルで翻訳しました。");
-  assert.deepEqual(calls.map((call) => call.model), [M2M, GLM]);
+  assert.deepEqual(calls.map((call) => call.model), [M2M, LLAMA]);
   assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
 
@@ -87,7 +97,7 @@ async function unknownLanguageUsesMultilingualModelAndSharedCapacity() {
   const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
-    assert.equal(model, GLM);
+    assert.equal(model, LLAMA);
     return { response: "翻訳の精度が低い。" };
   }, limits), {
     message: "La precisione della traduzione è scarsa.",
@@ -136,7 +146,7 @@ async function provider429DoesNotAmplifyIntoFallbackCalls() {
     }),
     (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
   );
-  assert.deepEqual(calls, [GLM]);
+  assert.deepEqual(calls, [LLAMA]);
   assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
 
@@ -155,14 +165,22 @@ async function translationLimiterFailureFailsClosed() {
 async function moderationFallbackConsumesCapacityPerProviderCall() {
   const models = [];
   const limits = [];
-  const env = moderationEnvironment(async (model) => {
+  const env = moderationEnvironment(async (model, request) => {
     models.push(model);
-    if (model === GLM) { const error = new Error("temporary model outage"); error.status = 503; throw error; }
+    if (model === KIMI) {
+      assert.equal(request.max_completion_tokens, 320);
+      assert.equal(request.max_tokens, undefined);
+      assert.deepEqual(request.chat_template_kwargs, { thinking: false });
+      const error = new Error("temporary model outage"); error.status = 503; throw error;
+    }
+    assert.equal(model, LLAMA);
+    assert.equal(request.max_tokens, 180);
+    assert.equal(request.max_completion_tokens, undefined);
     return { recommendation: "allow", confidence: 0.97, categories: [] };
   }, limits);
   const result = await runModerationModel(env, { message: "Ordinary classroom comment.", dictionaryCandidates: [] });
   assert.equal(result.recommendation, "allow");
-  assert.deepEqual(models, [GLM, QWEN]);
+  assert.deepEqual(models, [KIMI, LLAMA]);
   assert.deepEqual(limits, ["workers-ai-moderation", "workers-ai-moderation"]);
 }
 
@@ -188,8 +206,8 @@ function moderationEnvironment(run, limitCalls = []) {
   return {
     AI: { run },
     AI_MODERATION_RATE_LIMITER: { async limit({ key }) { limitCalls.push(key); return { success: true }; } },
-    AI_MODERATION_MODEL: GLM,
-    AI_MODERATION_FALLBACK_MODEL: QWEN,
+    AI_MODERATION_MODEL: KIMI,
+    AI_MODERATION_FALLBACK_MODEL: LLAMA,
     AI_TIMEOUT_MS: "12000"
   };
 }
@@ -204,8 +222,8 @@ function environment(run, limitCalls = [], capacity = true) {
       }
     },
     AI_TRANSLATION_MODEL: M2M,
-    AI_TRANSLATION_BALANCED_MODEL: GLM,
-    AI_TRANSLATION_ACCURATE_MODEL: QWEN,
+    AI_TRANSLATION_BALANCED_MODEL: LLAMA,
+    AI_TRANSLATION_ACCURATE_MODEL: KIMI,
     AI_TRANSLATION_TIMEOUT_MS: "8000",
     AI_TRANSLATION_BALANCED_TIMEOUT_MS: "18000",
     AI_TRANSLATION_ACCURATE_TIMEOUT_MS: "30000"

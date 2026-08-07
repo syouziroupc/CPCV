@@ -1,6 +1,6 @@
 import { normalizeModerationResult, normalizeTranslationResult } from "./validation.js";
 
-const MODERATION_PROMPT_VERSION = "moderation-v2-dictionary-context";
+const MODERATION_PROMPT_VERSION = "moderation-v3-current-model-runtime";
 const TRANSLATION_PROMPT_VERSION = "translation-v2-dedicated";
 const DEFAULT_TIMEOUT_MS = 12_000;
 const DEFAULT_TRANSLATION_TIMEOUT_MS = 3_000;
@@ -20,7 +20,6 @@ const MODERATION_SCHEMA = Object.freeze({
     confidence: { type: "number", minimum: 0, maximum: 1 },
     categories: {
       type: "array",
-      uniqueItems: true,
       maxItems: 9,
       items: {
         type: "string",
@@ -275,8 +274,9 @@ async function runWithFallback(env, models, request, validator, options = {}) {
         ? await options.reserveUsage(model)
         : null;
       const gateway = gatewayOptions(env);
+      const modelRequest = moderationRequestForModel(model, request);
       const response = await withTimeout(
-        Promise.resolve(env.AI.run(model, request, gateway)),
+        Promise.resolve(env.AI.run(model, modelRequest, gateway)),
         timeoutMs(env)
       );
       let normalized;
@@ -294,6 +294,16 @@ async function runWithFallback(env, models, request, validator, options = {}) {
     }
   }
   throw lastError || codedError("AI_PROVIDER_FAILED", true);
+}
+
+function moderationRequestForModel(model, request) {
+  const normalizedModel = String(model || "").trim();
+  if (normalizedModel.includes("moonshotai/kimi-k2.6")) {
+    const next = { ...request, max_completion_tokens: 320, chat_template_kwargs: { thinking: false } };
+    delete next.max_tokens;
+    return next;
+  }
+  return request;
 }
 
 async function acquireSharedTextGenerationCapacity(env) {
