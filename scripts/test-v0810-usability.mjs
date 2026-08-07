@@ -25,7 +25,7 @@ check('AI queue consumer uses automatic horizontal scaling', !wrangler.includes(
 check('AI queue worker parallelism is bounded', wrangler.includes('AI_QUEUE_PARALLELISM = "5"'));
 check('AI queue batch size supports burst throughput', wrangler.includes('max_batch_size = 10'));
 check('translation uses the dedicated Workers AI model', wrangler.includes('AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"'));
-check('translation has a three-second fail-open timeout', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = "3000"'));
+check('dedicated translation timeout allows cold-start latency', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = "8000"'));
 
 const processor = text('src/ai/processor.js');
 check('AI queue batch is processed with bounded concurrency', processor.includes('runWithConcurrency(messages, parallelism'));
@@ -44,7 +44,7 @@ const organizationSettings = text('public/assets/organization-settings.js');
 check('organization owners retain policy and pack controls', organizationSettings.includes('function ownerEditable()') && organizationSettings.includes("button.disabled = !ownerEditable() || current"));
 check('organization admins can manage individual terms', organizationSettings.includes('function termEditable()') && organizationSettings.includes('active.disabled = !termEditable()') && organizationSettings.includes('edit.disabled = !termEditable()'));
 check('pack installation reloads state after button cleanup', organizationSettings.indexOf('await withButton(button') < organizationSettings.indexOf('if (installed)') && organizationSettings.includes('await loadFilterSettings()'));
-const appCss = text('public/assets/app.css');
+const appCss = `${text('public/assets/app-base.css')}\n${text('public/assets/app.css')}`;
 check('mobile moderation table remains readable', appCss.includes('v0.8.10 compact table and header fixes') && appCss.includes('.moderation-table td:nth-child(8)::before'));
 const radiusDeclarations = [...appCss.matchAll(/border-radius:\s*([^;]+);/gi)].map((match) => match[1].trim());
 const allRadiusValuesAreZero = radiusDeclarations.length > 0 && radiusDeclarations.every((value) => {
@@ -70,7 +70,6 @@ check('batch policy changes preserve category enablement', organizationSettings.
 check('policy thresholds validate review mask reject order', organizationSettings.includes('function policyOrderValid') && organizationSettings.includes('承認待ち ≤ 伏字 ≤ 投稿拒否'));
 check('batch and category policy controls are separate flat sections', account.includes('class="workspace-detail policy-batch-section"') && account.includes('class="workspace-detail category-policy-detail"'));
 check('filter controls use a strong flat visual hierarchy', appCss.includes('v0.8.10 filter preset and batch policy UX') && appCss.includes('.filter-preset-actions') && appCss.includes('.policy-batch-grid'));
-
 
 const router = text('src/index.js');
 for (const route of ['/about', '/guide', '/privacy']) check(`${route} has an explicit asset route`, router.includes(`path === "${route}"`));
