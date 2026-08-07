@@ -33,7 +33,7 @@ jobs:
       - name: Execute real staging load test
         env:
           STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
-          STAGING_DB_V2_NAME: class_comment_db_v2_staging
+          STAGING_DB_V2_NAME: DB_V2
           STAGING_WRANGLER_CONFIG: .load-staging.wrangler.toml
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -62,6 +62,14 @@ jobs:
           database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"
           migrations_dir = "migrations-v2"
           TOML
+          npx wrangler d1 execute DB_V2 --remote --yes --config .load-staging.wrangler.toml --command "SELECT 1 AS ok" --json
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/staging-ai-load-test-v2.mjs')
+          s = p.read_text()
+          s = s.replace("'--remote', '--config', CONFIG", "'--remote', '--yes', '--config', CONFIG")
+          p.write_text(s)
+          PY
           node scripts/staging-ai-load-test-v2.mjs
           rm -f .load-staging.wrangler.toml
       - name: Upload load-test evidence
