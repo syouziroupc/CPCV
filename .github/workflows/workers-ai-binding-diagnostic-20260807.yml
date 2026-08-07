@@ -38,51 +38,23 @@ jobs:
           export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$account"
           mkdir -p binding-diagnostic
           cat > .binding-diagnostic-worker.mjs <<'JS'
-          const MODELS = {
-            glm: '@cf/zai-org/glm-4.7-flash',
-            qwen: '@cf/qwen/qwen3-30b-a3b-fp8',
-            llama: '@cf/meta/llama-3.3-70b-instruct-fp8-fast'
-          };
-          const SCHEMA = {
-            type: 'object', additionalProperties: false,
-            required: ['recommendation','confidence','categories'],
-            properties: {
-              recommendation: { type:'string', enum:['allow','review','hide'] },
-              confidence: { type:'number', minimum:0, maximum:1 },
-              categories: { type:'array', maxItems:9, items:{ type:'string' } }
-            }
-          };
-          function requestFor(modelKey, kind) {
-            const noThink = kind.includes('nothink');
-            const templateOff = kind.includes('templateoff');
-            const useSchema = kind.includes('schema');
-            const system = 'Classify a classroom comment. Return one JSON object only with recommendation, confidence, and categories.' + (noThink ? ' /no_think' : '');
-            const request = {
-              messages: [
-                {role:'system',content:system},
-                {role:'user',content:'Ordinary classroom comment about energy markets.' + (noThink ? ' /no_think' : '')}
-              ],
-              max_tokens: 256,
-              temperature: modelKey === 'qwen' ? 0.7 : 0
-            };
-            if (useSchema) request.response_format = {type:'json_schema',json_schema:SCHEMA};
-            if (templateOff) request.chat_template_kwargs = {enable_thinking:false};
+          const MODELS={glm:'@cf/zai-org/glm-4.7-flash',qwen:'@cf/qwen/qwen3-30b-a3b-fp8',llama:'@cf/meta/llama-3.3-70b-instruct-fp8-fast'};
+          const SCHEMA={type:'object',additionalProperties:false,required:['recommendation','confidence','categories'],properties:{recommendation:{type:'string',enum:['allow','review','hide']},confidence:{type:'number',minimum:0,maximum:1},categories:{type:'array',maxItems:9,items:{type:'string'}}}};
+          function requestFor(modelKey,kind){
+            const noThink=kind.includes('nothink'),templateOff=kind.includes('templateoff'),useSchema=kind.includes('schema');
+            const request={messages:[{role:'system',content:'Classify a classroom comment. Return one JSON object only with recommendation, confidence, and categories.'+(noThink?' /no_think':'')},{role:'user',content:'Ordinary classroom comment about energy markets.'+(noThink?' /no_think':'')}],max_tokens:256,temperature:modelKey==='qwen'?0.7:0};
+            if(useSchema) request.response_format={type:'json_schema',json_schema:SCHEMA};
+            if(templateOff) request.chat_template_kwargs={enable_thinking:false};
             return request;
           }
-          export default {
-            async fetch(request, env) {
-              const [modelKey,kind] = new URL(request.url).pathname.split('/').filter(Boolean);
-              const model = MODELS[modelKey];
-              if (!model || !kind) return new Response('not found',{status:404});
-              const started=Date.now();
-              try {
-                const result=await env.AI.run(model,requestFor(modelKey,kind));
-                return Response.json({ok:true,model,kind,elapsedMs:Date.now()-started,result});
-              } catch(error) {
-                return Response.json({ok:false,model,kind,elapsedMs:Date.now()-started,error:{name:String(error?.name||''),message:String(error?.message||''),status:error?.status??null,code:error?.code??null}},{status:502});
-              }
-            }
-          };
+          export default {async fetch(request,env){
+            const [modelKey,kind]=new URL(request.url).pathname.split('/').filter(Boolean);
+            if(modelKey==='health') return Response.json({ok:true});
+            const model=MODELS[modelKey]; if(!model||!kind)return new Response('not found',{status:404});
+            const started=Date.now();
+            try{return Response.json({ok:true,model,kind,elapsedMs:Date.now()-started,result:await env.AI.run(model,requestFor(modelKey,kind))});}
+            catch(error){return Response.json({ok:false,model,kind,elapsedMs:Date.now()-started,error:{name:String(error?.name||''),message:String(error?.message||''),status:error?.status??null,code:error?.code??null}},{status:502});}
+          }};
           JS
           cat > .binding-diagnostic.toml <<'TOML'
           name = "cpcv-ai-binding-diagnostic-20260807"
@@ -94,12 +66,15 @@ jobs:
           TOML
           npx wrangler deploy --config .binding-diagnostic.toml 2>&1 | tee binding-diagnostic/deploy.txt
           origin=$(grep -Eo 'https://[^ ]+\.workers\.dev' binding-diagnostic/deploy.txt | tail -n1)
-          test -n "$origin"
-          echo "diagnostic_origin=$origin" > binding-diagnostic/origin.txt
-          probe() {
-            model="$1"; kind="$2"
-            curl -sS -w '\nHTTP_STATUS=%{http_code}\n' "$origin/$model/$kind" > "binding-diagnostic/${model}-${kind}.txt"
-          }
+          test -n "$origin"; echo "diagnostic_origin=$origin" > binding-diagnostic/origin.txt
+          ready=0
+          for attempt in 1 2 3 4 5 6; do
+            sleep 3
+            code=$(curl -sS -o binding-diagnostic/health.json -w '%{http_code}' "$origin/health" || true)
+            if [ "$code" = 200 ] && jq -e '.ok == true' binding-diagnostic/health.json >/dev/null 2>&1; then ready=1; break; fi
+          done
+          test "$ready" = 1
+          probe(){ model="$1"; kind="$2"; curl -sS --retry 2 --retry-all-errors --retry-delay 1 -w '\nHTTP_STATUS=%{http_code}\n' "$origin/$model/$kind" > "binding-diagnostic/${model}-${kind}.txt"; }
           probe glm schema
           probe qwen schema
           probe qwen nothink-schema
@@ -113,24 +88,12 @@ jobs:
           rows=[]
           for path in sorted(Path('binding-diagnostic').glob('*.txt')):
               if path.name in {'deploy.txt','origin.txt','delete.txt'}: continue
-              text=path.read_text(); m=re.search(r'\nHTTP_STATUS=(\d+)\s*$',text)
-              status=int(m.group(1)) if m else None; body=text[:m.start()] if m else text
-              try: data=json.loads(body)
-              except Exception: data={'raw':body[:1200]}
-              result=data.get('result') if isinstance(data,dict) else None
-              choice=(result.get('choices') or [{}])[0] if isinstance(result,dict) else {}
-              message=choice.get('message') if isinstance(choice,dict) else None
-              rows.append({
-                'probe':path.stem,'httpStatus':status,'ok':data.get('ok') if isinstance(data,dict) else None,
-                'elapsedMs':data.get('elapsedMs') if isinstance(data,dict) else None,
-                'response':result.get('response') if isinstance(result,dict) else None,
-                'content':message.get('content') if isinstance(message,dict) else None,
-                'reasoningLength':len(str(message.get('reasoning') or message.get('reasoning_content') or '')) if isinstance(message,dict) else 0,
-                'finishReason':choice.get('finish_reason') if isinstance(choice,dict) else None,
-                'error':data.get('error') if isinstance(data,dict) else data
-              })
-          Path('binding-diagnostic/summary.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2))
-          print(json.dumps(rows,ensure_ascii=False,indent=2))
+              text=path.read_text(); m=re.search(r'\nHTTP_STATUS=(\d+)\s*$',text); status=int(m.group(1)) if m else None; body=text[:m.start()] if m else text
+              try:data=json.loads(body)
+              except Exception:data={'raw':body[:1200]}
+              result=data.get('result') if isinstance(data,dict) else None; choice=(result.get('choices') or [{}])[0] if isinstance(result,dict) else {}; message=choice.get('message') if isinstance(choice,dict) else None
+              rows.append({'probe':path.stem,'httpStatus':status,'ok':data.get('ok') if isinstance(data,dict) else None,'elapsedMs':data.get('elapsedMs') if isinstance(data,dict) else None,'response':result.get('response') if isinstance(result,dict) else None,'content':message.get('content') if isinstance(message,dict) else None,'reasoningLength':len(str(message.get('reasoning') or message.get('reasoning_content') or '')) if isinstance(message,dict) else 0,'finishReason':choice.get('finish_reason') if isinstance(choice,dict) else None,'error':data.get('error') if isinstance(data,dict) else data})
+          Path('binding-diagnostic/summary.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2)); print(json.dumps(rows,ensure_ascii=False,indent=2))
           PY
       - name: Delete isolated diagnostic Worker by API
         if: always()
@@ -142,11 +105,8 @@ jobs:
           ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set +e
-          account=""
-          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do value="${!key:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
-          code=$(curl -sS -o binding-diagnostic/delete-response.txt -w '%{http_code}' -X DELETE \
-            "https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/cpcv-ai-binding-diagnostic-20260807?force=true" \
-            -H "Authorization: Bearer ${TOKEN}")
+          account=""; for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do value="${!key:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
+          code=$(curl -sS -o binding-diagnostic/delete-response.txt -w '%{http_code}' -X DELETE "https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/cpcv-ai-binding-diagnostic-20260807?force=true" -H "Authorization: Bearer ${TOKEN}")
           printf '%s\n' "$code" > binding-diagnostic/delete-status.txt
           if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then cat binding-diagnostic/delete-response.txt; exit 1; fi
       - uses: actions/upload-artifact@v4
