@@ -1,7 +1,7 @@
 import { normalizeTranslationResult } from "./validation.js";
 export { runModerationModel } from "./provider-base.js";
 
-const PROMPT_VERSION = "translation-v4-capacity-aware";
+const PROMPT_VERSION = "translation-v5-current-model-runtime";
 const DEDICATED_MODEL = "@cf/meta/m2m100-1.2b";
 const DEDICATED_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);
 const SUPPORTED_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);
@@ -92,9 +92,13 @@ function translationCandidates(env, quality, sourceLanguage) {
     model,
     kind: model === DEDICATED_MODEL
       ? "dedicated"
-      : model.includes("/qwen/")
-        ? "prompt"
-        : "chat"
+      : model.includes("moonshotai/kimi-k2.6")
+        ? "kimi"
+        : model.includes("meta/llama-4-scout")
+          ? "llama"
+          : model.includes("/qwen/")
+            ? "prompt"
+            : "chat"
   }));
 }
 
@@ -127,14 +131,22 @@ function translationRequest(candidate, message, targetLanguage, sourceLanguage) 
       top_p: 0.8
     };
   }
+  const messages = [
+    { role: "system", content: instruction },
+    { role: "user", content: payload }
+  ];
+  if (candidate.kind === "kimi") {
+    return {
+      messages,
+      max_completion_tokens: 220,
+      temperature: 0,
+      chat_template_kwargs: { thinking: false }
+    };
+  }
   return {
-    messages: [
-      { role: "system", content: instruction },
-      { role: "user", content: payload }
-    ],
-    max_completion_tokens: 220,
-    temperature: 0,
-    reasoning_effort: "low"
+    messages,
+    max_tokens: 220,
+    temperature: 0
   };
 }
 
