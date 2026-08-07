@@ -12,6 +12,7 @@ permissions:
 jobs:
   patch:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,8 +70,7 @@ jobs:
           s=s.replace(anchor,helper+anchor,1)
           p.write_text(s)
 
-          # Translation: use Llama 4 for balanced/unknown fallback and Kimi for accurate,
-          # with the request shape verified through live Workers AI binding probes.
+          # Translation: use Llama 4 for balanced/unknown fallback and Kimi for accurate.
           p=Path('src/ai/provider.js')
           s=p.read_text()
           s=s.replace('const PROMPT_VERSION = "translation-v4-capacity-aware";', 'const PROMPT_VERSION = "translation-v5-current-model-runtime";', 1)
@@ -192,11 +192,8 @@ jobs:
 
           t=t.replace('    AI_MODERATION_MODEL: GLM,\n    AI_MODERATION_FALLBACK_MODEL: QWEN,','    AI_MODERATION_MODEL: KIMI,\n    AI_MODERATION_FALLBACK_MODEL: LLAMA,',1)
           t=t.replace('    AI_TRANSLATION_BALANCED_MODEL: GLM,\n    AI_TRANSLATION_ACCURATE_MODEL: QWEN,','    AI_TRANSLATION_BALANCED_MODEL: LLAMA,\n    AI_TRANSLATION_ACCURATE_MODEL: KIMI,',1)
-
-          # Update callback signature for moderation request assertions.
           t=t.replace('  const env = moderationEnvironment(async (model) => {\n    models.push(model);', '  const env = moderationEnvironment(async (model, request) => {\n    models.push(model);',1)
 
-          # Schema compatibility and config guards.
           log='console.log("AI capacity and translation resilience tests passed");'
           guard='''const providerBaseSource = readFileSync(new URL("../src/ai/provider-base.js", import.meta.url), "utf8");
 assert.doesNotMatch(providerBaseSource, /uniqueItems\\s*:\\s*true/, "moderation schema must avoid unsupported uniqueItems");
@@ -210,7 +207,6 @@ assert.match(wranglerSource, /AI_TRANSLATION_ACCURATE_MODEL = "@cf\\/moonshotai\
           t=t.replace(log,guard+log,1)
           p.write_text(t)
 
-          # Source manifest.
           manifest=Path('SOURCE_SHA256SUMS.override.txt')
           entries={}
           for line in manifest.read_text().splitlines():
