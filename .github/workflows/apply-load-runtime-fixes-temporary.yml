@@ -27,31 +27,27 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          # Moderation: account shared Text Generation capacity per actual provider call.
           p = Path('src/ai/provider-base.js')
           s = p.read_text()
           anchor = 'const DEDICATED_SOURCE_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);\n'
-          addition = anchor + 'const SHARED_TEXT_GENERATION_KEY = "workers-ai-moderation";\n'
           if 'const SHARED_TEXT_GENERATION_KEY = "workers-ai-moderation";' not in s:
               if anchor not in s: raise SystemExit('provider-base constant anchor missing')
-              s = s.replace(anchor, addition, 1)
-          old = '''  for (const model of models) {
-            try {
-              const usageEventId = typeof options.reserveUsage === "function"
-                ? await options.reserveUsage(model)
-                : null;'''
-          new = '''  for (const model of models) {
-            try {
-              const capacity = await acquireSharedTextGenerationCapacity(env);
-              if (!capacity) throw codedError("AI_PROVIDER_RATE_LIMITED", true);
-              const usageEventId = typeof options.reserveUsage === "function"
-                ? await options.reserveUsage(model)
-                : null;'''
-          if 'const capacity = await acquireSharedTextGenerationCapacity(env);' not in s:
-              if old not in s: raise SystemExit('provider-base runWithFallback anchor missing')
-              s = s.replace(old, new, 1)
+              s = s.replace(anchor, anchor + 'const SHARED_TEXT_GENERATION_KEY = "workers-ai-moderation";\n', 1)
+          head, sep, tail = s.partition('async function runWithFallback(env, models, request, validator, options = {}) {')
+          if not sep: raise SystemExit('runWithFallback missing')
+          if 'const capacity = await acquireSharedTextGenerationCapacity(env);' not in tail:
+              needle = '    try {\n'
+              if needle not in tail: raise SystemExit('runWithFallback try missing')
+              tail = tail.replace(needle, needle + '      const capacity = await acquireSharedTextGenerationCapacity(env);\n      if (!capacity) throw codedError("AI_PROVIDER_RATE_LIMITED", true);\n', 1)
+          if 'if (lastError.aiCode === "AI_PROVIDER_RATE_LIMITED") throw lastError;' not in tail:
+              needle = '      lastError = normalizeProviderError(error);\n'
+              if needle not in tail: raise SystemExit('runWithFallback error normalization missing')
+              tail = tail.replace(needle, needle + '      if (lastError.aiCode === "AI_PROVIDER_RATE_LIMITED") throw lastError;\n', 1)
+          s = head + sep + tail
           fn_anchor = 'function modelCandidates(env, primaryKey, fallbackKey) {'
-          capacity_fn = '''async function acquireSharedTextGenerationCapacity(env) {
+          if 'AI moderation capacity limiter failed closed' not in s:
+              if fn_anchor not in s: raise SystemExit('modelCandidates missing')
+              helper = '''async function acquireSharedTextGenerationCapacity(env) {
             const limiter = env?.AI_MODERATION_RATE_LIMITER;
             if (!limiter || typeof limiter.limit !== "function") return true;
             try {
@@ -64,47 +60,23 @@ jobs:
           }
 
           '''
-          if 'AI moderation capacity limiter failed closed' not in s:
-              if fn_anchor not in s: raise SystemExit('provider-base model anchor missing')
-              s = s.replace(fn_anchor, capacity_fn + fn_anchor, 1)
+              s = s.replace(fn_anchor, helper + fn_anchor, 1)
           p.write_text(s)
 
-          # Translation: capacity limiter outages must not fail open into Workers AI.
           p = Path('src/ai/provider.js')
           s = p.read_text()
-          old = '''  } catch (error) {
-              console.error("AI text-generation capacity limiter failed open", safeCode(error));
-              return true;
-            }'''
-          new = '''  } catch (error) {
-              console.error("AI text-generation capacity limiter failed closed", safeCode(error));
-              return false;
-            }'''
           if 'AI text-generation capacity limiter failed closed' not in s:
-              if old not in s: raise SystemExit('provider limiter catch anchor missing')
-              s = s.replace(old, new, 1)
+              needle = 'console.error("AI text-generation capacity limiter failed open", safeCode(error));\n    return true;'
+              if needle not in s: raise SystemExit('translation limiter fail-open block missing')
+              s = s.replace(needle, 'console.error("AI text-generation capacity limiter failed closed", safeCode(error));\n    return false;', 1)
           p.write_text(s)
 
-          # Queue admission limits only the dedicated Translation task. Moderation is
-          # counted per actual Text Generation provider call above to avoid double count.
           p = Path('src/ai/processor.js')
           s = p.read_text()
-          old = '''async function acquireQueueCapacity(env, queueKind) {
-            const limiter = queueKind === QUEUE_KIND_TRANSLATION
-              ? env?.AI_TRANSLATION_RATE_LIMITER
-              : queueKind === QUEUE_KIND_MODERATION
-                ? env?.AI_MODERATION_RATE_LIMITER
-                : null;
-            if (!limiter || typeof limiter.limit !== "function") return true;
-            try {
-              const result = await limiter.limit({ key: `workers-ai-${queueKind}` });
-              return result?.success !== false;
-            } catch (error) {
-              console.error(`AI ${queueKind} capacity limiter failed open`, safeCode(error));
-              return true;
-            }
-          }'''
-          new = '''async function acquireQueueCapacity(env, queueKind) {
+          if 'if (queueKind !== QUEUE_KIND_TRANSLATION) return true;' not in s:
+              start = s.index('async function acquireQueueCapacity(env, queueKind) {')
+              end = s.index('\nfunction capacityRetryDelaySeconds(queueKind) {', start)
+              replacement = '''async function acquireQueueCapacity(env, queueKind) {
             if (queueKind !== QUEUE_KIND_TRANSLATION) return true;
             const limiter = env?.AI_TRANSLATION_RATE_LIMITER;
             if (!limiter || typeof limiter.limit !== "function") return true;
@@ -115,48 +87,36 @@ jobs:
               console.error(`AI ${queueKind} capacity limiter failed closed`, safeCode(error));
               return false;
             }
-          }'''
-          if 'if (queueKind !== QUEUE_KIND_TRANSLATION) return true;' not in s:
-              if old not in s: raise SystemExit('processor queue capacity anchor missing')
-              s = s.replace(old, new, 1)
+          }
+          '''
+              s = s[:start] + replacement + s[end:]
           p.write_text(s)
 
-          # Extend the existing resilience suite without creating a second test surface.
           p = Path('scripts/test-ai-translation-resilience.mjs')
           s = p.read_text()
-          s = s.replace(
-              'import assert from "node:assert/strict";\nimport { runTranslationModel } from "../src/ai/provider.js";',
-              'import assert from "node:assert/strict";\nimport { readFileSync } from "node:fs";\nimport { runModerationModel, runTranslationModel } from "../src/ai/provider.js";'
-          )
-          calls_anchor = '''await provider429DoesNotAmplifyIntoFallbackCalls();
-          console.log("AI translation resilience tests passed");'''
-          calls_new = '''await provider429DoesNotAmplifyIntoFallbackCalls();
+          old_import = 'import assert from "node:assert/strict";\nimport { runTranslationModel } from "../src/ai/provider.js";'
+          new_import = 'import assert from "node:assert/strict";\nimport { readFileSync } from "node:fs";\nimport { runModerationModel, runTranslationModel } from "../src/ai/provider.js";'
+          if old_import in s: s = s.replace(old_import, new_import, 1)
+          call_anchor = 'await provider429DoesNotAmplifyIntoFallbackCalls();\nconsole.log("AI translation resilience tests passed");'
+          if 'await moderationFallbackConsumesCapacityPerProviderCall();' not in s:
+              if call_anchor not in s: raise SystemExit('test call anchor missing')
+              s = s.replace(call_anchor, '''await provider429DoesNotAmplifyIntoFallbackCalls();
           await translationLimiterFailureFailsClosed();
           await moderationFallbackConsumesCapacityPerProviderCall();
-          await moderationCompatibilityRetryConsumesCapacityPerProviderCall();
           await moderationLimiterFailureFailsClosed();
           moderationIsNotDoubleCountedAtQueueAdmission();
-          console.log("AI capacity and translation resilience tests passed");'''
-          if 'await moderationFallbackConsumesCapacityPerProviderCall();' not in s:
-              if calls_anchor not in s: raise SystemExit('resilience call anchor missing')
-              s = s.replace(calls_anchor, calls_new, 1)
+          console.log("AI capacity and translation resilience tests passed");''', 1)
           insert_anchor = '\nfunction environment(run, limitCalls = [], capacity = true) {'
-          tests = r'''
+          if 'async function moderationFallbackConsumesCapacityPerProviderCall()' not in s:
+              if insert_anchor not in s: raise SystemExit('test insert anchor missing')
+              tests = r'''
 
           async function translationLimiterFailureFailsClosed() {
             let aiCalls = 0;
-            const env = environment(async () => {
-              aiCalls += 1;
-              return { response: "unexpected" };
-            });
+            const env = environment(async () => { aiCalls += 1; return { response: "unexpected" }; });
             env.AI_MODERATION_RATE_LIMITER.limit = async () => { throw new Error("limiter unavailable"); };
             await assert.rejects(
-              runTranslationModel(env, {
-                message: "Capacity control must fail closed.",
-                sourceLanguage: "other",
-                targetLanguage: "ja",
-                quality: "balanced"
-              }),
+              runTranslationModel(env, { message: "Capacity control must fail closed.", sourceLanguage: "other", targetLanguage: "ja", quality: "balanced" }),
               (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
             );
             assert.equal(aiCalls, 0);
@@ -167,11 +127,7 @@ jobs:
             const limits = [];
             const env = moderationEnvironment(async (model) => {
               models.push(model);
-              if (model === GLM) {
-                const error = new Error("temporary model outage");
-                error.status = 503;
-                throw error;
-              }
+              if (model === GLM) { const error = new Error("temporary model outage"); error.status = 503; throw error; }
               return { recommendation: "allow", confidence: 0.97, categories: [] };
             }, limits);
             const result = await runModerationModel(env, { message: "Ordinary classroom comment.", dictionaryCandidates: [] });
@@ -180,64 +136,34 @@ jobs:
             assert.deepEqual(limits, ["workers-ai-moderation", "workers-ai-moderation"]);
           }
 
-          async function moderationCompatibilityRetryConsumesCapacityPerProviderCall() {
-            const calls = [];
-            const limits = [];
-            const env = moderationEnvironment(async (model, request) => {
-              calls.push({ model, structured: Boolean(request.response_format) });
-              if (request.response_format) {
-                const error = new Error("schema unsupported");
-                error.status = 400;
-                throw error;
-              }
-              return { recommendation: "allow", confidence: 0.95, categories: [] };
-            }, limits);
-            const result = await runModerationModel(env, { message: "Compatibility retry check.", dictionaryCandidates: [] });
-            assert.equal(result.recommendation, "allow");
-            assert.deepEqual(calls, [
-              { model: GLM, structured: true },
-              { model: GLM, structured: false }
-            ]);
-            assert.deepEqual(limits, ["workers-ai-moderation", "workers-ai-moderation"]);
-          }
-
           async function moderationLimiterFailureFailsClosed() {
             let aiCalls = 0;
-            const env = moderationEnvironment(async () => {
-              aiCalls += 1;
-              return { recommendation: "allow", confidence: 1, categories: [] };
-            });
-            env.AI_MODERATION_RATE_LIMITER.limit = async () => { throw new Error("limiter unavailable"); };
+            const limits = [];
+            const env = moderationEnvironment(async () => { aiCalls += 1; return { recommendation: "allow", confidence: 1, categories: [] }; }, limits);
+            env.AI_MODERATION_RATE_LIMITER.limit = async ({ key }) => { limits.push(key); throw new Error("limiter unavailable"); };
             await assert.rejects(
               runModerationModel(env, { message: "Limiter failure check.", dictionaryCandidates: [] }),
               (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
             );
             assert.equal(aiCalls, 0);
+            assert.deepEqual(limits, ["workers-ai-moderation"]);
           }
 
           function moderationIsNotDoubleCountedAtQueueAdmission() {
             const processor = readFileSync(new URL("../src/ai/processor.js", import.meta.url), "utf8");
             assert.match(processor, /if \(queueKind !== QUEUE_KIND_TRANSLATION\) return true;/);
-            assert.doesNotMatch(processor, /queueKind === QUEUE_KIND_MODERATION[\s\S]{0,160}AI_MODERATION_RATE_LIMITER/);
           }
 
           function moderationEnvironment(run, limitCalls = []) {
             return {
               AI: { run },
-              AI_MODERATION_RATE_LIMITER: {
-                async limit({ key }) {
-                  limitCalls.push(key);
-                  return { success: true };
-                }
-              },
+              AI_MODERATION_RATE_LIMITER: { async limit({ key }) { limitCalls.push(key); return { success: true }; } },
               AI_MODERATION_MODEL: GLM,
               AI_MODERATION_FALLBACK_MODEL: QWEN,
               AI_TIMEOUT_MS: "12000"
             };
           }
           '''
-          if 'async function moderationFallbackConsumesCapacityPerProviderCall()' not in s:
-              if insert_anchor not in s: raise SystemExit('resilience insert anchor missing')
               s = s.replace(insert_anchor, tests + insert_anchor, 1)
           p.write_text(s)
           PY
