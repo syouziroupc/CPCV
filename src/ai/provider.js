@@ -1,10 +1,11 @@
 import { normalizeTranslationResult } from "./validation.js";
 export { runModerationModel } from "./provider-base.js";
 
-const PROMPT_VERSION = "translation-v3-resilient";
+const PROMPT_VERSION = "translation-v4-capacity-aware";
 const DEDICATED_MODEL = "@cf/meta/m2m100-1.2b";
 const DEDICATED_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);
 const SUPPORTED_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);
+const SHARED_TEXT_GENERATION_KEY = "workers-ai-moderation";
 
 export async function runTranslationModel(env, input, options = {}) {
   if (!env?.AI || typeof env.AI.run !== "function") {
@@ -22,6 +23,10 @@ export async function runTranslationModel(env, input, options = {}) {
 
   for (const candidate of candidates) {
     try {
+      if (candidate.kind !== "dedicated") {
+        const capacity = await acquireSharedTextGenerationCapacity(env);
+        if (!capacity) throw codedError("AI_PROVIDER_RATE_LIMITED", true);
+      }
       const usageEventId = typeof options.reserveUsage === "function"
         ? await options.reserveUsage(candidate.model)
         : null;
@@ -52,12 +57,14 @@ export async function runTranslationModel(env, input, options = {}) {
       if ([
         "AI_BINDING_NOT_CONFIGURED",
         "AI_MODEL_NOT_CONFIGURED",
-        "AI_TRANSLATION_LANGUAGE_INVALID"
+        "AI_TRANSLATION_LANGUAGE_INVALID",
+        "AI_PROVIDER_RATE_LIMITED"
       ].includes(lastError.aiCode)) {
         throw lastError;
       }
-      // Request-shape rejection or an invalid model response must fall through to
-      // the next model instead of terminating the whole translation job.
+      // A rejected request shape, invalid output, timeout, or model outage may
+      // fall through to the next distinct model. A 429 never does: immediately
+      // trying another text-generation model amplifies the same upstream limit.
     }
   }
   throw lastError || codedError("AI_PROVIDER_FAILED", true);
@@ -79,7 +86,7 @@ function translationCandidates(env, quality, sourceLanguage) {
     ? [accurate, balanced, dedicated]
     : quality === "fast"
       ? [dedicated, balanced, accurate]
-      : [balanced, accurate, dedicated];
+      : [dedicated, balanced, accurate];
   const models = [...new Set(ordered.filter(Boolean))];
   if (!models.length) throw codedError("AI_MODEL_NOT_CONFIGURED", false);
   return models.map((model) => ({
@@ -221,6 +228,18 @@ function textContent(value) {
   }).join("");
 }
 
+async function acquireSharedTextGenerationCapacity(env) {
+  const limiter = env?.AI_MODERATION_RATE_LIMITER;
+  if (!limiter || typeof limiter.limit !== "function") return true;
+  try {
+    const result = await limiter.limit({ key: SHARED_TEXT_GENERATION_KEY });
+    return result?.success !== false;
+  } catch (error) {
+    console.error("AI text-generation capacity limiter failed open", safeCode(error));
+    return true;
+  }
+}
+
 function gatewayOptions(env) {
   const id = String(env?.AI_GATEWAY_ID || "").trim();
   return id ? { gateway: { id, skipCache: true } } : undefined;
@@ -255,6 +274,11 @@ function normalizeProviderError(error) {
 
 function structuredLength(value) {
   try { return JSON.stringify(value).length; } catch { return 0; }
+}
+
+function safeCode(error) {
+  const value = String(error?.aiCode || error?.code || error?.message || "unknown");
+  return value.replace(/[^A-Za-z0-9_.:-]/g, "_").slice(0, 120) || "unknown";
 }
 
 function codedError(code, retryable) {
