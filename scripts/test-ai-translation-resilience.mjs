@@ -16,6 +16,8 @@ await translationLimiterFailureFailsClosed();
 await moderationFallbackConsumesCapacityPerProviderCall();
 await moderationLimiterFailureFailsClosed();
 moderationIsNotDoubleCountedAtQueueAdmission();
+const providerBaseSource = readFileSync(new URL("../src/ai/provider-base.js", import.meta.url), "utf8");
+assert.doesNotMatch(providerBaseSource, /uniqueItems\s*:\s*true/, "moderation schema avoids unsupported uniqueItems");
 console.log("AI capacity and translation resilience tests passed");
 
 async function accurateUsesPromptSchemaAndSharedCapacity() {

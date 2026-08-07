@@ -20,7 +20,6 @@ const MODERATION_SCHEMA = Object.freeze({
     confidence: { type: "number", minimum: 0, maximum: 1 },
     categories: {
       type: "array",
-      uniqueItems: true,
       maxItems: 9,
       items: {
         type: "string",
