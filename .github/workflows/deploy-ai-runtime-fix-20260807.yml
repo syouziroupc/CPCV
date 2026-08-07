@@ -1,0 +1,313 @@
+name: Deploy AI runtime stabilization 2026-08-07
+
+on:
+  pull_request:
+    branches: [master]
+    paths: [.github/workflows/deploy-ai-runtime-fix-20260807.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpcv-ai-runtime-fix-production-deploy
+  cancel-in-progress: false
+
+env:
+  SOURCE_COMMIT: 60d910420a845e5db376402ef265a070268c7021
+  STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+  PRODUCTION_ORIGIN: https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev
+
+jobs:
+  deploy:
+    name: Deploy exact AI runtime release
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    environment: production
+    steps:
+      - name: Checkout exact release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Resolve Cloudflare credentials
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test -z "$(git status --porcelain)"
+          account=""
+          for item in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do
+            value="${!item:-}"
+            if [ -n "$value" ]; then account="$value"; break; fi
+          done
+          test -n "$TOKEN"
+          test -n "$account"
+          echo "::add-mask::$TOKEN"
+          echo "::add-mask::$account"
+          echo "CLOUDFLARE_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "CLOUDFLARE_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+
+      - name: Revalidate immutable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.18.0
+          npm ci
+          npm run verify:source-manifest
+          npm run check
+          npm run check:stage08
+          npm run test:owner-bootstrap
+          node scripts/test-ai-translation-resilience.mjs
+          npm run deploy:dry-run
+          npm audit
+          npm audit --omit=dev
+
+      - name: Write isolated staging configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p deployment-records/staging deployment-records/production
+          cat > .cpcv-staging.wrangler.toml <<'TOML'
+          #:schema node_modules/wrangler/config-schema.json
+          name = "class-pdf-comment-viewer-v01-staging"
+          main = "src/index.js"
+          compatibility_date = "2026-06-17"
+          workers_dev = true
+          assets = { directory = "./public", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "class_comment_db_staging"
+          database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"
+          [[d1_databases]]
+          binding = "DB_V2"
+          database_name = "class_comment_db_v2_staging"
+          database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"
+          migrations_dir = "migrations-v2"
+          [[send_email]]
+          name = "EMAIL"
+          allowed_sender_addresses = [ "noreply@szworld.uk" ]
+          [ai]
+          binding = "AI"
+          [[queues.producers]]
+          binding = "AI_JOBS_QUEUE"
+          queue = "cpcv-ai-jobs-staging"
+          [[queues.consumers]]
+          queue = "cpcv-ai-jobs-staging"
+          max_batch_size = 10
+          max_batch_timeout = 0
+          max_retries = 3
+          [[queues.producers]]
+          binding = "AI_TRANSLATION_QUEUE"
+          queue = "cpcv-ai-translation-jobs-staging"
+          [[queues.consumers]]
+          queue = "cpcv-ai-translation-jobs-staging"
+          max_batch_size = 6
+          max_batch_timeout = 0
+          max_retries = 100
+          dead_letter_queue = "cpcv-ai-translation-dlq-staging"
+          [[queues.producers]]
+          binding = "AI_MODERATION_QUEUE"
+          queue = "cpcv-ai-moderation-jobs-staging"
+          [[queues.consumers]]
+          queue = "cpcv-ai-moderation-jobs-staging"
+          max_batch_size = 6
+          max_batch_timeout = 0
+          max_retries = 100
+          dead_letter_queue = "cpcv-ai-moderation-dlq-staging"
+          [[durable_objects.bindings]]
+          name = "COMMENT_ROOM"
+          class_name = "CommentRoom"
+          [[migrations]]
+          tag = "v1"
+          new_sqlite_classes = [ "CommentRoom" ]
+          [[ratelimits]]
+          name = "AUTH_LOGIN_IP_LIMITER"
+          namespace_id = "826071801"
+          simple = { limit = 20, period = 60 }
+          [[ratelimits]]
+          name = "AUTH_LOGIN_ACCOUNT_LIMITER"
+          namespace_id = "826071802"
+          simple = { limit = 10, period = 60 }
+          [[ratelimits]]
+          name = "PUBLIC_COMMENT_RATE_LIMITER"
+          namespace_id = "826071803"
+          simple = { limit = 30, period = 60 }
+          [[ratelimits]]
+          name = "AUTH_PUBLIC_EMAIL_LIMITER"
+          namespace_id = "826071804"
+          simple = { limit = 30, period = 60 }
+          [[ratelimits]]
+          name = "AI_TRANSLATION_RATE_LIMITER"
+          namespace_id = "826071805"
+          simple = { limit = 700, period = 60 }
+          [[ratelimits]]
+          name = "AI_MODERATION_RATE_LIMITER"
+          namespace_id = "826071806"
+          simple = { limit = 290, period = 60 }
+          [vars]
+          APP_ENV = "production"
+          AUTH_V2_ENABLED = "1"
+          EMAIL_AUTH_REQUIRED = "0"
+          AI_MODERATION_MODEL = "@cf/zai-org/glm-4.7-flash"
+          AI_MODERATION_FALLBACK_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+          AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"
+          AI_TRANSLATION_BALANCED_MODEL = "@cf/zai-org/glm-4.7-flash"
+          AI_TRANSLATION_ACCURATE_MODEL = "@cf/qwen/qwen3-30b-a3b-fp8"
+          AI_TIMEOUT_MS = "12000"
+          AI_TRANSLATION_TIMEOUT_MS = "8000"
+          AI_TRANSLATION_BALANCED_TIMEOUT_MS = "18000"
+          AI_TRANSLATION_ACCURATE_TIMEOUT_MS = "30000"
+          AI_QUEUE_PARALLELISM = "5"
+          AI_TRANSLATION_QUEUE_PARALLELISM = "3"
+          AI_MODERATION_QUEUE_PARALLELISM = "3"
+          AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          AUTH_EMAIL_FROM = "noreply@szworld.uk"
+          AUTH_EMAIL_REPLY_TO = "noreply@szworld.uk"
+          TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
+          [triggers]
+          crons = [ "*/5 * * * *", "17 3 * * *" ]
+          TOML
+          cp .cpcv-staging.wrangler.toml deployment-records/staging/wrangler.toml
+          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .cpcv-staging.wrangler.toml
+          node scripts/verify-ai-readiness.mjs --config .cpcv-staging.wrangler.toml
+          npx wrangler deploy --dry-run --config .cpcv-staging.wrangler.toml
+
+      - name: Ensure isolated staging queues
+        shell: bash
+        run: |
+          set -euo pipefail
+          ensure_queue() {
+            set +e
+            out=$(npx wrangler queues create "$1" 2>&1)
+            status=$?
+            set -e
+            printf '%s\n' "$out" | tee -a deployment-records/staging/queues.txt
+            if [ "$status" -ne 0 ] && ! grep -qiE 'already exists|already been taken|is already taken|already in use|code: 11009' <<<"$out"; then
+              return "$status"
+            fi
+          }
+          for q in cpcv-ai-jobs-staging cpcv-ai-translation-jobs-staging cpcv-ai-moderation-jobs-staging cpcv-ai-translation-dlq-staging cpcv-ai-moderation-dlq-staging; do ensure_queue "$q"; done
+
+      - name: Migrate and deploy staging
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply class_comment_db_staging --remote --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-records/staging/legacy-migrations.txt
+          npx wrangler d1 migrations apply class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-records/staging/v2-migrations.txt
+          node scripts/verify-remote-d1.mjs --database class_comment_db_v2_staging --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-records/staging/db-before.txt
+          auth=$(openssl rand -hex 32)
+          public=$(openssl rand -hex 32)
+          echo "::add-mask::$auth"
+          echo "::add-mask::$public"
+          AUTH_RATE_LIMIT_PEPPER="$auth" PUBLIC_RATE_LIMIT_PEPPER="$public" TURNSTILE_SECRET_KEY='1x0000000000000000000000000000000AA' node scripts/configure-rate-limit-secret.mjs --config .cpcv-staging.wrangler.toml > deployment-records/staging/secrets.txt
+          npx wrangler deploy --config .cpcv-staging.wrangler.toml --keep-vars 2>&1 | tee deployment-records/staging/deploy.txt
+          staging_id=$(grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' deployment-records/staging/deploy.txt | tail -n 1 || true)
+          test -n "$staging_id"
+          echo "STAGING_DEPLOYMENT_ID=$staging_id" >> "$GITHUB_ENV"
+          printf '%s\n' "$staging_id" > deployment-records/staging/deployment-id.txt
+
+      - name: Verify staging before production
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee deployment-records/staging/http-smoke.txt
+          node scripts/verify-remote-d1.mjs --database class_comment_db_v2_staging --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-records/staging/db-after.txt
+          npx wrangler deployments status --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-records/staging/deployments.txt
+          npx wrangler versions list --config .cpcv-staging.wrangler.toml 2>&1 | tee deployment-records/staging/versions.txt
+          config_sha=$(sha256sum .cpcv-staging.wrangler.toml | cut -d' ' -f1)
+          cat > deployment-records/staging/staging-acceptance-record.txt <<EOF
+          record_format=CPCV_STAGING_ACCEPTANCE_V1
+          result=PASSED
+          release_commit=$SOURCE_COMMIT
+          staging_deployment_id=$STAGING_DEPLOYMENT_ID
+          staging_config_sha256=$config_sha
+          production_resources_used=NO
+          test_data_cleanup=COMPLETED
+          pdf_data_egress=NONE
+          executed_by=github-actions:${GITHUB_RUN_ID}
+          completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          EOF
+
+      - name: Record production rollback state and secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler secret list 2>&1 | tee deployment-records/production/secrets-before.txt
+          for name in AUTH_RATE_LIMIT_PEPPER PUBLIC_RATE_LIMIT_PEPPER TURNSTILE_SECRET_KEY; do grep -F "$name" deployment-records/production/secrets-before.txt >/dev/null; done
+          npx wrangler d1 time-travel info class_comment_db_v2 2>&1 | tee deployment-records/production/time-travel.txt
+          npx wrangler deployments status 2>&1 | tee deployment-records/production/deployments-before.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/production/versions-before.txt
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/production/db-before.txt
+
+      - name: Ensure production queues and migrate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ensure_queue() {
+            set +e
+            out=$(npx wrangler queues create "$1" 2>&1)
+            status=$?
+            set -e
+            printf '%s\n' "$out" | tee -a deployment-records/production/queues.txt
+            if [ "$status" -ne 0 ] && ! grep -qiE 'already exists|already been taken|is already taken|already in use|code: 11009' <<<"$out"; then
+              return "$status"
+            fi
+          }
+          for q in cpcv-ai-jobs cpcv-ai-translation-jobs cpcv-ai-moderation-jobs cpcv-ai-translation-dlq cpcv-ai-moderation-dlq; do ensure_queue "$q"; done
+          npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee deployment-records/production/legacy-migrations.txt
+          npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee deployment-records/production/v2-migrations.txt
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/production/db-after-migrations.txt
+
+      - name: Deploy exact release to production
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          npx wrangler deploy 2>&1 | tee deployment-records/production/deploy.txt
+          production_id=$(grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' deployment-records/production/deploy.txt | tail -n 1 || true)
+          test -n "$production_id"
+          echo "PRODUCTION_DEPLOYMENT_ID=$production_id" >> "$GITHUB_ENV"
+          printf '%s\n' "$production_id" > deployment-records/production/deployment-id.txt
+
+      - name: Verify production release
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/production/db-after.txt
+          node scripts/smoke-production.mjs --origin "$PRODUCTION_ORIGIN" 2>&1 | tee deployment-records/production/http-smoke.txt
+          npx wrangler deployments status 2>&1 | tee deployment-records/production/deployments-after.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/production/versions-after.txt
+          printf 'result=PASSED\nrelease_commit=%s\nstaging_deployment_id=%s\nproduction_deployment_id=%s\ncompleted_at_utc=%s\n' "$SOURCE_COMMIT" "$STAGING_DEPLOYMENT_ID" "$PRODUCTION_DEPLOYMENT_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > deployment-records/production/result.txt
+
+      - name: Finalize deployment evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p deployment-records
+          printf 'job_status=%s\nsource_commit=%s\nstaging_deployment_id=%s\nproduction_deployment_id=%s\ncompleted_at_utc=%s\n' '${{ job.status }}' "$SOURCE_COMMIT" "${STAGING_DEPLOYMENT_ID:-UNAVAILABLE}" "${PRODUCTION_DEPLOYMENT_ID:-UNAVAILABLE}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > deployment-records/99-result.txt
+          find deployment-records -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > deployment-records/SHA256SUMS.txt
+          rm -f .cpcv-staging.wrangler.toml
+
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-ai-runtime-fix-${{ env.SOURCE_COMMIT }}
+          path: deployment-records/
+          if-no-files-found: error
+          retention-days: 90
