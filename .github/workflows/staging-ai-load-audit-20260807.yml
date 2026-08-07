@@ -36,22 +36,15 @@ jobs:
           STAGING_DB_V2_NAME: DB_V2
           STAGING_WRANGLER_CONFIG: .load-staging.wrangler.toml
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
-          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         shell: bash
         run: |
           set -euo pipefail
-          account=""
-          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do
-            value="${!key:-}"
-            if [ -n "$value" ]; then account="$value"; break; fi
-          done
           test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$account"
           echo "::add-mask::$CLOUDFLARE_API_TOKEN"
-          echo "::add-mask::$account"
-          export CLOUDFLARE_ACCOUNT_ID="$account"
+          unset CLOUDFLARE_ACCOUNT_ID || true
+          npx wrangler whoami --json > .wrangler-whoami.json
+          mapfile -t accounts < <(jq -r '.accounts[]?.id // empty' .wrangler-whoami.json)
+          test "${#accounts[@]}" -gt 0
           cat > .load-staging.wrangler.toml <<'TOML'
           name = "cpcv-load-audit-cli"
           main = "src/index.js"
@@ -62,7 +55,18 @@ jobs:
           database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"
           migrations_dir = "migrations-v2"
           TOML
-          npx wrangler d1 execute DB_V2 --remote --yes --config .load-staging.wrangler.toml --command "SELECT 1 AS ok" --json
+          account=""
+          for candidate in "${accounts[@]}"; do
+            echo "::add-mask::$candidate"
+            export CLOUDFLARE_ACCOUNT_ID="$candidate"
+            if npx wrangler d1 execute DB_V2 --remote --yes --config .load-staging.wrangler.toml --command "SELECT 1 AS ok" --json > .d1-probe.json 2> .d1-probe.err; then
+              account="$candidate"
+              break
+            fi
+          done
+          test -n "$account"
+          export CLOUDFLARE_ACCOUNT_ID="$account"
+          rm -f .wrangler-whoami.json .d1-probe.json .d1-probe.err
           python3 - <<'PY'
           from pathlib import Path
           p = Path('scripts/staging-ai-load-test-v2.mjs')
