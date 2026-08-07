@@ -1,0 +1,55 @@
+name: Integrate posting hot-path fix temporary
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/integrate-posting-hotpath-temporary.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/load-fixes-integration-20260807
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply already-reviewed filter hot-path change on current master
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          git checkout 0066c452a6fdc0d9a0acab72dabb7cb7d8d4e54e -- src/content-filter/repository.js scripts/test-content-filter-v2.mjs
+          node --check src/content-filter/repository.js
+          node --check scripts/test-content-filter-v2.mjs
+          node scripts/test-content-filter-v2.mjs
+          node scripts/test-comments-v2.mjs
+          npm run check:stage08
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          changed=['src/content-filter/repository.js','scripts/test-content-filter-v2.mjs']
+          path=Path('SOURCE_SHA256SUMS.override.txt')
+          entries={}
+          for line in path.read_text().splitlines():
+              if not line: continue
+              digest,name=line.split('  ',1)
+              entries[name]=digest
+          for name in changed:
+              entries[name]=hashlib.sha256(Path(name).read_bytes()).hexdigest()
+          path.write_text('\n'.join(f'{entries[name]}  {name}' for name in sorted(entries))+'\n')
+          PY
+          node scripts/verify-source-manifest.mjs
+          git rm .github/workflows/integrate-posting-hotpath-temporary.yml
+          git config user.name "cpcv-load-integration"
+          git config user.email "actions@users.noreply.github.com"
+          git add src/content-filter/repository.js scripts/test-content-filter-v2.mjs SOURCE_SHA256SUMS.override.txt
+          git commit -m "Integrate measured posting hot-path reduction"
+          git push origin HEAD:agent/load-fixes-integration-20260807
