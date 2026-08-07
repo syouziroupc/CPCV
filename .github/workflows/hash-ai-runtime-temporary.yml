@@ -1,0 +1,9 @@
+name: Temporary AI runtime checksums
+on:
+  pull_request:
+jobs:
+  hash:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sha256sum src/ai/provider.js scripts/test-ai-translation-resilience.mjs wrangler.toml .github/workflows/responsive-and-ai-regression.yml public/assets/app.css
