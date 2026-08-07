@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -61,41 +61,3 @@ jobs:
         run: |
           npm audit
           npm audit --omit=dev
-
-  deploy-responsive-ai:
-    name: Verified staging and production deployment
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.event.head_commit.message == 'Trigger verified responsive AI deployment'
-    uses: ./.github/workflows/reusable-responsive-ai-deploy-20260807.yml
-    secrets: inherit
-
-  record-responsive-ai-status:
-    name: Record deployment result
-    needs: deploy-responsive-ai
-    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/master' && github.event.head_commit.message == 'Trigger verified responsive AI deployment'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Write deployment result marker
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          RESULT: ${{ needs.deploy-responsive-ai.result }}
-          RUN_ID: ${{ github.run_id }}
-          RUN_ATTEMPT: ${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          cat > /tmp/responsive-ai-result.json <<EOF
-          {
-            "application_commit": "82e96a23e103c0c826b772c576408c58ec8f9ce7",
-            "workflow_run_id": "$RUN_ID",
-            "workflow_run_attempt": "$RUN_ATTEMPT",
-            "result": "$RESULT",
-            "recorded_at_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          }
-          EOF
-          path='deployment-status/responsive-ai-20260807.json'
-          encoded=$(base64 -w0 /tmp/responsive-ai-result.json)
-          existing_sha=$(gh api "repos/$REPO/contents/$path?ref=master" --jq '.sha' 2>/dev/null || true)
-          args=(--method PUT "repos/$REPO/contents/$path" -f message='Record responsive AI deployment result' -f content="$encoded" -f branch=master)
-          [ -z "$existing_sha" ] || args+=(-f sha="$existing_sha")
-          gh api "${args[@]}" >/dev/null
