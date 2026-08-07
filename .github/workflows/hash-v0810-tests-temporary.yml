@@ -1,9 +1,0 @@
-name: Temporary v0.8.10 test checksums
-on:
-  pull_request:
-jobs:
-  hash:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: sha256sum scripts/test-v0810-usability.mjs scripts/test-v0810-security-ui.mjs
