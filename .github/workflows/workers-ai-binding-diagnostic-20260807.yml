@@ -38,22 +38,20 @@ jobs:
           export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$account"
           mkdir -p binding-diagnostic
           cat > .binding-diagnostic-worker.mjs <<'JS'
-          const MODELS={glm:'@cf/zai-org/glm-4.7-flash',qwen:'@cf/qwen/qwen3-30b-a3b-fp8',llama:'@cf/meta/llama-3.3-70b-instruct-fp8-fast'};
+          const MODELS={
+            llama33:'@cf/meta/llama-3.3-70b-instruct-fp8-fast',
+            llama31fast:'@cf/meta/llama-3.1-8b-instruct-fast',
+            llama31fp8:'@cf/meta/llama-3.1-8b-instruct-fp8'
+          };
           const SCHEMA={type:'object',additionalProperties:false,required:['recommendation','confidence','categories'],properties:{recommendation:{type:'string',enum:['allow','review','hide']},confidence:{type:'number',minimum:0,maximum:1},categories:{type:'array',maxItems:9,items:{type:'string'}}}};
-          function requestFor(modelKey,kind){
-            const noThink=kind.includes('nothink'),templateOff=kind.includes('templateoff'),useSchema=kind.includes('schema');
-            const request={messages:[{role:'system',content:'Classify a classroom comment. Return one JSON object only with recommendation, confidence, and categories.'+(noThink?' /no_think':'')},{role:'user',content:'Ordinary classroom comment about energy markets.'+(noThink?' /no_think':'')}],max_tokens:256,temperature:modelKey==='qwen'?0.7:0};
-            if(useSchema) request.response_format={type:'json_schema',json_schema:SCHEMA};
-            if(templateOff) request.chat_template_kwargs={enable_thinking:false};
-            return request;
-          }
+          function requestFor(){return {messages:[{role:'system',content:'Classify a classroom comment. Return one JSON object only with recommendation, confidence, and categories. Categories must be chosen only from harassment, hate, sexual, violence, self_harm, spam, personal_data, prompt_injection, other.'},{role:'user',content:'Ordinary classroom comment about energy markets.'}],max_tokens:220,temperature:0,response_format:{type:'json_schema',json_schema:SCHEMA}};}
           export default {async fetch(request,env){
-            const [modelKey,kind]=new URL(request.url).pathname.split('/').filter(Boolean);
+            const [modelKey]=new URL(request.url).pathname.split('/').filter(Boolean);
             if(modelKey==='health') return Response.json({ok:true});
-            const model=MODELS[modelKey]; if(!model||!kind)return new Response('not found',{status:404});
+            const model=MODELS[modelKey]; if(!model)return new Response('not found',{status:404});
             const started=Date.now();
-            try{return Response.json({ok:true,model,kind,elapsedMs:Date.now()-started,result:await env.AI.run(model,requestFor(modelKey,kind))});}
-            catch(error){return Response.json({ok:false,model,kind,elapsedMs:Date.now()-started,error:{name:String(error?.name||''),message:String(error?.message||''),status:error?.status??null,code:error?.code??null}},{status:502});}
+            try{const result=await env.AI.run(model,requestFor());return Response.json({ok:true,model,elapsedMs:Date.now()-started,result});}
+            catch(error){return Response.json({ok:false,model,elapsedMs:Date.now()-started,error:{name:String(error?.name||''),message:String(error?.message||''),status:error?.status??null,code:error?.code??null}},{status:502});}
           }};
           JS
           cat > .binding-diagnostic.toml <<'TOML'
@@ -74,25 +72,19 @@ jobs:
             if [ "$code" = 200 ] && jq -e '.ok == true' binding-diagnostic/health.json >/dev/null 2>&1; then ready=1; break; fi
           done
           test "$ready" = 1
-          probe(){ model="$1"; kind="$2"; curl -sS --retry 2 --retry-all-errors --retry-delay 1 -w '\nHTTP_STATUS=%{http_code}\n' "$origin/$model/$kind" > "binding-diagnostic/${model}-${kind}.txt"; }
-          probe glm schema
-          probe qwen schema
-          probe qwen nothink-schema
-          probe qwen templateoff-schema
-          probe qwen nothink-templateoff-schema
-          probe llama schema
-          probe llama plain
+          for model in llama33 llama31fast llama31fp8; do
+            curl -sS --retry 2 --retry-all-errors --retry-delay 1 -w '\nHTTP_STATUS=%{http_code}\n' "$origin/$model" > "binding-diagnostic/${model}.txt"
+          done
           python3 - <<'PY'
           from pathlib import Path
           import json,re
           rows=[]
-          for path in sorted(Path('binding-diagnostic').glob('*.txt')):
-              if path.name in {'deploy.txt','origin.txt','delete.txt'}: continue
+          for path in sorted(Path('binding-diagnostic').glob('llama*.txt')):
               text=path.read_text(); m=re.search(r'\nHTTP_STATUS=(\d+)\s*$',text); status=int(m.group(1)) if m else None; body=text[:m.start()] if m else text
               try:data=json.loads(body)
               except Exception:data={'raw':body[:1200]}
-              result=data.get('result') if isinstance(data,dict) else None; choice=(result.get('choices') or [{}])[0] if isinstance(result,dict) else {}; message=choice.get('message') if isinstance(choice,dict) else None
-              rows.append({'probe':path.stem,'httpStatus':status,'ok':data.get('ok') if isinstance(data,dict) else None,'elapsedMs':data.get('elapsedMs') if isinstance(data,dict) else None,'response':result.get('response') if isinstance(result,dict) else None,'content':message.get('content') if isinstance(message,dict) else None,'reasoningLength':len(str(message.get('reasoning') or message.get('reasoning_content') or '')) if isinstance(message,dict) else 0,'finishReason':choice.get('finish_reason') if isinstance(choice,dict) else None,'error':data.get('error') if isinstance(data,dict) else data})
+              result=data.get('result') if isinstance(data,dict) else None
+              rows.append({'probe':path.stem,'httpStatus':status,'ok':data.get('ok') if isinstance(data,dict) else None,'elapsedMs':data.get('elapsedMs') if isinstance(data,dict) else None,'response':result.get('response') if isinstance(result,dict) else None,'error':data.get('error') if isinstance(data,dict) else data})
           Path('binding-diagnostic/summary.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2)); print(json.dumps(rows,ensure_ascii=False,indent=2))
           PY
       - name: Delete isolated diagnostic Worker by API
