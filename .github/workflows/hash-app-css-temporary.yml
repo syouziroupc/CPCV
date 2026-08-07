@@ -1,5 +1,6 @@
 name: Temporary app CSS checksum
 on:
+  pull_request:
   push:
     branches:
       - agent/fix-ai-runtime-throughput-20260807
