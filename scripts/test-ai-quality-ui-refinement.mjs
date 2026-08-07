@@ -5,7 +5,7 @@ import { normalizeModerationResult } from '../src/ai/validation.js';
 
 const html = readFileSync('public/admin/index.html', 'utf8');
 const js = readFileSync('public/assets/admin.js', 'utf8');
-const css = readFileSync('public/assets/app.css', 'utf8');
+const css = `${readFileSync('public/assets/app-base.css', 'utf8')}\n${readFileSync('public/assets/app.css', 'utf8')}`;
 const migration = readFileSync('migrations-v2/0018_ai_translation_quality.sql', 'utf8');
 assert.match(html, /id="sessionAiTranslationQuality"/);
 assert.match(html, /id="saveSessionSettingsButton"/);
@@ -26,7 +26,7 @@ const env = {
   AI_TRANSLATION_MODEL: '@cf/meta/m2m100-1.2b',
   AI_TRANSLATION_BALANCED_MODEL: '@cf/zai-org/glm-4.7-flash',
   AI_TRANSLATION_ACCURATE_MODEL: '@cf/qwen/qwen3-30b-a3b-fp8',
-  AI_TRANSLATION_TIMEOUT_MS: '3000', AI_TRANSLATION_BALANCED_TIMEOUT_MS: '6000', AI_TRANSLATION_ACCURATE_TIMEOUT_MS: '12000',
+  AI_TRANSLATION_TIMEOUT_MS: '8000', AI_TRANSLATION_BALANCED_TIMEOUT_MS: '18000', AI_TRANSLATION_ACCURATE_TIMEOUT_MS: '30000',
   AI: { run: async (model, request) => { calls.push({ model, request }); return { response: '翻訳結果' }; } }
 };
 await runTranslationModel(env, { message: 'Una frase italiana', sourceLanguage: 'other', targetLanguage: 'ja', quality: 'fast' });

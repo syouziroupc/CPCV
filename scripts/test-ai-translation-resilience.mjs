@@ -5,19 +5,22 @@ const M2M = "@cf/meta/m2m100-1.2b";
 const GLM = "@cf/zai-org/glm-4.7-flash";
 const QWEN = "@cf/qwen/qwen3-30b-a3b-fp8";
 
-await accurateUsesPromptSchema();
-await balancedFallsBackAfterRejectedModel();
-await fastFallsBackAfterDedicatedOutage();
-await unknownLanguageUsesMultilingualModel();
+await accurateUsesPromptSchemaAndSharedCapacity();
+await balancedKnownLanguageUsesDedicatedTranslationFirst();
+await balancedFallsBackAfterDedicatedOutage();
+await unknownLanguageUsesMultilingualModelAndSharedCapacity();
+await localCapacityRejectionDoesNotCallWorkersAi();
+await provider429DoesNotAmplifyIntoFallbackCalls();
 console.log("AI translation resilience tests passed");
 
-async function accurateUsesPromptSchema() {
+async function accurateUsesPromptSchemaAndSharedCapacity() {
   const calls = [];
+  const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
     assert.equal(model, QWEN);
     return { response: "これは翻訳の正常性確認です。" };
-  }), {
+  }, limits), {
     message: "This is a translation health check.",
     sourceLanguage: "en",
     targetLanguage: "ja",
@@ -26,34 +29,32 @@ async function accurateUsesPromptSchema() {
   assert.equal(result.translatedText, "これは翻訳の正常性確認です。");
   assert.equal(typeof calls[0].request.prompt, "string");
   assert.equal(calls[0].request.messages, undefined);
+  assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
 
-async function balancedFallsBackAfterRejectedModel() {
+async function balancedKnownLanguageUsesDedicatedTranslationFirst() {
   const calls = [];
+  const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
-    if (model === GLM) {
-      const error = new Error("request schema rejected");
-      error.status = 400;
-      throw error;
-    }
-    assert.equal(model, QWEN);
-    return { response: "代替モデルで翻訳しました。" };
-  }), {
-    message: "Fallback translation.",
+    assert.equal(model, M2M);
+    assert.equal(request.source_lang, "en");
+    assert.equal(request.target_lang, "ja");
+    return { translated_text: "専用翻訳モデルを優先します。" };
+  }, limits), {
+    message: "Prefer the dedicated translation model.",
     sourceLanguage: "en",
     targetLanguage: "ja",
     quality: "balanced"
   });
-  assert.equal(result.translatedText, "代替モデルで翻訳しました。");
-  assert.deepEqual(calls.map((call) => call.model), [GLM, QWEN]);
-  assert.equal(calls[0].request.reasoning_effort, "low");
-  assert.equal(calls[0].request.max_completion_tokens, 220);
-  assert.equal(typeof calls[1].request.prompt, "string");
+  assert.equal(result.translatedText, "専用翻訳モデルを優先します。");
+  assert.deepEqual(calls.map((call) => call.model), [M2M]);
+  assert.deepEqual(limits, []);
 }
 
-async function fastFallsBackAfterDedicatedOutage() {
+async function balancedFallsBackAfterDedicatedOutage() {
   const calls = [];
+  const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
     if (model === M2M) {
@@ -62,26 +63,28 @@ async function fastFallsBackAfterDedicatedOutage() {
       throw error;
     }
     assert.equal(model, GLM);
-    return { choices: [{ message: { content: "高速翻訳の代替結果です。" } }] };
-  }), {
-    message: "Fast translation fallback.",
+    assert.equal(request.reasoning_effort, "low");
+    assert.equal(request.max_completion_tokens, 220);
+    return { choices: [{ message: { content: "代替モデルで翻訳しました。" } }] };
+  }, limits), {
+    message: "Fallback translation.",
     sourceLanguage: "en",
     targetLanguage: "ja",
-    quality: "fast"
+    quality: "balanced"
   });
-  assert.equal(result.translatedText, "高速翻訳の代替結果です。");
+  assert.equal(result.translatedText, "代替モデルで翻訳しました。");
   assert.deepEqual(calls.map((call) => call.model), [M2M, GLM]);
-  assert.equal(calls[0].request.source_lang, "en");
-  assert.equal(calls[0].request.target_lang, "ja");
+  assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
 
-async function unknownLanguageUsesMultilingualModel() {
+async function unknownLanguageUsesMultilingualModelAndSharedCapacity() {
   const calls = [];
+  const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
     assert.equal(model, GLM);
     return { response: "翻訳の精度が低い。" };
-  }), {
+  }, limits), {
     message: "La precisione della traduzione è scarsa.",
     sourceLanguage: "other",
     targetLanguage: "ja",
@@ -90,16 +93,62 @@ async function unknownLanguageUsesMultilingualModel() {
   assert.equal(result.translatedText, "翻訳の精度が低い。");
   assert.equal(calls.length, 1);
   assert.match(calls[0].request.messages[1].content, /"sourceLanguage":"auto"/);
+  assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
 
-function environment(run) {
+async function localCapacityRejectionDoesNotCallWorkersAi() {
+  let aiCalls = 0;
+  const env = environment(async () => {
+    aiCalls += 1;
+    return { response: "unexpected" };
+  }, [], false);
+  await assert.rejects(
+    runTranslationModel(env, {
+      message: "La traduzione deve attendere.",
+      sourceLanguage: "other",
+      targetLanguage: "ja",
+      quality: "balanced"
+    }),
+    (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
+  );
+  assert.equal(aiCalls, 0);
+}
+
+async function provider429DoesNotAmplifyIntoFallbackCalls() {
+  const calls = [];
+  const limits = [];
+  await assert.rejects(
+    runTranslationModel(environment(async (model) => {
+      calls.push(model);
+      const error = new Error("too many requests");
+      error.status = 429;
+      throw error;
+    }, limits), {
+      message: "Questa richiesta è limitata.",
+      sourceLanguage: "other",
+      targetLanguage: "ja",
+      quality: "balanced"
+    }),
+    (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
+  );
+  assert.deepEqual(calls, [GLM]);
+  assert.deepEqual(limits, ["workers-ai-moderation"]);
+}
+
+function environment(run, limitCalls = [], capacity = true) {
   return {
     AI: { run },
+    AI_MODERATION_RATE_LIMITER: {
+      async limit({ key }) {
+        limitCalls.push(key);
+        return { success: capacity };
+      }
+    },
     AI_TRANSLATION_MODEL: M2M,
     AI_TRANSLATION_BALANCED_MODEL: GLM,
     AI_TRANSLATION_ACCURATE_MODEL: QWEN,
-    AI_TRANSLATION_TIMEOUT_MS: "3000",
-    AI_TRANSLATION_BALANCED_TIMEOUT_MS: "6000",
-    AI_TRANSLATION_ACCURATE_TIMEOUT_MS: "12000"
+    AI_TRANSLATION_TIMEOUT_MS: "8000",
+    AI_TRANSLATION_BALANCED_TIMEOUT_MS: "18000",
+    AI_TRANSLATION_ACCURATE_TIMEOUT_MS: "30000"
   };
 }
