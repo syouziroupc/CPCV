@@ -32,7 +32,7 @@ const UKRAINIAN_COMMON = new Set(`і в не на що я з він як це а
 
 const LATIN_HINTS = Object.freeze({
   en: new Set(`a an and are as at be because but by can could did do does during for from had has have he her here how i if in into is it its may my no not of on or our over she should so than that the their them there they this through to very was we were what when where which who why will with without would you your classroom discussion`.split(/\s+/)),
-  es: new Set(`a al algo como con de del el ella en es esta este hay la las lo los más no para pero por que se si sin su sus un una y yo gracias hola clase estudiante profesor`.split(/\s+/)),
+  es: new Set(`a al algo ayudar como con de del el ella en energía eólica es esta este futuro hay importante la las lo los más no para pero por puede que se si sin solar su sus un una y yo gracias hola clase estudiante profesor`.split(/\s+/)),
   fr: new Set(`à au aux avec ce ces comme dans de des du elle en est et il la le les mais ne nous ou pas pour que qui sans se son sur un une vous merci bonjour classe étudiant professeur`.split(/\s+/)),
   de: new Set(`aber als am an auch auf aus bei das dem den der die ein eine einer eines er es für hat ich im in ist mit nicht oder sie sind und von was wir zu zum zur danke hallo klasse student lehrer`.split(/\s+/)),
   it: new Set(`a al alla che con da del della di e è gli ha il in io la le ma non o per più questo se si sono su un una grazie ciao classe studente insegnante`.split(/\s+/)),
