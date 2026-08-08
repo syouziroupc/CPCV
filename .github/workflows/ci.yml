@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Preserve duplicate broadcast semantics
+      - name: Preserve tested semantics
         shell: bash
         run: |
           python - <<'PY'
@@ -39,7 +39,12 @@ jobs:
           new = '      if (!result.duplicate && result.comment.moderationState === "visible") {'
           if s.count(old) != 1:
               raise SystemExit(f'expected one duplicate-broadcast patch point, got {s.count(old)}')
-          p.write_text(s.replace(old, new, 1))
+          s = s.replace(old, new, 1)
+          radius = '  border-radius: 0 !important;'
+          if s.count(radius) != 1:
+              raise SystemExit(f'expected one minimal radius patch point, got {s.count(radius)}')
+          s = s.replace(radius, '  border-radius: 0;', 1)
+          p.write_text(s)
           PY
       - name: Apply product patch
         run: python .github/apply-final-load-ui.py
