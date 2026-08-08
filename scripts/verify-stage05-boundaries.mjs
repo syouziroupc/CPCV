@@ -30,10 +30,17 @@ check("concurrent duplicate action conflicts map to 409", repository.includes("i
 check("moderation audit does not embed comment body", !/details[\s\S]{0,200}message:/i.test(repository));
 
 const route = text("src/routes/private-v2.js");
+const realtimeDispatch = text("src/realtime/dispatch.js");
 check("bulk moderation is capped and reports per-item results", route.includes("normalizeBulkModerationItems") && route.includes("succeeded:") && route.includes("failed:"));
 check("unexpected bulk item failures do not erase known item outcomes", route.includes('error: "INTERNAL_ERROR", status: 500') && route.includes("Stage 5 bulk moderation item failed"));
 check("moderation request scope comes from the authorized session", route.includes("organizationId: session.organization_id") && route.includes("liveSessionId: session.id"));
-check("clear display remains separate from moderation state", route.includes('action: "comments.cleared"') && route.includes("/clear"));
+check("clear display remains separate from moderation state",
+  route.includes('action: "comments.cleared"')
+  && route.includes('eventType: "message:clear"')
+  && route.includes("dispatchRealtimeEvent(env, session.id, event, false)")
+  && !/async function clearComments[\s\S]{0,1800}moderateComment\(/.test(route)
+  && realtimeDispatch.includes('event.type === "message:clear"')
+  && realtimeDispatch.includes('"/clear"'));
 
 const validation = text("src/moderation/validation.js");
 check("bulk moderation limit is 25", validation.includes("MAX_BULK_MODERATION_ITEMS = 25"));
