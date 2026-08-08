@@ -37,8 +37,8 @@ max_retries = 3
 
 # Translation and moderation scale independently. max_concurrency is intentionally
 # unset so Cloudflare Queues can autoscale consumers as backlog grows. Translation
-# stays at the measured batch size 3. Embedding moderation can safely fan out a
-# larger batch because it uses the independent high-RPM Text Embeddings task.
+# stays at the measured batch size 3. Moderation can safely fan out a larger batch
+# because the primary path uses the independent high-RPM Text Classification task.
 [[queues.producers]]
 binding = "AI_TRANSLATION_QUEUE"
 queue = "cpcv-ai-translation-jobs"
@@ -103,13 +103,13 @@ name = "AI_TRANSLATION_DEDICATED_RATE_LIMITER"
 namespace_id = "826071908" # dedicated Translation task capacity
 simple = { limit = 700, period = 60 }
 
-# Normal moderation uses multilingual embeddings. This limiter counts batched
-# embedding inference requests, not comments, and keeps a margin below the
-# 3000 RPM Text Embeddings task limit.
+# Primary moderation is batched Text Classification. This limiter counts model
+# requests rather than comments and leaves a margin below Cloudflare's 2000 RPM
+# Text Classification task limit. Raising account limits later requires config only.
 [[ratelimits]]
 name = "AI_MODERATION_CLASSIFIER_RATE_LIMITER"
-namespace_id = "826071907" # multilingual embedding request capacity
-simple = { limit = 2800, period = 60 }
+namespace_id = "826071907" # batched moderation classification capacity
+simple = { limit = 1900, period = 60 }
 
 # Text-generation translation overflow and legacy moderation fallback share a
 # single capacity namespace below the 300 RPM Text Generation task limit.
@@ -122,12 +122,12 @@ simple = { limit = 290, period = 60 }
 APP_ENV = "production"
 AUTH_V2_ENABLED = "1"
 EMAIL_AUTH_REQUIRED = "0"
-AI_MODERATION_CLASSIFIER_MODEL = "@cf/google/embeddinggemma-300m"
+AI_MODERATION_CLASSIFIER_MODEL = "@cf/baai/bge-reranker-base"
 AI_MODERATION_CLASSIFIER_TIMEOUT_MS = "5000"
 AI_MODERATION_MODEL_BATCH_SIZE = "20"
 AI_MODERATION_BATCH_WINDOW_MS = "8"
-AI_MODERATION_REVIEW_MARGIN = "0.035"
-AI_MODERATION_HIDE_MARGIN = "0.12"
+AI_MODERATION_REVIEW_SCORE = "0.46"
+AI_MODERATION_HIDE_SCORE = "0.78"
 AI_MODERATION_CLASSIFIER_FALLBACK = "1"
 AI_MODERATION_MODEL = "@cf/meta/llama-3.2-3b-instruct"
 AI_MODERATION_FALLBACK_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
