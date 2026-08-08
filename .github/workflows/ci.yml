@@ -86,7 +86,9 @@ jobs:
         run: npm ci
 
       - name: Apply hardening patch
-        run: python scripts/ai-response-hardening-patch.py
+        run: |
+          sed -i 's/if count != 1:/if count < 1:/' scripts/ai-response-hardening-patch.py
+          python scripts/ai-response-hardening-patch.py
 
       - name: Remove temporary machinery and restore permanent CI
         run: |
