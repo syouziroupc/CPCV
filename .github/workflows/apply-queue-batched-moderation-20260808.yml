@@ -34,7 +34,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           p=Path('scripts/test-ai-translation-resilience.mjs')
-          s=p.read_text().replace('"workers-ai-moderation", "workers-ai-moderation"','"workers-ai-text-generation", "workers-ai-text-generation"')
+          s=p.read_text().replace('workers-ai-moderation','workers-ai-text-generation')
           p.write_text(s)
           PY
 
