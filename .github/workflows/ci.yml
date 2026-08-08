@@ -19,7 +19,7 @@ jobs:
     environment: production
     timeout-minutes: 35
     env:
-      RELEASE_COMMIT: 66123c3a976b42315cf0d8c5d6f47d7d14e7061b
+      RELEASE_COMMIT: 0373502a78315c035eba228deea961d7f3c1843a
       STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
     steps:
       - name: Checkout operational branch
