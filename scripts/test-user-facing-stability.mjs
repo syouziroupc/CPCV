@@ -36,6 +36,7 @@ assert.equal(normalizeAiTargetLanguage('xx-unsupported'), '');
 const samples = [
   ['Energy markets change during classroom discussion.', 'en'],
   ['La energía solar es importante para el futuro.', 'es'],
+  ['La energía eólica puede ayudar al futuro.', 'es'],
   ['에너지 시장에 대해 수업에서 토론하고 싶습니다.', 'ko'],
   ['พลังงานแสงอาทิตย์มีความสำคัญต่ออนาคต', 'th'],
   ['Це важлива тема для обговорення в класі.', 'uk']
