@@ -39,7 +39,7 @@ check("clear display remains separate from moderation state",
   && route.includes('eventType: "message:clear"')
   && route.includes("dispatchRealtimeEvent(env, session.id, event, false)")
   && !/async function clearComments[\s\S]{0,1800}moderateComment\(/.test(route)
-  && realtimeDispatch.includes('event.type === "message:clear"')
+  && realtimeDispatch.includes('dispatchType === "message:clear"')
   && realtimeDispatch.includes('"/clear"'));
 
 const validation = text("src/moderation/validation.js");
