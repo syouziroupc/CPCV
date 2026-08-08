@@ -44,6 +44,11 @@ jobs:
           if s.count(radius) != 1:
               raise SystemExit(f'expected one minimal radius patch point, got {s.count(radius)}')
           s = s.replace(radius, '  border-radius: 0;', 1)
+          start = s.find('# Bump shared CSS query on remaining HTML pages to avoid stale cached styling.')
+          end = s.find('# Flat, high-contrast, low-decoration finish.')
+          if start < 0 or end <= start:
+              raise SystemExit('global CSS cache-bump block not found')
+          s = s[:start] + s[end:]
           p.write_text(s)
           PY
       - name: Apply product patch
@@ -61,6 +66,14 @@ jobs:
           npm ci || { npm cache clean --force; npm ci; }
       - name: Refresh source manifest
         run: npm run manifest:source
+      - name: Run static release checks
+        shell: bash
+        run: |
+          npm run verify:source-manifest
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run verify:final-docs
       - name: Run focused load/UI regression
         run: node scripts/test-load-hardening.mjs
       - name: Run comments, realtime, AI and full Stage 8 regressions
