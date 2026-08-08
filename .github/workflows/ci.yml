@@ -66,6 +66,15 @@ jobs:
           npm ci || { npm cache clean --force; npm ci; }
       - name: Refresh source manifest
         run: npm run manifest:source
+      - name: Create local candidate commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          test -n "$(git status --porcelain)"
+          git commit -m "Finish load hardening and simplify CPCV UI"
+          test -z "$(git status --porcelain)"
       - name: Run static release checks
         shell: bash
         run: |
@@ -87,15 +96,8 @@ jobs:
           npm run deploy:dry-run
           npm audit
           npm audit --omit=dev
-      - name: Commit verified product changes
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          test -n "$(git status --porcelain)"
-          git commit -m "Finish load hardening and simplify CPCV UI"
-          git push origin HEAD:agent/final-load-ui-hardening-20260808
+      - name: Push verified candidate commit
+        run: git push origin HEAD:agent/final-load-ui-hardening-20260808
 
   check:
     if: github.event_name != 'pull_request' || github.head_ref != 'agent/final-load-ui-hardening-20260808'
