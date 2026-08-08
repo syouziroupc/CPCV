@@ -22,6 +22,15 @@ async function api(path, options = {}) {
   }
   return data;
 }
+function sharedSession() {
+  if (!window.__cpcvSessionPromise) {
+    window.__cpcvSessionPromise = api("/api/auth/session").catch((error) => {
+      window.__cpcvSessionPromise = null;
+      throw error;
+    });
+  }
+  return window.__cpcvSessionPromise;
+}
 function errorText(code) {
   return ({
     EMAIL_INVALID: "メールアドレスを確認してください。",
@@ -33,7 +42,7 @@ function errorText(code) {
 }
 async function load() {
   try {
-    const session = await api("/api/auth/session");
+    const session = await sharedSession();
     csrfToken = session.csrfToken || "";
     const account = await api("/api/auth/account");
     $("displayName").textContent = account.user.displayName || "利用者";
@@ -70,6 +79,40 @@ $("emailForm").addEventListener("submit", async (event) => {
     await load();
   } catch (error) { setStatus(errorText(error.code), true); }
   finally { button.disabled = false; }
+});
+
+$("passwordForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const button = $("passwordButton");
+  const status = $("passwordStatus");
+  const currentPassword = $("passwordCurrent").value;
+  const newPassword = $("passwordNew").value;
+  if (newPassword !== $("passwordConfirm").value) {
+    status.textContent = "新しいパスワードの確認入力が一致しません。";
+    status.style.color = "#dc2626";
+    return;
+  }
+  button.disabled = true;
+  status.textContent = "変更しています。";
+  status.style.color = "";
+  try {
+    const data = await api("/api/auth/password/change", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    csrfToken = data.csrfToken || csrfToken;
+    window.__cpcvSessionPromise = Promise.resolve(data);
+    $("passwordCurrent").value = "";
+    $("passwordNew").value = "";
+    $("passwordConfirm").value = "";
+    status.textContent = "パスワードを変更しました。他の端末のログイン状態は終了しました。";
+  } catch (error) {
+    status.textContent = error.code === "CURRENT_PASSWORD_INVALID"
+      ? "現在のパスワードが正しくありません。"
+      : errorText(error.code);
+    status.style.color = "#dc2626";
+  } finally { button.disabled = false; }
 });
 $("logoutButton").addEventListener("click", async () => {
   try { await api("/api/auth/logout", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }); } catch {}

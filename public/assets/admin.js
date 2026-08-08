@@ -16,6 +16,8 @@ const organizationManageLink = document.getElementById('organizationManageLink')
 const loginButton = document.getElementById('loginButton');
 const logoutButton = document.getElementById('logoutButton');
 const loginStatus = document.getElementById('loginStatus');
+const adminBootSection = document.getElementById('adminBootSection');
+const adminBootStatus = document.getElementById('adminBootStatus');
 const newTitle = document.getElementById('newTitle');
 const createButton = document.getElementById('createButton');
 const notFoundCreateButton = document.getElementById('notFoundCreateButton');
@@ -122,6 +124,7 @@ let csrfToken = '';
 let currentIdentity = null;
 let pendingOrganizations = [];
 let moderationComments = [];
+const selectedModerationIds = new Set();
 let moderationRefreshTimer = 0;
 let moderationRequestRunning = false;
 let analyticsRefreshTimer = 0;
@@ -162,6 +165,7 @@ function setLoginStatus(text, error = false) {
 }
 
 function setViewMode(mode) {
+  show(adminBootSection, false);
   const authView = mode === 'auth';
   document.body.classList.toggle('auth-view', authView);
   document.body.dataset.view = authView ? 'auth' : 'application';
@@ -206,15 +210,27 @@ function displayError(error, target = setStatus) {
 }
 
 async function verifySession() {
-  const data = await api('/api/auth/session');
+  let data;
+  let lastError;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      data = await api('/api/auth/session');
+      break;
+    } catch (error) {
+      lastError = error;
+      if (error?.status === 401 || attempt === 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+  }
+  if (!data) throw lastError || new Error('AUTH_SESSION_UNAVAILABLE');
   csrfToken = data.csrfToken || '';
   currentIdentity = data;
   show(organizationManageLink, ['owner', 'admin'].includes(data.organization?.role));
-  if (data.user?.requirePasswordChange) setStatus('初期パスワードを変更してください。', true);
   return data;
 }
 
 function showLogin(message = '', error = false) {
+  show(adminBootSection, false);
   stopModerationRefresh();
   stopAnalyticsRefresh();
   currentSession = null;
@@ -713,7 +729,12 @@ function renderModerationComments() {
     checkbox.type = 'checkbox';
     checkbox.className = 'moderation-select';
     checkbox.value = comment.id;
+    checkbox.checked = selectedModerationIds.has(comment.id);
     checkbox.setAttribute('aria-label', `${comment.nickname || '匿名'}のコメントを選択`);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) selectedModerationIds.add(comment.id);
+      else selectedModerationIds.delete(comment.id);
+    });
     selectCell.appendChild(checkbox);
     appendModerationCell(row, formatLogDate(comment.createdAt));
     appendModerationCell(row, comment.nickname || '匿名');
@@ -809,7 +830,7 @@ function aiStatusLabel(status, error = '') {
 }
 
 function aiLanguageLabel(value) {
-  return { ja: '日本語', en: '英語', ko: '韓国語', 'zh-CN': '中国語 簡体', 'zh-TW': '中国語 繁体' }[value] || value || '-';
+  return { ja: '日本語', en: '英語', zh: '中国語', ko: '韓国語', es: 'スペイン語', fr: 'フランス語', de: 'ドイツ語', it: 'イタリア語', pt: 'ポルトガル語', ru: 'ロシア語', uk: 'ウクライナ語', tr: 'トルコ語', ar: 'アラビア語', hi: 'ヒンディー語', bn: 'ベンガル語', th: 'タイ語', vi: 'ベトナム語', id: 'インドネシア語', ms: 'マレー語', tl: 'タガログ語', fa: 'ペルシャ語', ur: 'ウルドゥー語', ne: 'ネパール語', si: 'シンハラ語', km: 'クメール語', lo: 'ラオ語', my: 'ミャンマー語', nl: 'オランダ語', pl: 'ポーランド語', sv: 'スウェーデン語' }[value] || value || '-';
 }
 
 async function retryCommentAi(comment, jobType, button) {
@@ -895,6 +916,7 @@ async function runBulkModeration(action, button) {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ items })
       });
+      if (data.failed === 0) for (const item of items) selectedModerationIds.delete(item.commentId);
       setStatus(`一括操作: 成功${data.succeeded}件。失敗${data.failed}件。`, data.failed > 0);
       await loadModerationComments();
     } catch (error) {
@@ -1769,17 +1791,20 @@ function escapeHtml(value) {
 }
 
 async function boot() {
+  show(adminBootSection, true);
   try {
     await verifySession();
     if (sessionId) await loadSession();
     else {
       showAdminTop();
       await loadActiveSessions();
-
     }
   } catch (error) {
     if (error.status === 401) showLogin();
-    else displayError(error, setLoginStatus);
+    else {
+      show(adminBootSection, true);
+      if (adminBootStatus) adminBootStatus.textContent = `読み込みに失敗しました: ${error.code || error.message || 'API_ERROR'}。再読み込みしてください。`;
+    }
   }
 }
 

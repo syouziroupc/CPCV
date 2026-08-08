@@ -1,6 +1,6 @@
 import { AuthError } from "../auth/errors.js";
 
-export const AI_TARGET_LANGUAGES = Object.freeze(["ja", "en"]);
+export const AI_TARGET_LANGUAGES = Object.freeze(["af", "am", "ar", "ast", "az", "ba", "be", "bg", "bn", "br", "bs", "ca", "ceb", "cs", "cy", "da", "de", "el", "en", "es", "et", "fa", "ff", "fi", "fr", "fy", "ga", "gd", "gl", "gu", "ha", "he", "hi", "hr", "ht", "hu", "hy", "id", "ig", "ilo", "is", "it", "ja", "jv", "ka", "kk", "km", "kn", "ko", "lb", "lg", "ln", "lo", "lt", "lv", "mg", "mk", "ml", "mn", "mr", "ms", "my", "ne", "nl", "no", "ns", "oc", "or", "pa", "pl", "ps", "pt", "ro", "ru", "sd", "si", "sk", "sl", "so", "sq", "sr", "ss", "su", "sv", "sw", "ta", "th", "tl", "tn", "tr", "uk", "ur", "uz", "vi", "wo", "xh", "yi", "yo", "zh", "zu"]);
 export const AI_TRANSLATION_QUALITIES = Object.freeze(["fast", "balanced", "accurate"]);
 export const AI_JOB_TYPES = Object.freeze(["moderation", "translation"]);
 export const AI_RECOMMENDATIONS = Object.freeze(["allow", "review", "hide"]);

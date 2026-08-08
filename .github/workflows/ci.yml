@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -61,49 +61,3 @@ jobs:
         run: |
           npm audit
           npm audit --omit=dev
-
-  apply-user-stability-patch:
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/agent/fix-ui-auth-state-language-20260808') || (github.event_name == 'pull_request' && github.head_ref == 'agent/fix-ui-auth-state-language-20260808')
-    name: Apply user-facing stability patch
-    runs-on: ubuntu-latest
-    timeout-minutes: 120
-    steps:
-      - name: Checkout patch branch
-        uses: actions/checkout@v4
-        with:
-          ref: agent/fix-ui-auth-state-language-20260808
-          fetch-depth: 0
-          token: ${{ github.token }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Apply and validate patch
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm ci
-          python3 scripts/apply-user-stability-patch.py
-          python3 scripts/apply-stage7-language-test-update.py
-          node --check public/assets/admin.js
-          node --check public/assets/master.js
-          node --check public/assets/account.js
-          node --check public/assets/organization-settings.js
-          node --check src/content-filter/language.js
-          node --check src/ai/provider.js
-          node scripts/test-user-facing-stability.mjs
-          npm run check:stage08
-          npm run test:owner-bootstrap
-          npm run deploy:dry-run
-          git checkout origin/master -- .github/workflows/ci.yml
-          git rm scripts/apply-user-stability-patch.py scripts/apply-stage7-language-test-update.py
-          git config user.name "cpcv-stability-fix"
-          git config user.email "actions@users.noreply.github.com"
-          git add -A
-          git commit -m "Fix navigation auth state selections and language support"
-          node scripts/verify-source-manifest.mjs
-          test -z "$(git status --porcelain)"
-          git push origin HEAD:agent/fix-ui-auth-state-language-20260808
