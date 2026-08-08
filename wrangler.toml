@@ -94,12 +94,12 @@ simple = { limit = 30, period = 60 }
 # 720 RPM Translation limit.
 [[ratelimits]]
 name = "AI_TRANSLATION_RATE_LIMITER"
-namespace_id = "826071905"
+namespace_id = "826071905" # translation ingress capacity
 simple = { limit = 990, period = 60 }
 
 [[ratelimits]]
 name = "AI_TRANSLATION_DEDICATED_RATE_LIMITER"
-namespace_id = "826071908"
+namespace_id = "826071908" # dedicated Translation task capacity
 simple = { limit = 700, period = 60 }
 
 # Normal moderation uses multilingual embeddings. Keep a margin below the
@@ -107,14 +107,14 @@ simple = { limit = 700, period = 60 }
 # changing moderation code if account limits are increased.
 [[ratelimits]]
 name = "AI_MODERATION_CLASSIFIER_RATE_LIMITER"
-namespace_id = "826071907"
+namespace_id = "826071907" # multilingual embedding moderation capacity
 simple = { limit = 2800, period = 60 }
 
 # Text-generation translation overflow and legacy moderation fallback share a
 # single capacity namespace below the 300 RPM Text Generation task limit.
 [[ratelimits]]
 name = "AI_MODERATION_RATE_LIMITER"
-namespace_id = "826071906"
+namespace_id = "826071906" # shared Text Generation capacity
 simple = { limit = 290, period = 60 }
 
 [vars]
