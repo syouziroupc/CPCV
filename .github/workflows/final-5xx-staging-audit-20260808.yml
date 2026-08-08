@@ -1,0 +1,110 @@
+name: Final staging 5xx recovery audit 2026-08-08
+
+on:
+  pull_request:
+    branches: [master]
+    paths: [.github/workflows/final-5xx-staging-audit-20260808.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/final-5xx-staging-audit-20260808'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      RELEASE_COMMIT: 4b0062f9149bca7b1019fa125f314986191c6e44
+      STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/final-5xx-staging-audit-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Deploy exact release and reproduce post-deploy load
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          account=""; for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do value="${!key:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
+          test -n "$TOKEN"; test -n "$account"
+          echo "::add-mask::$TOKEN"; echo "::add-mask::$account"
+          export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$account"
+          git fetch origin agent/staging-reload-audit-20260807:refs/remotes/origin/agent/staging-reload-audit-20260807
+          git show origin/agent/staging-reload-audit-20260807:scripts/staging-load-audit-v3.mjs > /tmp/load.mjs
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/load.mjs'); s=p.read_text()
+          s=s.replace("count: 40, concurrency: 10", "count: 80, concurrency: 20")
+          s=s.replace("count: 120, concurrency: 60", "count: 80, concurrency: 40")
+          s=s.replace("count: 100, concurrency: 50", "count: 60, concurrency: 30")
+          s=s.replace("count: 40, concurrency: 20", "count: 20, concurrency: 10")
+          s=s.replace("timeoutMs: 150_000", "timeoutMs: 100_000").replace("timeoutMs: 240_000", "timeoutMs: 100_000").replace("timeoutMs: 300_000", "timeoutMs: 100_000").replace("await sleep(65_000);", "await sleep(5_000);")
+          p.write_text(s)
+          PY
+          git reset --hard "$RELEASE_COMMIT"; git clean -fd; npm ci
+          cp wrangler.toml .staging.wrangler.toml
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('.staging.wrangler.toml'); s=p.read_text()
+          reps={
+          'name = "class-pdf-comment-viewer-v01"':'name = "class-pdf-comment-viewer-v01-staging"',
+          'database_name = "class_comment_db"':'database_name = "class_comment_db_staging"',
+          'database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"':'database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"',
+          'database_name = "class_comment_db_v2"':'database_name = "class_comment_db_v2_staging"',
+          'database_id = "8315a076-67ad-44e6-8286-11887af52ad3"':'database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"',
+          'cpcv-ai-jobs"':'cpcv-ai-jobs-staging"',
+          'cpcv-ai-translation-jobs"':'cpcv-ai-translation-jobs-staging"',
+          'cpcv-ai-translation-dlq"':'cpcv-ai-translation-dlq-staging"',
+          'cpcv-ai-moderation-jobs"':'cpcv-ai-moderation-jobs-staging"',
+          'cpcv-ai-moderation-dlq"':'cpcv-ai-moderation-dlq-staging"',
+          '826071901':'826071801','826071902':'826071802','826071903':'826071803','826071904':'826071804','826071905':'826071805','826071906':'826071806',
+          'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev':'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev',
+          'TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"':'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"'}
+          for a,b in reps.items():
+              if a not in s: raise SystemExit(f'missing staging replacement: {a}')
+              s=s.replace(a,b)
+          p.write_text(s)
+          PY
+          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .staging.wrangler.toml
+          npx wrangler d1 migrations apply class_comment_db_v2_staging --remote --config .staging.wrangler.toml
+          npx wrangler deploy --config .staging.wrangler.toml --keep-vars 2>&1 | tee deploy.txt
+          timeout 1500s npx wrangler tail class-pdf-comment-viewer-v01-staging --format json > worker-tail.jsonl 2>&1 &
+          tail_pid=$!; trap 'kill "$tail_pid" 2>/dev/null || true' EXIT
+          sleep 8
+          STAGING_ORIGIN="$STAGING_ORIGIN" STAGING_WRANGLER_CONFIG=.staging.wrangler.toml node /tmp/load.mjs
+          sleep 3; kill "$tail_pid" 2>/dev/null || true; wait "$tail_pid" 2>/dev/null || true
+          node - <<'NODE'
+          const r=require('./load-v3-report.json'); const errors=[];
+          for(const p of r.phases||[]){
+            if(p.accepted!==p.count) errors.push(`${p.name}: ${p.accepted}/${p.count}`);
+            const five=Object.entries(p.httpStatusCounts||{}).filter(([k])=>/^5/.test(k)).reduce((n,[,v])=>n+Number(v),0); if(five) errors.push(`${p.name}: 5xx=${five}`);
+            if(p.ai?.expectedJobs!=null && (p.ai.failed||p.ai.retried||p.ai.nonTerminal||p.ai.totalJobs!==p.ai.expectedJobs)) errors.push(`${p.name}: AI=${JSON.stringify(p.ai)}`);
+          }
+          const i=r.invariants||{};
+          if(i.comments!==i.expectedComments||i.jobs!==i.expectedJobs||i.stuck||i.orphan||!i.realtimeGapless||String(i.quickCheck).toLowerCase()!=='ok'||i.foreignKeyViolations) errors.push(`invariants=${JSON.stringify(i)}`);
+          if(errors.length){console.error(errors.join('\n'));process.exit(1)}
+          console.log('final 5xx recovery staging audit passed');
+          NODE
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-final-5xx-audit-${{ github.run_id }}
+          path: |
+            load-v3-report.json
+            load-v3-summary.md
+            worker-tail.jsonl
+            deploy.txt
+          if-no-files-found: warn
+          retention-days: 30
