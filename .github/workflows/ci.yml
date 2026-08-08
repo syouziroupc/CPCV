@@ -89,6 +89,16 @@ jobs:
         run: |
           sed -i 's/if count != 1:/if count < 1:/' scripts/ai-response-hardening-patch.py
           python scripts/ai-response-hardening-patch.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/test-ai-v2.mjs')
+          text = path.read_text(encoding='utf-8')
+          old = 'check("admin labels AI verdict as reference only", admin.includes("AI参考") && !admin.includes("AI自動削除"));'
+          new = 'check("admin distinguishes provider AI from local protection advice", admin.includes("local_privacy_guard") && admin.includes("ローカル保護") && admin.includes("sourceLabel") && !admin.includes("AI自動削除"));'
+          if text.count(old) != 1:
+              raise SystemExit('expected legacy AI reference assertion once')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
 
       - name: Remove temporary machinery and restore permanent CI
         run: |
