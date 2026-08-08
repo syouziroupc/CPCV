@@ -2,11 +2,14 @@ import { AI_CATEGORIES, normalizeModerationResult } from "./validation.js";
 import { runModerationModel as runLegacyModerationModel } from "./provider-base.js";
 
 const DEFAULT_MODEL = "@cf/google/embeddinggemma-300m";
-const PROMPT_VERSION = "moderation-embedding-v1";
+const PROMPT_VERSION = "moderation-embedding-v2-batched";
 const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_BATCH_SIZE = 20;
+const DEFAULT_BATCH_WINDOW_MS = 8;
 const CLASSIFIER_LIMIT_KEY = "workers-ai-moderation-embedding";
 const VALID_CATEGORIES = new Set(AI_CATEGORIES);
 const prototypeCache = new Map();
+const batchStates = new WeakMap();
 
 const PROFILES = Object.freeze([
   {
@@ -61,14 +64,13 @@ export async function runModerationModel(env, input, options = {}) {
     return runLegacyModerationModel(env, input, options);
   }
   const model = configuredModel || DEFAULT_MODEL;
-  try {
-    const capacity = await acquireClassifierCapacity(env);
-    if (!capacity) throw codedError("AI_CLASSIFIER_RATE_LIMITED", true);
 
-    const usageEventId = typeof options.reserveUsage === "function"
-      ? await options.reserveUsage(model)
-      : null;
-    const result = await classifyWithEmbeddings(env, model, input);
+  const usageEventId = typeof options.reserveUsage === "function"
+    ? await options.reserveUsage(model)
+    : null;
+
+  try {
+    const result = await enqueueEmbeddingClassification(env, model, input);
     return {
       ...result.normalized,
       provider: "workers_ai",
@@ -87,58 +89,149 @@ export async function runModerationModel(env, input, options = {}) {
   }
 }
 
-async function classifyWithEmbeddings(env, model, input) {
-  const message = String(input?.message || "").trim();
-  if (!message) throw codedError("AI_RESPONSE_INVALID", false);
+function enqueueEmbeddingClassification(env, model, input) {
+  return new Promise((resolve, reject) => {
+    const state = batchState(env.AI, model);
+    state.items.push({ env, input, resolve, reject });
+    const limit = classifierBatchSize(env);
+
+    if (state.items.length >= limit && !state.flushing) {
+      if (state.timer) clearTimeout(state.timer);
+      state.timer = null;
+      queueMicrotask(() => flushEmbeddingBatch(state, model));
+      return;
+    }
+    scheduleBatchFlush(state, model, env);
+  });
+}
+
+function batchState(binding, model) {
+  let byModel = batchStates.get(binding);
+  if (!byModel) {
+    byModel = new Map();
+    batchStates.set(binding, byModel);
+  }
+  let state = byModel.get(model);
+  if (!state) {
+    state = { items: [], timer: null, flushing: false };
+    byModel.set(model, state);
+  }
+  return state;
+}
+
+function scheduleBatchFlush(state, model, env) {
+  if (state.timer || state.flushing || !state.items.length) return;
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    void flushEmbeddingBatch(state, model);
+  }, classifierBatchWindowMs(env));
+}
+
+async function flushEmbeddingBatch(state, model) {
+  if (state.flushing || !state.items.length) return;
+  state.flushing = true;
+  if (state.timer) clearTimeout(state.timer);
+  state.timer = null;
+
+  const env = state.items[0].env;
+  const size = Math.min(classifierBatchSize(env), state.items.length);
+  const batch = state.items.splice(0, size);
+
+  try {
+    const capacity = await acquireClassifierCapacity(env);
+    if (!capacity) throw codedError("AI_CLASSIFIER_RATE_LIMITED", true);
+    const results = await classifyBatchWithEmbeddings(
+      env,
+      model,
+      batch.map((item) => item.input)
+    );
+    if (results.length !== batch.length) throw codedError("AI_RESPONSE_INVALID", true);
+    for (let index = 0; index < batch.length; index += 1) {
+      batch[index].resolve(results[index]);
+    }
+  } catch (error) {
+    for (const item of batch) item.reject(error);
+  } finally {
+    state.flushing = false;
+    if (state.items.length) {
+      queueMicrotask(() => flushEmbeddingBatch(state, model));
+    }
+  }
+}
+
+async function classifyBatchWithEmbeddings(env, model, inputs) {
+  const messages = inputs.map((input) => String(input?.message || "").trim());
+  if (messages.some((message) => !message)) {
+    throw codedError("AI_RESPONSE_INVALID", false);
+  }
 
   const timeout = classifierTimeoutMs(env);
   let prototypes = prototypeCache.get(model);
   let response;
-  let messageVector;
+  let messageVectors;
 
   if (!prototypes) {
     response = await withTimeout(
       Promise.resolve(
         env.AI.run(
           model,
-          { text: [message, ...PROFILES.map((profile) => profile.text)] },
+          {
+            text: [
+              ...messages,
+              ...PROFILES.map((profile) => profile.text)
+            ]
+          },
           gatewayOptions(env)
         )
       ),
       timeout
     );
     const vectors = extractVectors(response);
-    if (vectors.length !== PROFILES.length + 1) throw codedError("AI_RESPONSE_INVALID", true);
-    messageVector = vectors[0];
-    prototypes = vectors.slice(1);
+    if (vectors.length !== messages.length + PROFILES.length) {
+      throw codedError("AI_RESPONSE_INVALID", true);
+    }
+    messageVectors = vectors.slice(0, messages.length);
+    prototypes = vectors.slice(messages.length);
     prototypeCache.set(model, prototypes);
   } else {
     response = await withTimeout(
-      Promise.resolve(env.AI.run(model, { text: [message] }, gatewayOptions(env))),
+      Promise.resolve(
+        env.AI.run(model, { text: messages }, gatewayOptions(env))
+      ),
       timeout
     );
     const vectors = extractVectors(response);
-    if (vectors.length !== 1) throw codedError("AI_RESPONSE_INVALID", true);
-    messageVector = vectors[0];
+    if (vectors.length !== messages.length) {
+      throw codedError("AI_RESPONSE_INVALID", true);
+    }
+    messageVectors = vectors;
   }
 
   if (
-    !Array.isArray(messageVector)
-    || !messageVector.length
-    || prototypes.some((vector) => !Array.isArray(vector) || vector.length !== messageVector.length)
+    prototypes.some((vector) => !Array.isArray(vector) || !vector.length)
+    || messageVectors.some(
+      (vector) => !Array.isArray(vector)
+        || !vector.length
+        || vector.length !== prototypes[0].length
+    )
   ) {
     throw codedError("AI_RESPONSE_INVALID", true);
   }
 
+  const rawPerItem = Math.max(1, Math.ceil(structuredLength(response) / inputs.length));
+  return inputs.map((input, index) => ({
+    normalized: classifyVector(input, messageVectors[index], prototypes, env),
+    rawOutputLength: rawPerItem
+  }));
+}
+
+function classifyVector(input, messageVector, prototypes, env) {
   if (input?.promptInjection) {
-    return {
-      normalized: normalizeModerationResult({
-        recommendation: "review",
-        confidence: 0.98,
-        categories: ["prompt_injection"]
-      }),
-      rawOutputLength: structuredLength(response)
-    };
+    return normalizeModerationResult({
+      recommendation: "review",
+      confidence: 0.98,
+      categories: ["prompt_injection"]
+    });
   }
 
   const scored = PROFILES.map((profile, index) => ({
@@ -188,7 +281,9 @@ async function classifyWithEmbeddings(env, model, input) {
     categories = [...new Set([...categories, ...dictionaryCategories])]
       .filter((item) => VALID_CATEGORIES.has(item))
       .slice(0, 9);
-    if (!categories.length) categories = [top.category === "safe" ? "other" : top.category];
+    if (!categories.length) {
+      categories = [top.category === "safe" ? "other" : top.category];
+    }
   }
 
   const separation = Math.min(0.45, Math.abs(margin));
@@ -198,14 +293,11 @@ async function classifyWithEmbeddings(env, model, input) {
       ? Math.min(0.92, 0.56 + separation * 1.6)
       : Math.min(0.98, 0.58 + separation * 1.8);
 
-  return {
-    normalized: normalizeModerationResult({
-      recommendation,
-      confidence,
-      categories
-    }),
-    rawOutputLength: structuredLength(response)
-  };
+  return normalizeModerationResult({
+    recommendation,
+    confidence,
+    categories
+  });
 }
 
 function extractDictionaryCategories(value) {
@@ -268,13 +360,33 @@ async function acquireClassifierCapacity(env) {
 function allowLegacyFallback(env, error) {
   if (String(env?.AI_MODERATION_CLASSIFIER_FALLBACK || "1") === "0") return false;
   return [
-    "AI_CLASSIFIER_RATE_LIMITED",
-    "AI_PROVIDER_RATE_LIMITED",
     "AI_PROVIDER_TIMEOUT",
     "AI_PROVIDER_UNAVAILABLE",
     "AI_PROVIDER_FAILED",
     "AI_RESPONSE_INVALID"
   ].includes(String(error?.aiCode || ""));
+}
+
+function classifierBatchSize(env) {
+  return Math.round(
+    configuredNumber(
+      env?.AI_MODERATION_MODEL_BATCH_SIZE,
+      DEFAULT_BATCH_SIZE,
+      1,
+      100
+    )
+  );
+}
+
+function classifierBatchWindowMs(env) {
+  return Math.round(
+    configuredNumber(
+      env?.AI_MODERATION_BATCH_WINDOW_MS,
+      DEFAULT_BATCH_WINDOW_MS,
+      0,
+      25
+    )
+  );
 }
 
 function classifierTimeoutMs(env) {
