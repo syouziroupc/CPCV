@@ -28,7 +28,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Apply audited fixes
-        run: python scripts/system-wide-hardening-patch.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('scripts/system-wide-hardening-patch.py')
+          text = path.read_text(encoding='utf-8')
+          old = "'''    const response = await fetch(`/api/private/sessions/${encodeURIComponent(sessionId)}/comments/export`, {"
+          new = "'''  const response = await fetch(`/api/private/sessions/${encodeURIComponent(sessionId)}/comments/export`, {"
+          if old not in text:
+              raise SystemExit('viewer export patch marker not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python scripts/system-wide-hardening-patch.py
       - name: Remove temporary audit machinery
         run: |
           git rm -f scripts/system-wide-hardening-patch.py scripts/system-bug-audit.mjs \
