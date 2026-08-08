@@ -341,9 +341,10 @@ async function testQueueBehavior(h) {
 function testValidationAndClientBoundaries() {
   check("moderation output validator accepts bounded schema", normalizeModerationResult({ recommendation: "review", confidence: 0.5, categories: ["spam"] }).confidenceMilli === 500);
   check("translation output validator trims valid output", normalizeTranslationResult({ translation: " hello " }).translatedText === "hello");
+  check("M2M100 target languages are accepted", requireAiTargetLanguage("fr") === "fr" && requireAiTargetLanguage("ko") === "ko");
   let invalidLanguage = false;
-  try { requireAiTargetLanguage("fr"); } catch (error) { invalidLanguage = error?.code === "AI_TARGET_LANGUAGE_INVALID"; }
-  check("unsupported target languages are rejected", invalidLanguage);
+  try { requireAiTargetLanguage("xx-unsupported"); } catch (error) { invalidLanguage = error?.code === "AI_TARGET_LANGUAGE_INVALID"; }
+  check("languages outside the M2M100 set are rejected", invalidLanguage);
   const admin = readFileSync(resolve(ROOT, "public/assets/admin.js"), "utf8");
   const viewer = readFileSync(resolve(ROOT, "public/assets/viewer.js"), "utf8");
   const wrangler = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");

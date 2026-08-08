@@ -149,6 +149,17 @@
           </form>
           <p id="pendingEmail" class="muted break"></p><p id="status" class="status" aria-live="polite"></p>
         </section>
+        <section id="passwordSettings" class="workspace-panel">
+          <h2>パスワードを変更</h2>
+          <p class="muted">このフォームを送信した場合だけパスワードを変更します。通常のログインや画面移動でパスワードが変更されることはありません。</p>
+          <form id="passwordForm">
+            <label class="label" for="passwordCurrent">現在のパスワード</label><input id="passwordCurrent" class="input" type="password" autocomplete="current-password" maxlength="128" required>
+            <label class="label" for="passwordNew">新しいパスワード</label><input id="passwordNew" class="input" type="password" autocomplete="new-password" maxlength="128" required>
+            <label class="label" for="passwordConfirm">新しいパスワードを確認</label><input id="passwordConfirm" class="input" type="password" autocomplete="new-password" maxlength="128" required>
+            <button id="passwordButton" class="button primary auth-submit" type="submit">パスワードを変更</button>
+          </form>
+          <p id="passwordStatus" class="status" aria-live="polite"></p>
+        </section>
         <section id="loginSettings" class="workspace-panel">
           <h2>ログイン状態</h2>
           <p class="muted">この端末からログアウトします。</p>

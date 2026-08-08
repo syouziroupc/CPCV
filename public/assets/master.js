@@ -8,6 +8,8 @@ const masterOrganization = $('masterOrganization');
 const masterLoginButton = $('masterLoginButton');
 const masterLogoutButton = $('masterLogoutButton');
 const masterLoginStatus = $('masterLoginStatus');
+const masterBootSection = $('masterBootSection');
+const masterBootStatus = $('masterBootStatus');
 const masterStatus = $('masterStatus');
 const masterTimeLeft = $('masterTimeLeft');
 const organizationName = $('organizationName');
@@ -48,11 +50,12 @@ async function api(path, options = {}) {
 }
 
 function showLogin(message = '', error = false) {
+  show(masterBootSection, false);
   show(loginSection, true); show(masterPanel, false); show(masterLogoutButton, false);
   csrfToken = ''; identity = null; expiresAt = '';
   setLoginStatus(message, error); masterLoginId.focus();
 }
-function showPanel() { show(loginSection, false); show(masterPanel, true); show(masterLogoutButton, true); }
+function showPanel() { show(masterBootSection, false); show(loginSection, false); show(masterPanel, true); show(masterLogoutButton, true); }
 
 function applyIdentity(data) {
   csrfToken = data.csrfToken || csrfToken;
@@ -82,7 +85,7 @@ masterLoginButton.addEventListener('click', async () => {
     }
     masterPassword.value = '';
     show(masterOrganizationGroup, false);
-    applyIdentity(data); showPanel(); await loadPanel();
+    applyIdentity(data); showPanel(); await loadPanel(data);
   } catch (error) {
     if (error.code === 'ORGANIZATION_SELECTION_REQUIRED') {
       masterOrganization.textContent = '';
@@ -119,9 +122,10 @@ inviteMemberButton.addEventListener('click', async () => {
   finally { inviteMemberButton.disabled = false; inviteMemberButton.textContent = '招待メールを送る'; }
 });
 
-async function loadPanel() {
-  const [sessionData, organizationData] = await Promise.all([api('/api/auth/session'), api('/api/org')]);
-  applyIdentity(sessionData); organizationName.textContent = organizationData.organization.name;
+async function loadPanel(sessionData = identity) {
+  const organizationData = await api('/api/org');
+  if (sessionData) applyIdentity(sessionData);
+  organizationName.textContent = organizationData.organization.name;
   await Promise.all([loadInvitations(), loadMembers(), loadSessions(), loadAuditLogs()]);
 }
 
@@ -251,7 +255,19 @@ function updateTimeLeft() { const ms = Date.parse(expiresAt || '') - Date.now();
 function showApiError(error) { if (error?.status === 401) return showLogin('Sessionが切れました。もう一度ログインしてください。', true); setStatus(`操作できません: ${error?.code || error?.message || 'API_ERROR'}`, true); }
 
 async function boot() {
-  try { const data = await api('/api/auth/session'); if (!['owner', 'admin'].includes(data.organization?.role)) return showLogin('この画面はOwnerまたはAdmin専用です。', true); applyIdentity(data); showPanel(); await loadPanel(); }
-  catch (error) { if (error.status === 401) showLogin(); else showLogin(`起動できません: ${error.code || error.message}`, true); }
+  show(masterBootSection, true);
+  try {
+    const data = await api('/api/auth/session');
+    if (!['owner', 'admin'].includes(data.organization?.role)) return showLogin('この画面はOwnerまたはAdmin専用です。', true);
+    applyIdentity(data);
+    showPanel();
+    await loadPanel(data);
+  } catch (error) {
+    if (error.status === 401) showLogin();
+    else {
+      show(masterBootSection, true);
+      if (masterBootStatus) masterBootStatus.textContent = `読み込みに失敗しました: ${error.code || error.message || 'API_ERROR'}。再読み込みしてください。`;
+    }
+  }
 }
 setInterval(updateTimeLeft, 30_000); boot();

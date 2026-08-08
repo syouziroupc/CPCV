@@ -76,7 +76,7 @@
     "staging:materialize-config": "node scripts/materialize-staging-config.mjs",
     "manifest:source": "node scripts/generate-source-manifest.mjs",
     "verify:source-manifest": "node scripts/verify-source-manifest.mjs",
-    "check:v0810": "node scripts/test-v0810-usability.mjs && node scripts/test-v0810-security-ui.mjs && npm run test:ai-quality-ui",
+    "check:v0810": "node scripts/test-v0810-usability.mjs && node scripts/test-v0810-security-ui.mjs && npm run test:ai-quality-ui && node scripts/test-user-facing-stability.mjs",
     "visual:v0810": "python scripts/render-v0810-visuals.py",
     "check:security-ui": "node scripts/test-v0810-security-ui.mjs",
     "test:ai-quality-ui": "node scripts/test-ai-quality-ui-refinement.mjs",

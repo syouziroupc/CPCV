@@ -6,7 +6,7 @@
   <title>授業管理 | CPCV</title>
   <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav1">
 </head>
-<body class="page admin-page auth-view">
+<body class="page admin-page">
   <a class="skip-link" href="#mainContent">本文へ移動</a>
   <main id="mainContent" class="admin-shell">
     <header class="app-header app-topbar">
@@ -20,7 +20,9 @@
       </nav>
     </header>
 
-    <section id="loginSection" class="auth-shell admin-login-shell" aria-labelledby="teacherLoginHeading">
+    <section id="adminBootSection" class="section"><p id="adminBootStatus" class="status">授業管理を読み込んでいます。</p></section>
+
+    <section id="loginSection" class="auth-shell admin-login-shell hidden" aria-labelledby="teacherLoginHeading">
       <div class="auth-intro">
         <p class="eyebrow">先生用</p>
         <h1 id="teacherLoginHeading">授業管理へログイン</h1>
@@ -194,7 +196,7 @@
               </div>
               <div class="settings-grid ai-translation-settings">
                 <label class="field-control" for="sessionAiTargetLanguage">翻訳先
-                  <select id="sessionAiTargetLanguage" class="select"><option value="ja">日本語</option><option value="en">英語</option></select>
+                  <select id="sessionAiTargetLanguage" class="select"><option value="ja">日本語</option><option value="en">English</option><option value="zh">中文</option><option value="ko">한국어</option><option value="es">Español</option><option value="fr">Français</option><option value="de">Deutsch</option><option value="it">Italiano</option><option value="pt">Português</option><option value="ru">Русский</option><option value="uk">Українська</option><option value="tr">Türkçe</option><option value="ar">العربية</option><option value="hi">हिन्दी</option><option value="bn">বাংলা</option><option value="th">ไทย</option><option value="vi">Tiếng Việt</option><option value="id">Bahasa Indonesia</option><option value="ms">Bahasa Melayu</option><option value="tl">Filipino / Tagalog</option><option value="fa">فارسی</option><option value="ur">اردو</option><option value="ne">नेपाली</option><option value="si">සිංහල</option><option value="km">ខ្មែរ</option><option value="lo">ລາວ</option><option value="my">မြန်မာ</option><option value="nl">Nederlands</option><option value="pl">Polski</option><option value="sv">Svenska</option></select>
                 </label>
                 <label class="field-control" for="sessionAiTranslationQuality">翻訳モード
                   <select id="sessionAiTranslationQuality" class="select">

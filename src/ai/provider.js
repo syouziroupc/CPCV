@@ -3,8 +3,9 @@ export { runModerationModel } from "./provider-base.js";
 
 const PROMPT_VERSION = "translation-v5-current-model-runtime";
 const DEDICATED_MODEL = "@cf/meta/m2m100-1.2b";
-const DEDICATED_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);
-const SUPPORTED_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);
+const M2M_LANGUAGES = ["af", "am", "ar", "ast", "az", "ba", "be", "bg", "bn", "br", "bs", "ca", "ceb", "cs", "cy", "da", "de", "el", "en", "es", "et", "fa", "ff", "fi", "fr", "fy", "ga", "gd", "gl", "gu", "ha", "he", "hi", "hr", "ht", "hu", "hy", "id", "ig", "ilo", "is", "it", "ja", "jv", "ka", "kk", "km", "kn", "ko", "lb", "lg", "ln", "lo", "lt", "lv", "mg", "mk", "ml", "mn", "mr", "ms", "my", "ne", "nl", "no", "ns", "oc", "or", "pa", "pl", "ps", "pt", "ro", "ru", "sd", "si", "sk", "sl", "so", "sq", "sr", "ss", "su", "sv", "sw", "ta", "th", "tl", "tn", "tr", "uk", "ur", "uz", "vi", "wo", "xh", "yi", "yo", "zh", "zu"];
+const DEDICATED_LANGUAGES = new Set(M2M_LANGUAGES);
+const SUPPORTED_LANGUAGES = new Set(M2M_LANGUAGES);
 const SHARED_TEXT_GENERATION_KEY = "workers-ai-moderation";
 
 export async function runTranslationModel(env, input, options = {}) {

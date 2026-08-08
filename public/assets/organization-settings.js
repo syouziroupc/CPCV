@@ -37,6 +37,16 @@ if (section) {
     return data;
   }
 
+  function sharedIdentity() {
+    if (!window.__cpcvSessionPromise) {
+      window.__cpcvSessionPromise = api('/api/auth/session').catch((error) => {
+        window.__cpcvSessionPromise = null;
+        throw error;
+      });
+    }
+    return window.__cpcvSessionPromise;
+  }
+
   function setStatus(id, text, error = false) {
     const node = $(id);
     if (!node) return;
@@ -132,7 +142,7 @@ if (section) {
   }
 
   async function loadIdentity() {
-    identity = await api('/api/auth/session');
+    identity = await sharedIdentity();
     csrfToken = identity.csrfToken || '';
     if (!visible()) return;
     section.classList.remove('hidden');
