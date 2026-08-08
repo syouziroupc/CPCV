@@ -47,8 +47,7 @@ export async function handlePublicV2Api(request, env) {
     const input = await readJsonObject(request, { maxBytes: 4096 });
     assertOnlyFields(input, ["nickname", "message", "idempotencyKey", "clientId"]);
     const normalized = normalizeCommentInput(input);
-    const stub = env.COMMENT_ROOM.get(env.COMMENT_ROOM.idFromName(session.id));
-    const roomResponse = await fetchCommentRoomMessage(stub, {
+    const roomResponse = await fetchCommentRoomMessage(env.COMMENT_ROOM, session.id, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -85,22 +84,46 @@ export async function handlePublicV2Api(request, env) {
 
 const COMMENT_ROOM_RETRY_DELAYS_MS = Object.freeze([80, 240, 720, 1600, 3200]);
 
-async function fetchCommentRoomMessage(stub, init) {
+async function fetchCommentRoomMessage(namespace, sessionId, init) {
   let lastError = null;
   for (let attempt = 0; attempt <= COMMENT_ROOM_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
+      // A transport exception can poison a DurableObjectStub. Recreate it for
+      // every attempt as recommended by Cloudflare.
+      const stub = namespace.get(namespace.idFromName(sessionId));
       const response = await stub.fetch("https://comment-room/message", init);
       if (response.status < 500 || attempt >= COMMENT_ROOM_RETRY_DELAYS_MS.length) return response;
-      console.warn("CommentRoom 5xx retry", attempt + 1, response.status);
+      console.warn(JSON.stringify({
+        event: "comment_room_5xx_retry",
+        sessionId,
+        attempt: attempt + 1,
+        status: response.status
+      }));
       await new Promise((resolve) => setTimeout(resolve, COMMENT_ROOM_RETRY_DELAYS_MS[attempt]));
     } catch (error) {
       lastError = error;
-      if (attempt >= COMMENT_ROOM_RETRY_DELAYS_MS.length) throw error;
-      console.warn("CommentRoom transport retry", attempt + 1, String(error?.name || "ERROR"));
+      if (error?.overloaded) {
+        console.warn(JSON.stringify({ event: "comment_room_overloaded", sessionId }));
+        throw new AuthError(503, "COMMENT_ROOM_OVERLOADED");
+      }
+      if (error?.retryable === false || attempt >= COMMENT_ROOM_RETRY_DELAYS_MS.length) {
+        throw new AuthError(503, "COMMENT_ROOM_UNAVAILABLE");
+      }
+      console.warn(JSON.stringify({
+        event: "comment_room_transport_retry",
+        sessionId,
+        attempt: attempt + 1,
+        code: String(error?.name || error?.code || "ERROR").slice(0, 80)
+      }));
       await new Promise((resolve) => setTimeout(resolve, COMMENT_ROOM_RETRY_DELAYS_MS[attempt]));
     }
   }
-  throw lastError || new Error("COMMENT_ROOM_UNAVAILABLE");
+  console.error(JSON.stringify({
+    event: "comment_room_unavailable",
+    sessionId,
+    code: String(lastError?.name || lastError?.code || "ERROR").slice(0, 80)
+  }));
+  throw new AuthError(503, "COMMENT_ROOM_UNAVAILABLE");
 }
 
 

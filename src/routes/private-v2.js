@@ -47,6 +47,7 @@ import {
   issueConnectionTicket,
   realtimeEventStatements
 } from "../realtime/repository.js";
+import { dispatchRealtimeEvent } from "../realtime/dispatch.js";
 
 import {
   getPrivateSessionAiSettings,
@@ -151,11 +152,11 @@ export async function handlePrivateV2Api(request, env, ctx = { waitUntil() {} })
   }
   if (parts[4] === "comments" && parts[5] === "moderate-bulk" && parts.length === 6) {
     if (request.method !== "POST") throw methodNotAllowed("POST");
-    return moderateCommentsBulk(request, env, auth, session);
+    return moderateCommentsBulk(request, env, auth, session, ctx);
   }
   if (parts[4] === "comments" && parts[5] && parts[6] === "moderate" && parts.length === 7) {
     if (request.method !== "POST") throw methodNotAllowed("POST");
-    return moderateSingleComment(request, env, auth, session, decodeCommentId(parts[5]));
+    return moderateSingleComment(request, env, auth, session, decodeCommentId(parts[5]), ctx);
   }
   if (parts[4] === "comments" && parts[5] && parts[6] === "moderation" && parts.length === 7) {
     if (request.method !== "GET") throw methodNotAllowed("GET");
@@ -540,7 +541,7 @@ async function deleteSession(request, env, auth, current, ctx) {
   return authJson({ ok: true, sequence: event?.sequence || null });
 }
 
-async function moderateSingleComment(request, env, auth, session, commentId) {
+async function moderateSingleComment(request, env, auth, session, commentId, ctx) {
   const input = await readJsonObject(request);
   rejectOrganizationSelector(request, input);
   assertOnlyFields(input, ["action", "expectedUpdatedAt", "reason"]);
@@ -558,11 +559,11 @@ async function moderateSingleComment(request, env, auth, session, commentId) {
   });
   const delivery = await deliverCommentRealtime(env, session, result.comment, result.action);
   if (result.comment.moderationState === "visible") {
-    void scheduleAiForComment(env, {
+    await scheduleModerationAi(ctx, env, {
       organizationId: session.organization_id,
       liveSessionId: session.id,
       commentId: result.comment.id
-    }).catch((error) => console.error("AI scheduling after moderation failed", safeErrorName(error)));
+    }, "single");
   }
   if (delivery.event && !delivery.delivered) {
     await recordModerationDeliveryFailure(env.DB_V2, auth, session.id, result.comment.id, result.comment.moderationState);
@@ -570,7 +571,7 @@ async function moderateSingleComment(request, env, auth, session, commentId) {
   return authJson({ ok: true, ...result, realtimeDelivered: delivery.delivered, sequence: delivery.event?.sequence || null });
 }
 
-async function moderateCommentsBulk(request, env, auth, session) {
+async function moderateCommentsBulk(request, env, auth, session, ctx) {
   const input = await readJsonObject(request);
   rejectOrganizationSelector(request, input);
   assertOnlyFields(input, ["items"]);
@@ -592,11 +593,11 @@ async function moderateCommentsBulk(request, env, auth, session) {
       });
       const delivery = await deliverCommentRealtime(env, session, result.comment, result.action);
       if (result.comment.moderationState === "visible") {
-        void scheduleAiForComment(env, {
+        await scheduleModerationAi(ctx, env, {
           organizationId: session.organization_id,
           liveSessionId: session.id,
           commentId: result.comment.id
-        }).catch((error) => console.error("AI scheduling after bulk moderation failed", safeErrorName(error)));
+        }, "bulk");
       }
       if (delivery.event && !delivery.delivered) {
         await recordModerationDeliveryFailure(env.DB_V2, auth, session.id, result.comment.id, result.comment.moderationState);
@@ -685,37 +686,14 @@ async function deliverCommentRealtime(env, session, comment, action) {
   }
 }
 
-async function dispatchRealtimeEvent(env, sessionId, event, closeAfter = false) {
-  if (!event) return false;
-  try {
-    const stub = env.COMMENT_ROOM.get(env.COMMENT_ROOM.idFromName(sessionId));
-    const path = closeAfter
-      ? "/close"
-      : event.type === "settings:update"
-        ? "/settings"
-        : event.type === "message:clear"
-          ? "/clear"
-          : ["message:remove", "message:restore"].includes(event.type)
-            ? "/moderation"
-            : "/event";
-    const response = await stub.fetch(`https://comment-room${path}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-realtime-internal": "true"
-      },
-      body: JSON.stringify({
-        organizationId: event.organizationId,
-        liveSessionId: event.liveSessionId,
-        sequence: event.sequence,
-        ...event.payload,
-        comment: event.payload
-      })
-    });
-    return response.ok;
-  } catch {
-    return false;
+async function scheduleModerationAi(ctx, env, input, source) {
+  const task = Promise.resolve(scheduleAiForComment(env, input))
+    .catch((error) => console.error(`AI scheduling after ${source} moderation failed`, safeErrorName(error)));
+  if (typeof ctx?.waitUntil === "function") {
+    ctx.waitUntil(task);
+    return;
   }
+  await task;
 }
 
 async function recordModerationDeliveryFailure(db, auth, sessionId, commentId, moderationState) {

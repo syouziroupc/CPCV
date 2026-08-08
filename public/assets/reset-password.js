@@ -17,13 +17,19 @@ form.addEventListener("submit", async (event) => {
     return;
   }
   button.disabled = true;
-  const result = await api("/api/auth/password/reset", { token, newPassword: password });
-  if (result.response.ok) {
-    form.classList.add("hidden");
-    status.textContent = "パスワードを変更しました。";
-    loginLink.classList.remove("hidden");
-  } else {
-    status.textContent = errorMessage(result.data.error);
+  status.textContent = "変更しています。";
+  try {
+    const result = await api("/api/auth/password/reset", { token, newPassword: password });
+    if (result.response.ok) {
+      form.classList.add("hidden");
+      status.textContent = "パスワードを変更しました。";
+      loginLink.classList.remove("hidden");
+    } else {
+      status.textContent = errorMessage(result.data.error);
+      button.disabled = false;
+    }
+  } catch (error) {
+    status.textContent = errorMessage(error?.code || error?.message || "NETWORK_ERROR");
     button.disabled = false;
   }
 });

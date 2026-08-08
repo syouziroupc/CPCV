@@ -290,41 +290,6 @@ async function deleteExpiredIdempotencyKey(db, commentId, nowIso) {
   ).bind(commentId, nowIso).run();
 }
 
-async function findCommentByIdempotency(db, liveSessionId, key, participantTokenHash, nowIso) {
-  const pdfPageSelect = await pdfPageSelectExpression(db, "comments");
-  return db.prepare(
-    `SELECT id, nickname, message, display_message, message_length, moderation_state,
-            filter_action, filter_ai_required, filter_version,
-            detected_language, language_confidence_milli, unsupported_language,
-            created_at, updated_at, retained_until, deleted_at,
-            ${pdfPageSelect} AS pdf_page_number
-     FROM comments
-     WHERE live_session_id = ?1 AND idempotency_key = ?2
-       AND retained_until > ?3
-       AND participant_id = (
-         SELECT id FROM participants
-         WHERE live_session_id = ?1 AND token_hash = ?4 LIMIT 1
-       )
-     LIMIT 1`
-  ).bind(liveSessionId, key, nowIso, participantTokenHash).first();
-}
-
-async function activeIdempotencyKeyExists(db, liveSessionId, key, nowIso) {
-  const row = await db.prepare(
-    `SELECT 1 AS present FROM comments
-     WHERE live_session_id = ?1 AND idempotency_key = ?2 AND retained_until > ?3
-     LIMIT 1`
-  ).bind(liveSessionId, key, nowIso).first();
-  return Boolean(row?.present);
-}
-
-async function releaseExpiredIdempotencyKey(db, liveSessionId, key, nowIso) {
-  await db.prepare(
-    `DELETE FROM comments
-     WHERE live_session_id = ?1 AND idempotency_key = ?2 AND retained_until <= ?3`
-  ).bind(liveSessionId, key, nowIso).run();
-}
-
 async function findCommentById(db, id) {
   const pdfPageSelect = await pdfPageSelectExpression(db, "comments");
   return db.prepare(

@@ -200,6 +200,9 @@ async function moderationLimiterFailureFailsClosed() {
 function moderationIsNotDoubleCountedAtQueueAdmission() {
   const processor = readFileSync(new URL("../src/ai/processor.js", import.meta.url), "utf8");
   assert.match(processor, /if \(queueKind !== QUEUE_KIND_TRANSLATION\) return true;/);
+  assert.match(processor, /AI_PROVIDER_TIMEOUT/);
+  assert.match(processor, /AI_PROVIDER_UNAVAILABLE/);
+  assert.match(processor, /isTranslationDelay/);
 }
 
 function moderationEnvironment(run, limitCalls = []) {

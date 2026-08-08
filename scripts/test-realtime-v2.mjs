@@ -245,6 +245,22 @@ async function testHibernationHandlers(h) {
   };
   const room = new CommentRoom(state, { DB_V2: h.db });
 
+  const alarmWrites = [];
+  let currentAlarm = Date.now() + 60_000;
+  const alarmRoom = new CommentRoom({
+    getWebSockets() { return []; }, setWebSocketAutoResponse() {}, acceptWebSocket() {},
+    storage: {
+      async getAlarm() { return currentAlarm; },
+      async setAlarm(value) { currentAlarm = value; alarmWrites.push(value); }
+    }
+  }, { DB_V2: h.db });
+  await alarmRoom.scheduleAuthRevalidation();
+  check("new connections do not postpone an earlier auth revalidation alarm", alarmWrites.length === 0, alarmWrites);
+  currentAlarm = Date.now() + 600_000;
+  const lateAlarm = currentAlarm;
+  await alarmRoom.scheduleAuthRevalidation();
+  check("a missing or excessively late auth alarm is moved earlier", alarmWrites.length === 1 && alarmWrites[0] < lateAlarm, alarmWrites);
+
   const bulkSockets = [];
   for (let index = 0; index < 85; index += 1) {
     const authId = `auth_bulk_${index}`;

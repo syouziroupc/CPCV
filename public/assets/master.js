@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from "./http-client.js";
+
 const $ = (id) => document.getElementById(id);
 const loginSection = $('masterLoginSection');
 const masterPanel = $('masterPanel');
@@ -35,7 +37,7 @@ async function api(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) headers.set('x-csrf-token', csrfToken);
-  const response = await fetch(path, { cache: 'no-store', credentials: 'same-origin', ...options, method, headers });
+  const response = await fetchWithTimeout(path, { cache: 'no-store', credentials: 'same-origin', ...options, method, headers });
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
@@ -252,7 +254,14 @@ function mutedText(text) { const element = document.createElement('p'); element.
 function roleLabel(role) { return { owner: 'Owner', admin: 'Admin', teacher: 'Teacher' }[role] || role || ''; }
 function statusLabel(status) { return { active: '有効', suspended: '停止', removed: '解除済み' }[status] || status; }
 function updateTimeLeft() { const ms = Date.parse(expiresAt || '') - Date.now(); if (!Number.isFinite(ms) || ms <= 0) return masterTimeLeft.textContent = 'Session期限切れ'; const hours = Math.floor(ms / 3600000); const minutes = Math.ceil((ms % 3600000) / 60000); masterTimeLeft.textContent = `Session残り ${hours}時間${minutes}分`; }
-function showApiError(error) { if (error?.status === 401) return showLogin('Sessionが切れました。もう一度ログインしてください。', true); setStatus(`操作できません: ${error?.code || error?.message || 'API_ERROR'}`, true); }
+function showApiError(error) {
+  if (error?.status === 401) return showLogin('Sessionが切れました。もう一度ログインしてください。', true);
+  const code = error?.code || error?.message || 'API_ERROR';
+  const message = code === 'REQUEST_TIMEOUT' ? '通信がタイムアウトしました。もう一度試してください。'
+    : code === 'NETWORK_ERROR' ? 'ネットワークに接続できません。接続を確認してください。'
+      : `操作できません: ${code}`;
+  setStatus(message, true);
+}
 
 async function boot() {
   show(masterBootSection, true);

@@ -22,14 +22,14 @@ if (!/^https:\/\//.test(origin)) {
 }
 
 await retry(async () => {
-  const response = await fetch(`${origin}/`, { redirect: "error", cache: "no-store" });
+  const response = await fetch(`${origin}/`, { redirect: "error", cache: "no-store", signal: AbortSignal.timeout(10_000) });
   if (!response.ok) throw new Error(`home returned ${response.status}`);
   requireHeader(response, "x-content-type-options", "nosniff");
   requireHeader(response, "x-frame-options", "DENY");
 });
 
 await retry(async () => {
-  const response = await fetch(`${origin}/api/auth/session`, { redirect: "error", cache: "no-store" });
+  const response = await fetch(`${origin}/api/auth/session`, { redirect: "error", cache: "no-store", signal: AbortSignal.timeout(10_000) });
   const body = await response.json().catch(() => null);
   if (response.status !== 401 || body?.error !== "AUTH_REQUIRED") {
     throw new Error(`session probe returned ${response.status} ${JSON.stringify(body)}`);

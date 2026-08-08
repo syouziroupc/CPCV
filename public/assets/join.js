@@ -16,9 +16,66 @@ let pendingSubmission = null;
 let understandingEnabled = false;
 let currentPdfState = null;
 let sessionRefreshTimer = 0;
+let sessionRefreshRunning = false;
+let sessionLoadedOnce = false;
 
 function codePointLength(value) { return Array.from(String(value || '')).length; }
 function truncateCodePoints(value, limit) { return Array.from(String(value || '')).slice(0, limit).join(''); }
+
+const PUBLIC_API_TIMEOUT_MS = 12_000;
+const RETRYABLE_COMMENT_STATUSES = new Set([500, 502, 503, 504]);
+
+async function fetchJson(path, options = {}, timeoutMs = PUBLIC_API_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(path, { ...options, signal: controller.signal });
+    const text = await response.text();
+    let data = {};
+    if (text) {
+      try { data = JSON.parse(text); }
+      catch {
+        const error = new Error('INVALID_SERVER_RESPONSE');
+        error.status = response.status;
+        throw error;
+      }
+    }
+    return { response, data };
+  } catch (error) {
+    if (controller.signal.aborted) {
+      const timeout = new Error('REQUEST_TIMEOUT');
+      timeout.code = 'REQUEST_TIMEOUT';
+      throw timeout;
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function postCommentWithRetry(payload) {
+  let lastError = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await fetchJson(`/api/public/sessions/${encodeURIComponent(publicCode)}/messages`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (!RETRYABLE_COMMENT_STATUSES.has(result.response.status) || attempt === 1) return result;
+      lastError = new Error(result.data.error || `HTTP_${result.response.status}`);
+    } catch (error) {
+      lastError = error;
+      const retryable = error?.code === 'REQUEST_TIMEOUT'
+        || error?.message === 'REQUEST_TIMEOUT'
+        || error?.message === 'INVALID_SERVER_RESPONSE'
+        || error instanceof TypeError;
+      if (!retryable || attempt === 1) throw error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw lastError || new Error('SEND_FAILED');
+}
 
 function setStatus(text, isError = false) {
   statusEl.textContent = text;
@@ -26,9 +83,10 @@ function setStatus(text, isError = false) {
 }
 
 async function loadSession() {
+  if (sessionRefreshRunning) return;
+  sessionRefreshRunning = true;
   try {
-    const response = await fetch(`/api/public/sessions/${encodeURIComponent(publicCode)}`, { cache: 'no-store' });
-    const data = await response.json();
+    const { response, data } = await fetchJson(`/api/public/sessions/${encodeURIComponent(publicCode)}`, { cache: 'no-store' });
     if (!response.ok || !data.ok) throw new Error(data.error || 'SESSION_ERROR');
     titleEl.textContent = data.title || '授業コメント';
     postingEnabled = Boolean(data.postingEnabled);
@@ -40,14 +98,32 @@ async function loadSession() {
       ? requiresApproval ? '投稿できます。コメントは先生の承認後に表示されます。' : '投稿できます。'
       : '現在投稿停止中です。';
     sendButton.disabled = !postingEnabled || messageEl.value.trim().length === 0;
+    sessionLoadedOnce = true;
   } catch (error) {
-    titleEl.textContent = '授業が見つかりません';
-    postingEl.textContent = '授業コードを確認してください。';
-    sendButton.disabled = true;
-    understandingEnabled = false;
-    currentPdfState = null;
-    understandingSection.classList.add('hidden');
-    setStatus(error.message, true);
+    const code = error?.code || error?.message || 'SESSION_ERROR';
+    if (code === 'SESSION_NOT_FOUND') {
+      titleEl.textContent = '授業が見つかりません';
+      postingEl.textContent = '授業コードを確認してください。';
+      postingEnabled = false;
+      understandingEnabled = false;
+      currentPdfState = null;
+      understandingSection.classList.add('hidden');
+      sendButton.disabled = true;
+    } else {
+      if (!sessionLoadedOnce) {
+        titleEl.textContent = '授業情報を取得できません';
+        postingEl.textContent = '通信状況を確認して再読み込みしてください。';
+        sendButton.disabled = true;
+      }
+      const map = {
+        REQUEST_TIMEOUT: '授業情報の取得がタイムアウトしました。',
+        NETWORK_ERROR: 'ネットワークに接続できません。',
+        INVALID_SERVER_RESPONSE: 'サーバー応答を確認できませんでした。'
+      };
+      setStatus(map[code] || `授業情報の取得に失敗しました: ${code}`, true);
+    }
+  } finally {
+    sessionRefreshRunning = false;
   }
 }
 
@@ -74,17 +150,17 @@ sendButton.addEventListener('click', async () => {
     if (!pendingSubmission || pendingSubmission.message !== message || pendingSubmission.nickname !== nickname) {
       pendingSubmission = { nickname, message, idempotencyKey: crypto.randomUUID() };
     }
-    const response = await fetch(`/api/public/sessions/${encodeURIComponent(publicCode)}/messages`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(pendingSubmission)
-    });
-    const data = await response.json();
+    const { response, data } = await postCommentWithRetry(pendingSubmission);
     if (!response.ok || !data.ok) throw new Error(data.error || 'SEND_FAILED');
     messageEl.value = '';
     counterEl.textContent = '0 / 140';
     pendingSubmission = null;
-    setStatus(data.duplicate ? '送信済みのコメントを確認しました。' : data.moderationState === 'pending' ? '承認待ちとして送信しました。' : data.filter?.action === 'mask' ? '一部を伏字にして送信しました。' : '送信しました。');
+    setStatus(data.aiSchedulingPending
+      ? '送信しました。AI処理は自動で再試行しています。'
+      : data.duplicate ? '送信済みのコメントを確認しました。'
+        : data.moderationState === 'pending' ? '承認待ちとして送信しました。'
+          : data.filter?.action === 'mask' ? '一部を伏字にして送信しました。'
+            : '送信しました。');
   } catch (error) {
     const map = {
       RATE_LIMITED: '連投制限中です。10秒ほど待ってください。',
@@ -92,7 +168,11 @@ sendButton.addEventListener('click', async () => {
       URL_NOT_ALLOWED: 'URLは投稿できません。',
       CONTENT_REJECTED: 'この投稿は授業の投稿ルールにより送信できません。',
       MESSAGE_TOO_LONG: '140字以内にしてください。',
-      IDEMPOTENCY_KEY_INVALID: '送信識別子が不正です。ページを再読み込みしてください。'
+      IDEMPOTENCY_KEY_INVALID: '送信識別子が不正です。ページを再読み込みしてください。',
+      COMMENT_ROOM_UNAVAILABLE: '一時的に送信処理が混雑しています。もう一度送信してください。',
+      COMMENT_ROOM_OVERLOADED: '現在アクセスが集中しています。少し待ってからもう一度送信してください。',
+      REQUEST_TIMEOUT: '通信がタイムアウトしました。同じ内容を再送しても重複投稿されません。',
+      INVALID_SERVER_RESPONSE: 'サーバー応答を確認できませんでした。もう一度送信してください。'
     };
     setStatus(map[error.message] || `送信失敗: ${error.message}`, true);
   } finally {
@@ -107,12 +187,11 @@ for (const button of understandingButtons) {
     understandingStatus.textContent = '回答を送信しています。';
     understandingStatus.style.color = '#2563eb';
     try {
-      const response = await fetch(`/api/public/sessions/${encodeURIComponent(publicCode)}/understanding`, {
+      const { response, data } = await fetchJson(`/api/public/sessions/${encodeURIComponent(publicCode)}/understanding`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ signal: button.dataset.signal, ...currentPdfState })
       });
-      const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || 'SIGNAL_FAILED');
       understandingStatus.textContent = data.duplicate ? 'このページには同じ回答を送信済みです。' : 'このページの理解度を回答しました。';
     } catch (error) {
