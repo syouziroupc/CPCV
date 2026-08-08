@@ -329,19 +329,35 @@ async function testQueueBehavior(h) {
     moderationEnabled: false, translationEnabled: true, targetLanguage: "en",
     actorUserId: "usr_teacher_a", now: retryNow + 100
   });
-  const comment = await createComment(h, "delivery_retry", "授業内容を確認しました", retryNow + 200);
+  const transientComment = await createComment(h, "delivery_i", "授業内容を確認しました", retryNow + 200);
+  const transientJobs = await createAiJobsForComment(h.db, {
+    organizationId: "org_a", liveSessionId: h.sessionId, commentId: transientComment.id, now: retryNow + 300
+  });
+  const transientTranslationJob = transientJobs.find((job) => job.jobType === "translation");
+  h.room.failuresRemaining = 1;
+  const transientRequestsBefore = h.room.requests.length;
+  const transientAiCallsBefore = h.ai.calls.length;
+  const transientOutcome = await processAiJob(h.env, transientTranslationJob.id, { now: retryNow + 400 });
+  check("single transient translation delivery failure is recovered inside realtime dispatch",
+    transientOutcome.retry === false && transientOutcome.completed === true && transientOutcome.realtimeDelivered === true
+      && h.room.requests.length - transientRequestsBefore === 2,
+    { transientOutcome, requests: h.room.requests.slice(transientRequestsBefore) });
+  check("internal realtime delivery retry does not rerun the AI model", h.ai.calls.length === transientAiCallsBefore + 1,
+    { before: transientAiCallsBefore, after: h.ai.calls.length });
+
+  const comment = await createComment(h, "delivery_retry", "再送処理の確認をします", retryNow + 500);
   const jobs = await createAiJobsForComment(h.db, {
-    organizationId: "org_a", liveSessionId: h.sessionId, commentId: comment.id, now: retryNow + 300
+    organizationId: "org_a", liveSessionId: h.sessionId, commentId: comment.id, now: retryNow + 600
   });
   const translationJob = jobs.find((job) => job.jobType === "translation");
-  h.room.failuresRemaining = 1;
+  h.room.failuresRemaining = 3;
   const aiCallsBefore = h.ai.calls.length;
-  const firstOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 400 });
+  const firstOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 700 });
   const callsAfterFirst = h.ai.calls.length;
-  check("translation delivery failure requests a delivery-only retry", firstOutcome.retry === true && firstOutcome.deliveryOnly === true && firstOutcome.realtimeDelivered === false, firstOutcome);
+  check("persistent translation delivery failure requests a delivery-only retry", firstOutcome.retry === true && firstOutcome.deliveryOnly === true && firstOutcome.realtimeDelivered === false, firstOutcome);
   check("translation is persisted before realtime delivery retry", h.row("SELECT status FROM ai_jobs WHERE id=?1", translationJob.id)?.status === "succeeded");
 
-  const secondOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 500 });
+  const secondOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 800 });
   check("completed translation event is redelivered", secondOutcome.redelivered === true && secondOutcome.retry === false, secondOutcome);
   check("realtime redelivery does not call the AI model twice", callsAfterFirst === aiCallsBefore + 1 && h.ai.calls.length === callsAfterFirst, { aiCallsBefore, callsAfterFirst, finalCalls: h.ai.calls.length });
 

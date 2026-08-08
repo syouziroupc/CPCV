@@ -21,6 +21,19 @@ async function testRealtimeRetry() {
   assert.equal(gets, 2, "a fresh Durable Object stub must be acquired for the retry");
   assert.ok(calls.every((url) => url.endsWith("/clear")));
 
+  const translationEvent = {
+    organizationId: "org_a", liveSessionId: "sess_a", sequence: 5, type: "settings:update",
+    payload: { type: "translation:ready", commentId: "cmt_a", translation: "translated" }
+  };
+  assert.equal(await dispatchRealtimeEvent(env, "sess_a", translationEvent), true);
+  assert.ok(calls.at(-1).endsWith("/event"), "translation payloads must use the generic event endpoint");
+  const settingsEvent = {
+    organizationId: "org_a", liveSessionId: "sess_a", sequence: 6, type: "settings:update",
+    payload: { type: "settings:update", postingEnabled: true }
+  };
+  assert.equal(await dispatchRealtimeEvent(env, "sess_a", settingsEvent), true);
+  assert.ok(calls.at(-1).endsWith("/settings"), "real settings updates must use the settings endpoint");
+
   let overloadedGets = 0;
   const overloaded = new Error("overloaded"); overloaded.overloaded = true; overloaded.retryable = true;
   const overloadedEnv = { COMMENT_ROOM: { idFromName(v) { return v; }, get() { overloadedGets += 1; return { async fetch() { throw overloaded; } }; } } };
