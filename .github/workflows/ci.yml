@@ -58,15 +58,12 @@ jobs:
         run: |
           git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
           rm .github/apply-final-load-ui.py
-          git add scripts/test-load-hardening.mjs
       - name: Install dependencies
         shell: bash
         run: |
           npm install --global npm@11.18.0
           npm ci || { npm cache clean --force; npm ci; }
-      - name: Refresh source manifest
-        run: npm run manifest:source
-      - name: Create local candidate commit
+      - name: Create pre-manifest candidate commit
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -74,6 +71,14 @@ jobs:
           git add -A
           test -n "$(git status --porcelain)"
           git commit -m "Finish load hardening and simplify CPCV UI"
+          test -z "$(git status --porcelain)"
+      - name: Refresh source manifest from candidate HEAD
+        shell: bash
+        run: |
+          npm run manifest:source
+          git add SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt 2>/dev/null || true
+          git add -A
+          git commit --amend --no-edit
           test -z "$(git status --porcelain)"
       - name: Run static release checks
         shell: bash
