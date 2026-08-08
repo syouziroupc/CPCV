@@ -28,7 +28,7 @@ replace_once(
   check("completed translation event is redelivered", secondOutcome.redelivered === true && secondOutcome.retry === false, secondOutcome);
   check("realtime redelivery does not call the AI model twice", callsAfterFirst === aiCallsBefore + 1 && h.ai.calls.length === callsAfterFirst, { aiCallsBefore, callsAfterFirst, finalCalls: h.ai.calls.length });
 ''',
-    '''  const transientComment = await createComment(h, "delivery_internal_retry", "授業内容を確認しました", retryNow + 200);
+    '''  const transientComment = await createComment(h, "delivery_i", "授業内容を確認しました", retryNow + 200);
   const transientJobs = await createAiJobsForComment(h.db, {
     organizationId: "org_a", liveSessionId: h.sessionId, commentId: transientComment.id, now: retryNow + 300
   });
@@ -44,7 +44,7 @@ replace_once(
   check("internal realtime delivery retry does not rerun the AI model", h.ai.calls.length === transientAiCallsBefore + 1,
     { before: transientAiCallsBefore, after: h.ai.calls.length });
 
-  const comment = await createComment(h, "delivery_retry", "授業内容を確認しました", retryNow + 500);
+  const comment = await createComment(h, "delivery_retry", "再送処理の確認をします", retryNow + 500);
   const jobs = await createAiJobsForComment(h.db, {
     organizationId: "org_a", liveSessionId: h.sessionId, commentId: comment.id, now: retryNow + 600
   });
