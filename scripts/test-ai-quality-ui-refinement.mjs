@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { runModerationModel, runTranslationModel } from '../src/ai/provider.js';
 import { normalizeModerationResult } from '../src/ai/validation.js';
+import { inspectCommentPrivacy } from '../src/ai/privacy.js';
 
 const html = readFileSync('public/admin/index.html', 'utf8');
 const js = readFileSync('public/assets/admin.js', 'utf8');
@@ -49,4 +50,17 @@ const moderation = await runModerationModel(moderationEnv, { message: 'ordinary 
 assert.equal(moderation.recommendation, 'allow');
 assert.equal(moderation.confidenceMilli, 970);
 assert.equal(moderationCalls, 2);
+
+assert.equal(inspectCommentPrivacy('学生番号は1234567です').sensitive, false);
+assert.equal(inspectCommentPrivacy('整理番号1234567890を使います').sensitive, false);
+assert.equal(inspectCommentPrivacy('郵便番号は123-4567です').sensitive, true);
+assert.equal(inspectCommentPrivacy('電話は090-1234-5678です').sensitive, true);
+
+const cautiousModeration = await runModerationModel({
+  AI_MODERATION_MODEL: '@cf/zai-org/glm-4.7-flash',
+  AI: { run: async () => ({ recommendation: 'hide', confidence: 0.72, categories: ['other'] }) }
+}, { message: '授業で用語を引用して説明しています', dictionaryCandidates: [] });
+assert.equal(cautiousModeration.recommendation, 'review');
+assert.equal(cautiousModeration.confidenceMilli, 720);
+
 console.log('AI quality and administration UI refinement tests passed');

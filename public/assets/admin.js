@@ -116,6 +116,7 @@ const LOG_DB_NAME = 'CPCV_LOCAL_LOGS';
 const LOG_DB_VERSION = 1;
 const LOG_STORE_NAME = 'comments';
 const LOG_CHANNEL_NAME = 'CPCV_LOCAL_LOG_UPDATES';
+const API_TIMEOUT_MS = 15_000;
 const localLogChannel = 'BroadcastChannel' in window ? new BroadcastChannel(LOG_CHANNEL_NAME) : null;
 let localLogRefreshTimer = 0;
 let lastLocalLogSignature = '';
@@ -196,14 +197,31 @@ async function api(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) headers.set('x-csrf-token', csrfToken);
-  const response = await fetch(path, {
-    cache: 'no-store',
-    credentials: 'same-origin',
-    ...options,
-    method,
-    headers
-  });
-  const text = await response.text();
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  let response;
+  let text;
+  try {
+    response = await fetch(path, {
+      cache: 'no-store',
+      credentials: 'same-origin',
+      ...options,
+      method,
+      headers,
+      signal: controller.signal
+    });
+    text = await response.text();
+  } catch (error) {
+    if (controller.signal.aborted) {
+      const timeout = new Error('API_TIMEOUT');
+      timeout.code = 'API_TIMEOUT';
+      timeout.status = 0;
+      throw timeout;
+    }
+    throw error;
+  } finally {
+    window.clearTimeout(timer);
+  }
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
   if (!response.ok || data.ok === false) {
@@ -217,6 +235,10 @@ async function api(path, options = {}) {
 }
 
 function displayError(error, target = setStatus) {
+  if (error.code === 'API_TIMEOUT') {
+    target('サーバー応答がタイムアウトしました。再試行してください。', true);
+    return;
+  }
   if (error.status === 401) {
     csrfToken = '';
     currentIdentity = null;
@@ -792,7 +814,8 @@ function appendAiModerationCell(row, comment) {
   const label = { allow: '問題なし', review: '要確認', hide: '非表示推奨' }[result.recommendation] || aiStatusLabel(result.status, result.error);
   const badge = document.createElement('span');
   badge.className = `ai-result-badge ai-${result.recommendation || result.status || 'unknown'}`;
-  badge.textContent = `AI参考: ${label}`;
+  const sourceLabel = result.source === 'local_privacy_guard' ? 'ローカル保護' : 'AI';
+  badge.textContent = `${sourceLabel}参考: ${label}`;
   if (result.error) badge.title = `失敗理由: ${result.error}`;
   cell.appendChild(badge);
   if (Number.isFinite(result.confidence)) {
@@ -847,7 +870,17 @@ function appendAiRetryButton(cell, comment, jobType, result) {
 
 function aiStatusLabel(status, error = '') {
   const base = { queued: '待機中', processing: '処理中', retry: '再試行待ち', succeeded: '完了', failed: '失敗', skipped: '未実行' }[status] || '未実行';
-  return error ? `${base} (${error})` : base;
+  const errorLabel = {
+    AI_PROVIDER_TIMEOUT: 'AI応答タイムアウト',
+    AI_PROVIDER_UNAVAILABLE: 'AIサービス一時停止',
+    AI_PROVIDER_RATE_LIMITED: 'AI混雑',
+    AI_PROVIDER_FAILED: 'AI接続失敗',
+    AI_RESPONSE_INVALID: 'AI応答形式エラー',
+    AI_STALE_MAX_ATTEMPTS: 'AI応答なし・再試行上限',
+    AI_DAILY_LIMIT_REACHED: 'AI利用上限',
+    AI_BINDING_NOT_CONFIGURED: 'AI未設定'
+  }[error] || error;
+  return error ? `${base} (${errorLabel})` : base;
 }
 
 function aiLanguageLabel(value) {
