@@ -39,6 +39,12 @@ jobs:
           new='''function moderationIsNotDoubleCountedAtQueueAdmission() {\n  const processor = readFileSync(new URL("../src/ai/processor.js", import.meta.url), "utf8");\n  assert.doesNotMatch(processor, /AI_TRANSLATION_RATE_LIMITER|acquireQueueCapacity/);\n  assert.match(processor, /processModerationQueueBatch/);\n}'''
           if old not in s: raise SystemExit('obsolete queue admission test anchor missing')
           s=s.replace(old,new,1)
+          s=s.replace('assert.match(wranglerSource, /AI_MODERATION_MODEL_BATCH_SIZE = "20"/);\n','')
+          s=s.replace('assert.match(wranglerSource, /AI_MODERATION_BATCH_WINDOW_MS = "8"/);\n','')
+          insert='''assert.match(wranglerSource, /queue = "cpcv-ai-moderation-jobs"[\\s\\S]*?max_batch_size = 20[\\s\\S]*?max_batch_timeout = 1/);\n'''
+          anchor='''assert.match(wranglerSource, /AI_MODERATION_CLASSIFIER_MODEL = "@cf\\/baai\\/bge-reranker-base"/);\n'''
+          if anchor not in s: raise SystemExit('classifier wrangler assertion anchor missing')
+          s=s.replace(anchor,anchor+insert,1)
           p.write_text(s)
           PY
 
