@@ -35,6 +35,10 @@ jobs:
           from pathlib import Path
           p=Path('scripts/test-ai-translation-resilience.mjs')
           s=p.read_text().replace('workers-ai-moderation','workers-ai-text-generation')
+          old='''function moderationIsNotDoubleCountedAtQueueAdmission() {\n  const processor = readFileSync(new URL("../src/ai/processor.js", import.meta.url), "utf8");\n  assert.match(processor, /if \\(queueKind !== QUEUE_KIND_TRANSLATION\\) return true;/);\n}'''
+          new='''function moderationIsNotDoubleCountedAtQueueAdmission() {\n  const processor = readFileSync(new URL("../src/ai/processor.js", import.meta.url), "utf8");\n  assert.doesNotMatch(processor, /AI_TRANSLATION_RATE_LIMITER|acquireQueueCapacity/);\n  assert.match(processor, /processModerationQueueBatch/);\n}'''
+          if old not in s: raise SystemExit('obsolete queue admission test anchor missing')
+          s=s.replace(old,new,1)
           p.write_text(s)
           PY
 
