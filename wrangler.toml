@@ -36,8 +36,9 @@ max_batch_timeout = 0
 max_retries = 3
 
 # Translation and moderation scale independently. max_concurrency is intentionally
-# unset so Cloudflare Queues can autoscale consumers as backlog grows. Keep each
-# invocation small so a slow AI request does not hold a large batch and delay scale-out.
+# unset so Cloudflare Queues can autoscale consumers as backlog grows. Translation
+# stays at the measured batch size 3. Moderation can safely fan out a larger batch
+# because the primary path uses the independent high-RPM Text Classification task.
 [[queues.producers]]
 binding = "AI_TRANSLATION_QUEUE"
 queue = "cpcv-ai-translation-jobs"
@@ -55,7 +56,7 @@ queue = "cpcv-ai-moderation-jobs"
 
 [[queues.consumers]]
 queue = "cpcv-ai-moderation-jobs"
-max_batch_size = 3
+max_batch_size = 10
 max_batch_timeout = 0
 max_retries = 100
 dead_letter_queue = "cpcv-ai-moderation-dlq"
@@ -88,27 +89,50 @@ name = "AUTH_PUBLIC_EMAIL_LIMITER"
 namespace_id = "826071904"
 simple = { limit = 30, period = 60 }
 
-# Keep a small margin below Workers AI's default task limits. Translation-model
-# calls use the translation limiter. Text-generation translation fallbacks share
-# the moderation limiter's counter so both workloads stay under the 300 RPM task limit.
+# Translation ingress is allowed above the dedicated Translation task ceiling so
+# provider routing can overflow saturated M2M100 traffic into the separately
+# limited Text Generation lane. The dedicated lane remains below Cloudflare's
+# 720 RPM Translation limit.
 [[ratelimits]]
 name = "AI_TRANSLATION_RATE_LIMITER"
-namespace_id = "826071905" # AI capacity namespace; separate from auth/public boundary namespaces
-simple = { limit = 700, period = 60 }
+namespace_id = "826071905" # translation ingress capacity
+simple = { limit = 990, period = 60 }
 
 [[ratelimits]]
+name = "AI_TRANSLATION_DEDICATED_RATE_LIMITER"
+namespace_id = "826071908" # dedicated Translation task capacity
+simple = { limit = 700, period = 60 }
+
+# Primary moderation is batched Text Classification. This limiter counts model
+# requests rather than comments and leaves a margin below Cloudflare's 2000 RPM
+# Text Classification task limit. Raising account limits later requires config only.
+[[ratelimits]]
+name = "AI_MODERATION_CLASSIFIER_RATE_LIMITER"
+namespace_id = "826071907" # batched moderation classification capacity
+simple = { limit = 1900, period = 60 }
+
+# Text-generation translation overflow and legacy moderation fallback share a
+# single capacity namespace below the 300 RPM Text Generation task limit.
+[[ratelimits]]
 name = "AI_MODERATION_RATE_LIMITER"
-namespace_id = "826071906" # shared Workers AI text-generation capacity namespace
+namespace_id = "826071906" # shared Text Generation capacity
 simple = { limit = 290, period = 60 }
 
 [vars]
 APP_ENV = "production"
 AUTH_V2_ENABLED = "1"
 EMAIL_AUTH_REQUIRED = "0"
-AI_MODERATION_MODEL = "@cf/moonshotai/kimi-k2.6"
+AI_MODERATION_CLASSIFIER_MODEL = "@cf/baai/bge-reranker-base"
+AI_MODERATION_CLASSIFIER_TIMEOUT_MS = "5000"
+AI_MODERATION_MODEL_BATCH_SIZE = "20"
+AI_MODERATION_BATCH_WINDOW_MS = "8"
+AI_MODERATION_REVIEW_SCORE = "0.46"
+AI_MODERATION_HIDE_SCORE = "0.78"
+AI_MODERATION_CLASSIFIER_FALLBACK = "1"
+AI_MODERATION_MODEL = "@cf/meta/llama-3.2-3b-instruct"
 AI_MODERATION_FALLBACK_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
 AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"
-AI_TRANSLATION_BALANCED_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+AI_TRANSLATION_BALANCED_MODEL = "@cf/meta/llama-3.2-3b-instruct"
 AI_TRANSLATION_ACCURATE_MODEL = "@cf/moonshotai/kimi-k2.6"
 AI_TIMEOUT_MS = "12000"
 AI_TRANSLATION_TIMEOUT_MS = "8000"
@@ -116,7 +140,7 @@ AI_TRANSLATION_BALANCED_TIMEOUT_MS = "18000"
 AI_TRANSLATION_ACCURATE_TIMEOUT_MS = "30000"
 AI_QUEUE_PARALLELISM = "5"
 AI_TRANSLATION_QUEUE_PARALLELISM = "3"
-AI_MODERATION_QUEUE_PARALLELISM = "3"
+AI_MODERATION_QUEUE_PARALLELISM = "10"
 AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 AUTH_EMAIL_FROM = "noreply@szworld.uk"
