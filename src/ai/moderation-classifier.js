@@ -1,57 +1,35 @@
 import { AI_CATEGORIES, normalizeModerationResult } from "./validation.js";
 import { runModerationModel as runLegacyModerationModel } from "./provider-base.js";
 
-const DEFAULT_MODEL = "@cf/google/embeddinggemma-300m";
-const PROMPT_VERSION = "moderation-embedding-v2-batched";
+const DEFAULT_MODEL = "@cf/baai/bge-reranker-base";
+const PROMPT_VERSION = "moderation-reranker-v1-batched";
 const DEFAULT_TIMEOUT_MS = 5000;
 const DEFAULT_BATCH_SIZE = 20;
 const DEFAULT_BATCH_WINDOW_MS = 8;
-const CLASSIFIER_LIMIT_KEY = "workers-ai-moderation-embedding";
+const DEFAULT_REVIEW_SCORE = 0.46;
+const DEFAULT_HIDE_SCORE = 0.78;
+const CLASSIFIER_LIMIT_KEY = "workers-ai-moderation-text-classification";
 const VALID_CATEGORIES = new Set(AI_CATEGORIES);
-const prototypeCache = new Map();
 const batchStates = new WeakMap();
 
-const PROFILES = Object.freeze([
-  {
-    category: "safe",
-    text: "Ordinary classroom discussion, a neutral question, factual explanation, polite disagreement, quotation for study, or harmless casual comment. 普通の授業コメント、質問、説明、学習目的の引用、丁寧な反対意見、無害な雑談。"
-  },
-  {
-    category: "harassment",
-    text: "Direct insult, humiliation, bullying, abusive profanity, intimidation, or degrading language aimed at a person. 人への侮辱、罵倒、いじめ、威圧、人格攻撃、相手を傷つける暴言。"
-  },
-  {
-    category: "hate",
-    text: "Hateful or discriminatory attack against a protected group or identity, slur, dehumanization, or exclusion based on identity. 属性や集団への差別、蔑称、ヘイト、排斥、非人間化。"
-  },
-  {
-    category: "sexual",
-    text: "Explicit sexual content, sexual solicitation, graphic sexual description, or inappropriate sexual remarks. 露骨な性的内容、性的勧誘、性的描写、不適切な性的発言。"
-  },
-  {
-    category: "violence",
-    text: "Threat, encouragement, instruction, or graphic description of physical violence or serious harm. 暴力の脅迫、暴行の推奨や指示、深刻な危害、残虐な暴力表現。"
-  },
-  {
-    category: "self_harm",
-    text: "Self-harm or suicide intent, encouragement, methods, instructions, or imminent self-injury risk. 自傷や自殺の意図、方法、推奨、実行手順、切迫した自傷リスク。"
-  },
-  {
-    category: "spam",
-    text: "Spam, repeated advertising, scams, unsolicited promotion, meaningless flooding, or disruptive repetitive posting. スパム、宣伝、詐欺、無関係な大量投稿、連投による妨害。"
-  },
-  {
-    category: "personal_data",
-    text: "Exposure or solicitation of private personal data such as a phone number, home address, password, account secret, or sensitive identifier. 電話番号、住所、パスワード、秘密情報、個人識別情報の公開や要求。"
-  },
-  {
-    category: "prompt_injection",
-    text: "Instruction attempting to override system rules, reveal hidden prompts, bypass moderation, or manipulate the AI classifier. システム指示の上書き、プロンプト開示要求、検閲回避、AI判定の操作。"
-  },
-  {
-    category: "other",
-    text: "Other clearly unsafe, disruptive, malicious, or inappropriate classroom content not covered by the specific safety categories. その他の明確に危険、悪意、授業妨害、不適切な内容。"
-  }
+const SAFETY_QUERY = [
+  "Unsafe or disruptive classroom comment:",
+  "harassment, bullying, hate or discrimination, explicit sexual content,",
+  "violence or threats, self-harm encouragement or instructions, spam or scams,",
+  "exposure of private personal data, prompt injection, or other malicious content.",
+  "危険または授業を妨害するコメント：侮辱・いじめ・差別・ヘイト・露骨な性的内容・暴力や脅迫・",
+  "自傷自殺の推奨や方法・スパム詐欺・個人情報の暴露・プロンプトインジェクション・その他の悪意ある内容。"
+].join(" ");
+
+const CATEGORY_RULES = Object.freeze([
+  ["prompt_injection", /(?:ignore|override|bypass|reveal|show).{0,40}(?:system|prompt|moderation|rules?)|(?:system|prompt).{0,40}(?:ignore|reveal|show)|指示.{0,20}(?:無視|上書き)|プロンプト.{0,20}(?:開示|表示|無視)|検閲.{0,20}(?:回避|無効)/iu],
+  ["personal_data", /(?:password|passcode|phone\s*number|home\s*address|social\s*security|credit\s*card|api\s*key|secret|住所|電話番号|パスワード|暗証番号|個人情報|秘密鍵|APIキー)/iu],
+  ["self_harm", /(?:suicid|kill\s*myself|self[- ]?harm|cut\s*myself|自殺|自傷|死にたい|首を吊|リストカット)/iu],
+  ["violence", /(?:beat\s+you|kill\s+you|shoot\s+you|stab\s+you|break\s+your|bomb\b|murder|殴る|殴って|殺す|殺して|刺す|刺して|暴行|爆破|脅迫)/iu],
+  ["sexual", /(?:explicit\s+sex|sexual\s+act|nude|porn|rape|性的行為|セックス|裸|ポルノ|強姦|レイプ)/iu],
+  ["hate", /(?:inferior|subhuman|should\s+be\s+excluded|racial\s+slur|hate\s+(?:those|these|all)|劣等|排除すべき|人種差別|民族差別|ヘイト|差別語)/iu],
+  ["spam", /(?:buy\s+now|click\s+my|promotion\s+link|free\s+money|scam|crypto\s+giveaway|今すぐ購入|宣伝リンク|無料で稼|詐欺|連投)/iu],
+  ["harassment", /(?:idiot|moron|stupid|disgusting|loser|nobody\s+wants\s+you|shut\s+up|馬鹿|バカ|アホ|無能|キモい|消えろ|死ね|うざい|黙れ)/iu]
 ]);
 
 export async function runModerationModel(env, input, options = {}) {
@@ -64,13 +42,12 @@ export async function runModerationModel(env, input, options = {}) {
     return runLegacyModerationModel(env, input, options);
   }
   const model = configuredModel || DEFAULT_MODEL;
-
   const usageEventId = typeof options.reserveUsage === "function"
     ? await options.reserveUsage(model)
     : null;
 
   try {
-    const result = await enqueueEmbeddingClassification(env, model, input);
+    const result = await enqueueClassification(env, model, input);
     return {
       ...result.normalized,
       provider: "workers_ai",
@@ -89,16 +66,15 @@ export async function runModerationModel(env, input, options = {}) {
   }
 }
 
-function enqueueEmbeddingClassification(env, model, input) {
+function enqueueClassification(env, model, input) {
   return new Promise((resolve, reject) => {
     const state = batchState(env.AI, model);
     state.items.push({ env, input, resolve, reject });
     const limit = classifierBatchSize(env);
-
     if (state.items.length >= limit && !state.flushing) {
       if (state.timer) clearTimeout(state.timer);
       state.timer = null;
-      queueMicrotask(() => flushEmbeddingBatch(state, model));
+      queueMicrotask(() => flushClassificationBatch(state, model));
       return;
     }
     scheduleBatchFlush(state, model, env);
@@ -123,11 +99,11 @@ function scheduleBatchFlush(state, model, env) {
   if (state.timer || state.flushing || !state.items.length) return;
   state.timer = setTimeout(() => {
     state.timer = null;
-    void flushEmbeddingBatch(state, model);
+    void flushClassificationBatch(state, model);
   }, classifierBatchWindowMs(env));
 }
 
-async function flushEmbeddingBatch(state, model) {
+async function flushClassificationBatch(state, model) {
   if (state.flushing || !state.items.length) return;
   state.flushing = true;
   if (state.timer) clearTimeout(state.timer);
@@ -136,168 +112,136 @@ async function flushEmbeddingBatch(state, model) {
   const env = state.items[0].env;
   const size = Math.min(classifierBatchSize(env), state.items.length);
   const batch = state.items.splice(0, size);
-
   try {
     const capacity = await acquireClassifierCapacity(env);
     if (!capacity) throw codedError("AI_CLASSIFIER_RATE_LIMITED", true);
-    const results = await classifyBatchWithEmbeddings(
-      env,
-      model,
-      batch.map((item) => item.input)
-    );
+    const results = await classifyBatch(env, model, batch.map((item) => item.input));
     if (results.length !== batch.length) throw codedError("AI_RESPONSE_INVALID", true);
-    for (let index = 0; index < batch.length; index += 1) {
-      batch[index].resolve(results[index]);
-    }
+    for (let index = 0; index < batch.length; index += 1) batch[index].resolve(results[index]);
   } catch (error) {
     for (const item of batch) item.reject(error);
   } finally {
     state.flushing = false;
-    if (state.items.length) {
-      queueMicrotask(() => flushEmbeddingBatch(state, model));
-    }
+    if (state.items.length) queueMicrotask(() => flushClassificationBatch(state, model));
   }
 }
 
-async function classifyBatchWithEmbeddings(env, model, inputs) {
+async function classifyBatch(env, model, inputs) {
   const messages = inputs.map((input) => String(input?.message || "").trim());
-  if (messages.some((message) => !message)) {
-    throw codedError("AI_RESPONSE_INVALID", false);
-  }
+  if (messages.some((message) => !message)) throw codedError("AI_RESPONSE_INVALID", false);
 
-  const timeout = classifierTimeoutMs(env);
-  let prototypes = prototypeCache.get(model);
-  let response;
-  let messageVectors;
-
-  if (!prototypes) {
-    response = await withTimeout(
-      Promise.resolve(
-        env.AI.run(
-          model,
-          {
-            text: [
-              ...messages,
-              ...PROFILES.map((profile) => profile.text)
-            ]
-          },
-          gatewayOptions(env)
-        )
-      ),
-      timeout
-    );
-    const vectors = extractVectors(response);
-    if (vectors.length !== messages.length + PROFILES.length) {
-      throw codedError("AI_RESPONSE_INVALID", true);
-    }
-    messageVectors = vectors.slice(0, messages.length);
-    prototypes = vectors.slice(messages.length);
-    prototypeCache.set(model, prototypes);
-  } else {
-    response = await withTimeout(
-      Promise.resolve(
-        env.AI.run(model, { text: messages }, gatewayOptions(env))
-      ),
-      timeout
-    );
-    const vectors = extractVectors(response);
-    if (vectors.length !== messages.length) {
-      throw codedError("AI_RESPONSE_INVALID", true);
-    }
-    messageVectors = vectors;
-  }
-
-  if (
-    prototypes.some((vector) => !Array.isArray(vector) || !vector.length)
-    || messageVectors.some(
-      (vector) => !Array.isArray(vector)
-        || !vector.length
-        || vector.length !== prototypes[0].length
-    )
-  ) {
+  const response = await withTimeout(
+    Promise.resolve(
+      env.AI.run(
+        model,
+        {
+          query: SAFETY_QUERY,
+          top_k: messages.length,
+          contexts: messages.map((text) => ({ text }))
+        },
+        gatewayOptions(env)
+      )
+    ),
+    classifierTimeoutMs(env)
+  );
+  const scores = extractScores(response, messages.length);
+  if (scores.length !== messages.length || scores.some((score) => !Number.isFinite(score))) {
     throw codedError("AI_RESPONSE_INVALID", true);
   }
 
   const rawPerItem = Math.max(1, Math.ceil(structuredLength(response) / inputs.length));
   return inputs.map((input, index) => ({
-    normalized: classifyVector(input, messageVectors[index], prototypes, env),
+    normalized: classifyScore(input, scores[index], env),
     rawOutputLength: rawPerItem
   }));
 }
 
-function classifyVector(input, messageVector, prototypes, env) {
-  if (input?.promptInjection) {
-    return normalizeModerationResult({
-      recommendation: "review",
-      confidence: 0.98,
-      categories: ["prompt_injection"]
-    });
-  }
+function extractScores(value, expected) {
+  const rows = Array.isArray(value)
+    ? value
+    : Array.isArray(value?.response)
+      ? value.response
+      : Array.isArray(value?.result)
+        ? value.result
+        : Array.isArray(value?.data)
+          ? value.data
+          : [];
+  if (!rows.length) return [];
 
-  const scored = PROFILES.map((profile, index) => ({
-    category: profile.category,
-    score: cosineSimilarity(messageVector, prototypes[index])
-  }));
-  const safeScore = scored.find((item) => item.category === "safe")?.score ?? -1;
-  const unsafe = scored
-    .filter((item) => item.category !== "safe")
-    .sort((a, b) => b.score - a.score);
-  const top = unsafe[0] || { category: "other", score: -1 };
-  const dictionaryCategories = extractDictionaryCategories(input?.dictionaryCandidates);
-  const hasDictionarySignal = Array.isArray(input?.dictionaryCandidates)
-    && input.dictionaryCandidates.length > 0;
-
-  const configuredReviewMargin = configuredNumber(
-    env?.AI_MODERATION_REVIEW_MARGIN,
-    0.035,
-    0.005,
-    0.25
-  );
-  const reviewMargin = configuredReviewMargin * (hasDictionarySignal ? 0.65 : 1);
-  const hideMargin = configuredNumber(
-    env?.AI_MODERATION_HIDE_MARGIN,
-    0.12,
-    0.03,
-    0.5
-  );
-  const margin = top.score - safeScore;
-
-  let recommendation = "allow";
-  if (margin >= hideMargin && top.category !== "other") recommendation = "hide";
-  else if (margin >= reviewMargin || (hasDictionarySignal && margin >= -0.005)) {
-    recommendation = "review";
-  }
-
-  let categories = [];
-  if (recommendation !== "allow") {
-    const scoreFloor = Math.max(
-      safeScore + Math.max(0.005, reviewMargin * 0.5),
-      top.score - 0.045
-    );
-    categories = unsafe
-      .filter((item) => item.score >= scoreFloor)
-      .slice(0, 3)
-      .map((item) => item.category);
-    categories = [...new Set([...categories, ...dictionaryCategories])]
-      .filter((item) => VALID_CATEGORIES.has(item))
-      .slice(0, 9);
-    if (!categories.length) {
-      categories = [top.category === "safe" ? "other" : top.category];
+  const output = new Array(expected).fill(Number.NaN);
+  let usedIndexedRows = false;
+  for (let position = 0; position < rows.length; position += 1) {
+    const row = rows[position];
+    if (!row || typeof row !== "object") continue;
+    const rawIndex = row.id ?? row.index ?? row.context_index ?? row.contextIndex;
+    const parsedIndex = Number(rawIndex);
+    const score = Number(row.score ?? row.relevance_score ?? row.relevanceScore ?? row.similarity);
+    if (Number.isInteger(parsedIndex) && parsedIndex >= 0 && parsedIndex < expected && Number.isFinite(score)) {
+      output[parsedIndex] = score;
+      usedIndexedRows = true;
     }
   }
+  if (usedIndexedRows && output.every(Number.isFinite)) return output;
 
-  const separation = Math.min(0.45, Math.abs(margin));
-  const confidence = recommendation === "hide"
-    ? Math.min(0.99, 0.74 + separation * 1.7)
-    : recommendation === "review"
-      ? Math.min(0.92, 0.56 + separation * 1.6)
-      : Math.min(0.98, 0.58 + separation * 1.8);
+  if (rows.length === expected) {
+    return rows.map((row) => Number(
+      typeof row === "number"
+        ? row
+        : row?.score ?? row?.relevance_score ?? row?.relevanceScore ?? row?.similarity
+    ));
+  }
+  return output;
+}
+
+function classifyScore(input, rawScore, env) {
+  const score = clamp01(rawScore);
+  const categories = localCategories(input);
+  if (input?.promptInjection && !categories.includes("prompt_injection")) {
+    categories.unshift("prompt_injection");
+  }
+
+  const reviewScore = configuredNumber(
+    env?.AI_MODERATION_REVIEW_SCORE,
+    DEFAULT_REVIEW_SCORE,
+    0.05,
+    0.95
+  );
+  const hideScore = Math.max(
+    reviewScore + 0.03,
+    configuredNumber(env?.AI_MODERATION_HIDE_SCORE, DEFAULT_HIDE_SCORE, 0.08, 0.99)
+  );
+  const dictionarySignal = Array.isArray(input?.dictionaryCandidates) && input.dictionaryCandidates.length > 0;
+  const adjustedReview = dictionarySignal ? Math.max(0.08, reviewScore - 0.12) : reviewScore;
+  const adjustedHide = categories.length ? Math.max(adjustedReview + 0.03, hideScore - 0.08) : hideScore;
+
+  let recommendation = "allow";
+  if (input?.promptInjection || score >= adjustedHide) recommendation = "hide";
+  else if (score >= adjustedReview || (dictionarySignal && score >= adjustedReview - 0.05)) recommendation = "review";
+
+  const resultCategories = recommendation === "allow"
+    ? []
+    : categories.length
+      ? categories.slice(0, 9)
+      : ["other"];
+  const confidence = recommendation === "allow"
+    ? Math.min(0.99, Math.max(0.51, 1 - score))
+    : Math.min(0.99, Math.max(0.51, score));
 
   return normalizeModerationResult({
     recommendation,
     confidence,
-    categories
+    categories: resultCategories
   });
+}
+
+function localCategories(input) {
+  const message = String(input?.message || "");
+  const categories = extractDictionaryCategories(input?.dictionaryCandidates);
+  for (const [category, pattern] of CATEGORY_RULES) {
+    if (pattern.test(message)) categories.push(category);
+  }
+  if (input?.promptInjection) categories.push("prompt_injection");
+  return [...new Set(categories)].filter((category) => VALID_CATEGORIES.has(category));
 }
 
 function extractDictionaryCategories(value) {
@@ -312,37 +256,7 @@ function extractDictionaryCategories(value) {
       if (VALID_CATEGORIES.has(normalized)) categories.push(normalized);
     }
   }
-  return [...new Set(categories)];
-}
-
-function extractVectors(value) {
-  const data = value?.data ?? value?.result?.data ?? value?.response?.data ?? value;
-  if (!Array.isArray(data)) return [];
-  if (data.every((item) => Number.isFinite(Number(item)))) {
-    return [data.map(Number)];
-  }
-  return data
-    .filter(
-      (item) => Array.isArray(item)
-        && item.length
-        && item.every((entry) => Number.isFinite(Number(entry)))
-    )
-    .map((item) => item.map(Number));
-}
-
-function cosineSimilarity(a, b) {
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let index = 0; index < a.length; index += 1) {
-    const av = Number(a[index]);
-    const bv = Number(b[index]);
-    dot += av * bv;
-    normA += av * av;
-    normB += bv * bv;
-  }
-  if (!(normA > 0) || !(normB > 0)) return -1;
-  return dot / Math.sqrt(normA * normB);
+  return categories;
 }
 
 async function acquireClassifierCapacity(env) {
@@ -352,7 +266,7 @@ async function acquireClassifierCapacity(env) {
     const result = await limiter.limit({ key: CLASSIFIER_LIMIT_KEY });
     return result?.success !== false;
   } catch (error) {
-    console.error("AI moderation embedding limiter failed closed", safeCode(error));
+    console.error("AI moderation classifier limiter failed closed", safeCode(error));
     return false;
   }
 }
@@ -360,6 +274,8 @@ async function acquireClassifierCapacity(env) {
 function allowLegacyFallback(env, error) {
   if (String(env?.AI_MODERATION_CLASSIFIER_FALLBACK || "1") === "0") return false;
   return [
+    "AI_CLASSIFIER_RATE_LIMITED",
+    "AI_PROVIDER_RATE_LIMITED",
     "AI_PROVIDER_TIMEOUT",
     "AI_PROVIDER_UNAVAILABLE",
     "AI_PROVIDER_FAILED",
@@ -368,43 +284,26 @@ function allowLegacyFallback(env, error) {
 }
 
 function classifierBatchSize(env) {
-  return Math.round(
-    configuredNumber(
-      env?.AI_MODERATION_MODEL_BATCH_SIZE,
-      DEFAULT_BATCH_SIZE,
-      1,
-      100
-    )
-  );
+  return Math.round(configuredNumber(env?.AI_MODERATION_MODEL_BATCH_SIZE, DEFAULT_BATCH_SIZE, 1, 100));
 }
 
 function classifierBatchWindowMs(env) {
-  return Math.round(
-    configuredNumber(
-      env?.AI_MODERATION_BATCH_WINDOW_MS,
-      DEFAULT_BATCH_WINDOW_MS,
-      0,
-      25
-    )
-  );
+  return Math.round(configuredNumber(env?.AI_MODERATION_BATCH_WINDOW_MS, DEFAULT_BATCH_WINDOW_MS, 0, 25));
 }
 
 function classifierTimeoutMs(env) {
-  return Math.round(
-    configuredNumber(
-      env?.AI_MODERATION_CLASSIFIER_TIMEOUT_MS,
-      DEFAULT_TIMEOUT_MS,
-      1000,
-      15000
-    )
-  );
+  return Math.round(configuredNumber(env?.AI_MODERATION_CLASSIFIER_TIMEOUT_MS, DEFAULT_TIMEOUT_MS, 1000, 15000));
 }
 
 function configuredNumber(value, fallback, minimum, maximum) {
   const parsed = Number(value);
-  return Number.isFinite(parsed)
-    ? Math.min(maximum, Math.max(minimum, parsed))
-    : fallback;
+  return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, parsed)) : fallback;
+}
+
+function clamp01(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return Number.NaN;
+  return Math.min(1, Math.max(0, parsed));
 }
 
 function gatewayOptions(env) {
@@ -415,10 +314,7 @@ function gatewayOptions(env) {
 function withTimeout(promise, milliseconds) {
   let timer;
   const timeout = new Promise((_, reject) => {
-    timer = setTimeout(
-      () => reject(codedError("AI_PROVIDER_TIMEOUT", true)),
-      milliseconds
-    );
+    timer = setTimeout(() => reject(codedError("AI_PROVIDER_TIMEOUT", true)), milliseconds);
   });
   return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
@@ -436,9 +332,7 @@ function normalizeClassifierError(error) {
   if (/schema|json|invalid[ _-]?response/i.test(message)) {
     return codedError("AI_RESPONSE_INVALID", true);
   }
-  if (status >= 400 && status < 500) {
-    return codedError("AI_PROVIDER_REQUEST_REJECTED", false);
-  }
+  if (status >= 400 && status < 500) return codedError("AI_PROVIDER_REQUEST_REJECTED", false);
   return codedError("AI_PROVIDER_FAILED", status === 0 || status >= 500);
 }
 
