@@ -55,13 +55,17 @@ const incompleteConfig = current
       /database_name = "class_comment_db_v2"\s*\ndatabase_id = "8315a076-67ad-44e6-8286-11887af52ad3"/,
       'database_name = "class_comment_db_v2_staging"\ndatabase_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"'
     )
-    .replaceAll('queue = "cpcv-ai-jobs"', 'queue = "cpcv-ai-jobs-staging"')
+    .replaceAll('queue = "cpcv-ai-translation-jobs"', 'queue = "cpcv-ai-translation-jobs-staging"')
+    .replaceAll('queue = "cpcv-ai-moderation-jobs"', 'queue = "cpcv-ai-moderation-jobs-staging"')
     .replaceAll('https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev', 'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev')
     .replace(/TURNSTILE_SITE_KEY = "[^"]+"/, 'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"')
     .replace('namespace_id = "826071901"', 'namespace_id = "826071801"')
     .replace('namespace_id = "826071902"', 'namespace_id = "826071802"')
     .replace('namespace_id = "826071903"', 'namespace_id = "826071803"')
-    .replace('namespace_id = "826071904"', 'namespace_id = "826071804"');
+    .replace('namespace_id = "826071904"', 'namespace_id = "826071804"')
+    .replace('namespace_id = "826071906"', 'namespace_id = "826071806"')
+    .replace('namespace_id = "826071907"', 'namespace_id = "826071807"')
+    .replace('namespace_id = "826071908"', 'namespace_id = "826071808"');
   const stagingPath = join(temp, "staging.toml");
   writeFileSync(stagingPath, stagingConfig);
   const runtimeStagingPath = resolve(ROOT, ".cpcv-staging.wrangler.toml");
@@ -87,7 +91,7 @@ const incompleteConfig = current
   const aiTarget = run("scripts/verify-ai-readiness.mjs", ["--config", validPath]);
   check("AI readiness accepts an explicit Wrangler config", aiTarget.status === 0, aiTarget);
   const stagingAiTarget = run("scripts/verify-ai-readiness.mjs", ["--config", stagingPath]);
-  check("AI readiness accepts a separated staging queue", stagingAiTarget.status === 0 && stagingAiTarget.stdout.includes("cpcv-ai-jobs-staging"), stagingAiTarget);
+  check("AI readiness accepts separated staging queues", stagingAiTarget.status === 0 && stagingAiTarget.stdout.includes("cpcv-ai-translation-jobs-staging") && stagingAiTarget.stdout.includes("cpcv-ai-moderation-jobs-staging"), stagingAiTarget);
   const emailTarget = run("scripts/verify-email-auth-readiness.mjs", ["--database", "class_comment_db_v2_staging", "--config", stagingPath]);
   check("email readiness accepts explicit staging database and config", emailTarget.status === 0 && emailTarget.stdout.includes("EMAIL_AUTH_REQUIRED=0"), emailTarget);
   const invalidTarget = run("scripts/verify-remote-d1.mjs", ["--unknown"]);

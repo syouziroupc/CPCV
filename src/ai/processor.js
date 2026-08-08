@@ -3,7 +3,7 @@ import { appendRealtimeEvent } from "../realtime/repository.js";
 import { translationCommentPayload } from "./repository.js";
 import { evaluateTranslationFilter } from "../content-filter/repository.js";
 import { inspectCommentPrivacy } from "./privacy.js";
-import { runModerationModel, runTranslationModel } from "./provider.js";
+import { runModerationBatchModel, runModerationModel, runTranslationModel } from "./provider.js";
 import {
   claimAiJob,
   completeModerationJob,
@@ -33,8 +33,7 @@ export async function dispatchAiJobs(env, jobs) {
 
   const groups = {
     [QUEUE_KIND_TRANSLATION]: [],
-    [QUEUE_KIND_MODERATION]: [],
-    [QUEUE_KIND_LEGACY]: []
+    [QUEUE_KIND_MODERATION]: []
   };
   for (const job of jobs) {
     const jobId = normalizeJobId(job?.id);
@@ -42,39 +41,13 @@ export async function dispatchAiJobs(env, jobs) {
     const message = { body: { jobId } };
     if (job?.jobType === QUEUE_KIND_TRANSLATION) groups[QUEUE_KIND_TRANSLATION].push(message);
     else if (job?.jobType === QUEUE_KIND_MODERATION) groups[QUEUE_KIND_MODERATION].push(message);
-    else groups[QUEUE_KIND_LEGACY].push(message);
   }
 
-  const legacyQueue = env?.AI_JOBS_QUEUE;
   const dispatched = await Promise.all([
-    dispatchQueueGroup(
-      env?.AI_TRANSLATION_QUEUE,
-      legacyQueue,
-      groups[QUEUE_KIND_TRANSLATION],
-      QUEUE_KIND_TRANSLATION
-    ),
-    dispatchQueueGroup(
-      env?.AI_MODERATION_QUEUE,
-      legacyQueue,
-      groups[QUEUE_KIND_MODERATION],
-      QUEUE_KIND_MODERATION
-    ),
-    dispatchQueueGroup(
-      legacyQueue,
-      null,
-      groups[QUEUE_KIND_LEGACY],
-      QUEUE_KIND_LEGACY
-    )
+    sendQueueMessages(env?.AI_TRANSLATION_QUEUE, groups[QUEUE_KIND_TRANSLATION], QUEUE_KIND_TRANSLATION),
+    sendQueueMessages(env?.AI_MODERATION_QUEUE, groups[QUEUE_KIND_MODERATION], QUEUE_KIND_MODERATION)
   ]);
-  return dispatched.reduce((total, count) => total + count, 0);
-}
-
-async function dispatchQueueGroup(primaryQueue, fallbackQueue, messages, label) {
-  if (!messages.length) return 0;
-  const primary = await sendQueueMessages(primaryQueue, messages, label);
-  if (!primary.unsent.length || !fallbackQueue || fallbackQueue === primaryQueue) return primary.sent;
-  const fallback = await sendQueueMessages(fallbackQueue, primary.unsent, `${label}-fallback`);
-  return primary.sent + fallback.sent;
+  return dispatched.reduce((total, result) => total + result.sent, 0);
 }
 
 async function sendQueueMessages(queue, messages, label) {
@@ -110,8 +83,166 @@ export async function processAiQueueBatch(batch, env) {
   const messages = Array.from(batch?.messages || []);
   if (!messages.length) return;
   const queueKind = queueKindFromName(batch?.queue);
+  if (queueKind === QUEUE_KIND_MODERATION && String(env?.AI_MODERATION_CLASSIFIER_MODEL || "").trim()) {
+    await processModerationQueueBatch(messages, env);
+    return;
+  }
   const parallelism = queueParallelism(env, queueKind, messages.length);
   await runWithConcurrency(messages, parallelism, (message) => processAiQueueMessage(message, env, queueKind));
+}
+
+async function processModerationQueueBatch(messages, env) {
+  const parallelism = queueParallelism(env, QUEUE_KIND_MODERATION, messages.length);
+  const prepared = new Array(messages.length);
+  await runWithConcurrency(messages, parallelism, async (message, index) => {
+    try {
+      prepared[index] = await prepareModerationQueueMessage(message, env);
+    } catch (error) {
+      console.error("AI moderation queue preparation failed", safeCode(error));
+      prepared[index] = { message, kind: "done", outcome: { retry: true, delaySeconds: 30 } };
+    }
+  });
+
+  for (const item of prepared) {
+    if (item?.kind === "done") settleQueueMessage(item.message, item.outcome);
+  }
+
+  const candidates = prepared.filter((item) => item?.kind === "provider");
+  if (!candidates.length) return;
+
+  const model = String(env?.AI_MODERATION_CLASSIFIER_MODEL || "").trim();
+  const usage = await Promise.allSettled(candidates.map((item) =>
+    reserveAiUsage(env.DB_V2, item.job, item.now, model)
+  ));
+  const ready = [];
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index];
+    const reservation = usage[index];
+    if (reservation.status === "fulfilled") {
+      ready.push({ ...candidate, usageEventId: reservation.value });
+      continue;
+    }
+    const outcome = await failPreparedModerationJob(env, candidate.job, reservation.reason, candidate.now);
+    settleQueueMessage(candidate.message, outcome);
+  }
+  if (!ready.length) return;
+
+  let results;
+  try {
+    results = await runModerationBatchModel(
+      env,
+      ready.map((item) => item.input),
+      { usageEventIds: ready.map((item) => item.usageEventId), allowFallback: false }
+    );
+    if (!Array.isArray(results) || results.length !== ready.length) {
+      const error = new Error("AI_RESPONSE_INVALID");
+      error.aiCode = "AI_RESPONSE_INVALID";
+      error.retryable = true;
+      throw error;
+    }
+  } catch (error) {
+    await Promise.all(ready.map(async (item) => {
+      const outcome = await failPreparedModerationJob(env, item.job, error, Date.now());
+      settleQueueMessage(item.message, outcome);
+    }));
+    return;
+  }
+
+  await Promise.all(ready.map(async (item, index) => {
+    try {
+      const result = results[index];
+      const categories = item.privacy.promptInjection
+        ? [...new Set([...result.categories, "prompt_injection"])]
+        : result.categories;
+      await completeModerationJob(env.DB_V2, {
+        job: item.job,
+        recommendation: result.recommendation,
+        confidenceMilli: result.confidenceMilli,
+        categories,
+        source: "provider",
+        provider: result.provider,
+        model: result.model,
+        promptVersion: result.promptVersion,
+        outputCharacters: result.rawOutputLength,
+        usageEventId: item.usageEventId,
+        now: Date.now()
+      });
+      settleQueueMessage(item.message, { retry: false, completed: true });
+    } catch (error) {
+      const outcome = await failPreparedModerationJob(env, item.job, error, Date.now());
+      settleQueueMessage(item.message, outcome);
+    }
+  }));
+}
+
+async function prepareModerationQueueMessage(message, env) {
+  const now = Date.now();
+  const jobId = normalizeJobId(message?.body?.jobId ?? message?.body);
+  if (!jobId) return { message, kind: "done", outcome: { retry: false, ignored: true } };
+
+  const job = await claimAiJob(env.DB_V2, jobId, now);
+  if (!job) return { message, kind: "done", outcome: { retry: false, ignored: true } };
+  if (job.job_type !== QUEUE_KIND_MODERATION) {
+    const failed = await failOrRetryAiJob(env.DB_V2, job, "AI_QUEUE_KIND_MISMATCH", false, now);
+    return { message, kind: "done", outcome: { ...failed, errorCode: "AI_QUEUE_KIND_MISMATCH" } };
+  }
+  if (Date.parse(job.retained_until || "") <= now) {
+    await skipAiJob(env.DB_V2, job, "COMMENT_EXPIRED", now);
+    return { message, kind: "done", outcome: { retry: false, skipped: "COMMENT_EXPIRED" } };
+  }
+  if (!job.organization_ai_enabled || job.organization_status !== "active") {
+    await skipAiJob(env.DB_V2, job, "AI_DISABLED", now);
+    return { message, kind: "done", outcome: { retry: false, skipped: "AI_DISABLED" } };
+  }
+  if (job.moderation_state === "deleted") {
+    await skipAiJob(env.DB_V2, job, "COMMENT_DELETED", now);
+    return { message, kind: "done", outcome: { retry: false, skipped: "COMMENT_DELETED" } };
+  }
+  const unsupportedAiReview = Boolean(job.session_filter_enabled)
+    && Boolean(job.unsupported_language)
+    && job.unsupported_language_mode === "ai_review";
+  if (!job.session_moderation_enabled && !unsupportedAiReview) {
+    await skipAiJob(env.DB_V2, job, "AI_DISABLED", now);
+    return { message, kind: "done", outcome: { retry: false, skipped: "AI_DISABLED" } };
+  }
+
+  const privacy = inspectCommentPrivacy(job.message);
+  if (privacy.sensitive) {
+    await completePrivacyGuardModeration(env.DB_V2, { job, promptInjection: privacy.promptInjection, now });
+    return { message, kind: "done", outcome: { retry: false, completed: true, source: "local_privacy_guard" } };
+  }
+
+  return {
+    message,
+    kind: "provider",
+    job,
+    now,
+    privacy,
+    input: {
+      message: job.message,
+      promptInjection: privacy.promptInjection,
+      dictionaryCandidates: parseFilterContext(job.filter_context_json)
+    }
+  };
+}
+
+async function failPreparedModerationJob(env, job, error, now = Date.now()) {
+  if (error instanceof AuthError && error.code === "AI_JOB_STATE_CONFLICT") {
+    return { retry: false, ignored: true, conflict: true };
+  }
+  if (error instanceof AuthError && error.code === "AI_DAILY_LIMIT_REACHED") {
+    await skipAiJob(env.DB_V2, job, "AI_DAILY_LIMIT_REACHED", now);
+    return { retry: false, skipped: "AI_DAILY_LIMIT_REACHED" };
+  }
+  const code = String(error?.aiCode || error?.code || "AI_PROVIDER_FAILED").slice(0, 80);
+  const retryable = shouldRetryAiJob(job, error, code);
+  const failed = await failOrRetryAiJob(env.DB_V2, job, code, retryable, now);
+  return { ...failed, errorCode: code };
+}
+
+function settleQueueMessage(message, outcome) {
+  if (outcome?.retry) message?.retry?.({ delaySeconds: outcome.delaySeconds });
+  else message?.ack?.();
 }
 
 async function processAiQueueMessage(message, env, queueKind) {
@@ -121,34 +252,12 @@ async function processAiQueueMessage(message, env, queueKind) {
       message?.ack?.();
       return;
     }
-    if (!await acquireQueueCapacity(env, queueKind)) {
-      message?.retry?.({ delaySeconds: capacityRetryDelaySeconds(queueKind) });
-      return;
-    }
     const outcome = await processAiJob(env, jobId);
-    if (outcome.retry) message?.retry?.({ delaySeconds: outcome.delaySeconds });
-    else message?.ack?.();
+    settleQueueMessage(message, outcome);
   } catch (error) {
     console.error("AI queue message failed", safeCode(error));
     message?.retry?.({ delaySeconds: 30 });
   }
-}
-
-async function acquireQueueCapacity(env, queueKind) {
-  if (queueKind !== QUEUE_KIND_TRANSLATION) return true;
-  const limiter = env?.AI_TRANSLATION_RATE_LIMITER;
-  if (!limiter || typeof limiter.limit !== "function") return true;
-  try {
-    const result = await limiter.limit({ key: `workers-ai-${queueKind}` });
-    return result?.success !== false;
-  } catch (error) {
-    console.error(`AI ${queueKind} capacity limiter failed closed`, safeCode(error));
-    return false;
-  }
-}
-
-function capacityRetryDelaySeconds(queueKind) {
-  return queueKind === QUEUE_KIND_TRANSLATION ? 10 : 20;
 }
 
 async function runWithConcurrency(items, parallelism, worker) {
@@ -156,7 +265,7 @@ async function runWithConcurrency(items, parallelism, worker) {
   const runners = Array.from({ length: Math.min(parallelism, items.length) }, async () => {
     while (nextIndex < items.length) {
       const index = nextIndex++;
-      await worker(items[index]);
+      await worker(items[index], index);
     }
   });
   await Promise.all(runners);

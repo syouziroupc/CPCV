@@ -297,9 +297,9 @@ async function testProviderResponseShapes() {
 }
 
 async function testQueueBehavior(h) {
-  const sent = await dispatchAiJobs({ AI_JOBS_QUEUE: { async send() { throw new Error("queue down"); } } }, [{ id: "aij_1234567890abcdef" }]);
+  const sent = await dispatchAiJobs({ AI_MODERATION_QUEUE: { async send() { throw new Error("queue down"); } } }, [{ id: "aij_1234567890abcdef", jobType: "moderation" }]);
   check("queue dispatch failure does not throw into posting flow", sent === 0, sent);
-  const scheduled = await scheduleAiForComment({ DB_V2: h.db, AI_JOBS_QUEUE: { async send() { throw new Error("queue down"); } } }, {
+  const scheduled = await scheduleAiForComment({ DB_V2: h.db, AI_TRANSLATION_QUEUE: { async send() { throw new Error("queue down"); } }, AI_MODERATION_QUEUE: { async send() { throw new Error("queue down"); } } }, {
     organizationId: "org_a", liveSessionId: h.sessionId, commentId: "missing", now: h.now
   });
   check("missing or disabled comment scheduling stays non-fatal", scheduled.jobs.length === 0 && scheduled.dispatched === 0, scheduled);
@@ -400,7 +400,7 @@ function createHarness() {
     return new Response(null, { status: 204 });
   } }; } };
   const env = {
-    DB_V2: db, AI: ai, AI_JOBS_QUEUE: queue, COMMENT_ROOM: { idFromName: (id) => id, ...room },
+    DB_V2: db, AI: ai, AI_TRANSLATION_QUEUE: queue, AI_MODERATION_QUEUE: queue, COMMENT_ROOM: { idFromName: (id) => id, ...room },
     AI_MODERATION_MODEL: "@cf/zai-org/glm-4.7-flash",
     AI_MODERATION_FALLBACK_MODEL: "@cf/qwen/qwen3-30b-a3b-fp8",
     AI_TRANSLATION_MODEL: "@cf/meta/m2m100-1.2b",

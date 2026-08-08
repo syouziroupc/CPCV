@@ -12,18 +12,41 @@ function check(name, condition, detail = '') {
 }
 const text = (path) => readFileSync(resolve(root, path), 'utf8');
 
-let batch = [];
-const dispatched = await dispatchAiJobs({ AI_JOBS_QUEUE: { async sendBatch(messages) { batch = messages; } } }, [
-  { id: 'aij_1234567890abcdef' }, { id: 'aij_fedcba0987654321' }
+const moderationBatch = [];
+const translationBatch = [];
+const dispatched = await dispatchAiJobs({
+  AI_MODERATION_QUEUE: { async sendBatch(messages) { moderationBatch.push(...messages); } },
+  AI_TRANSLATION_QUEUE: { async sendBatch(messages) { translationBatch.push(...messages); } }
+}, [
+  { id: 'aij_1234567890abcdef', jobType: 'moderation' },
+  { id: 'aij_fedcba0987654321', jobType: 'translation' }
 ]);
-check('AI jobs use one queue batch when available', dispatched === 2 && batch.length === 2, { dispatched, batch });
-check('queue batch contains job IDs only', batch.every((message) => Object.keys(message.body).join() === 'jobId'), batch);
+const queuedMessages = [...moderationBatch, ...translationBatch];
+check('AI jobs use dedicated queue batches when available', dispatched === 2 && moderationBatch.length === 1 && translationBatch.length === 1, { dispatched, moderationBatch, translationBatch });
+check('queue batch contains job IDs only', queuedMessages.every((message) => Object.keys(message.body).join() === 'jobId'), queuedMessages);
 
 const wrangler = text('wrangler.toml');
-check('AI queue dispatches without batch wait', wrangler.includes('max_batch_timeout = 0'));
-check('AI queue consumer uses automatic horizontal scaling', !wrangler.includes('max_concurrency ='));
-check('AI queue worker parallelism is bounded', wrangler.includes('AI_QUEUE_PARALLELISM = "5"'));
-check('AI queue batch size supports burst throughput', wrangler.includes('max_batch_size = 10'));
+function queueConsumerConfig(queueName) {
+  const header = '[[queues.consumers]]';
+  const needle = `queue = "${queueName}"`;
+  let offset = 0;
+  while (offset < wrangler.length) {
+    const start = wrangler.indexOf(header, offset);
+    if (start < 0) return '';
+    const next = wrangler.indexOf('\n[[', start + header.length);
+    const block = wrangler.slice(start, next < 0 ? wrangler.length : next);
+    if (block.includes(needle)) return block;
+    offset = next < 0 ? wrangler.length : next + 1;
+  }
+  return '';
+}
+const translationQueueConfig = queueConsumerConfig('cpcv-ai-translation-jobs');
+const moderationQueueConfig = queueConsumerConfig('cpcv-ai-moderation-jobs');
+check('translation queue dispatches without batch wait', translationQueueConfig.includes('max_batch_timeout = 0'));
+check('moderation queue collects short burst batches', moderationQueueConfig.includes('max_batch_timeout = 1'));
+check('AI queue consumers use automatic horizontal scaling', !wrangler.includes('max_concurrency ='));
+check('AI queue worker parallelism is bounded per lane', wrangler.includes('AI_TRANSLATION_QUEUE_PARALLELISM = "6"') && wrangler.includes('AI_MODERATION_QUEUE_PARALLELISM = "20"'));
+check('AI queue batch sizes match lane workloads', translationQueueConfig.includes('max_batch_size = 6') && moderationQueueConfig.includes('max_batch_size = 20'));
 check('translation uses the dedicated Workers AI model', wrangler.includes('AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"'));
 check('dedicated translation timeout allows cold-start latency', wrangler.includes('AI_TRANSLATION_TIMEOUT_MS = "8000"'));
 
