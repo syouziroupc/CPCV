@@ -244,7 +244,7 @@ export async function findRealtimeEventForComment(db, input) {
 
 export async function markRealtimeCommentTranslationPending(db, input) {
   const nowIso = new Date(input.now ?? Date.now()).toISOString();
-  const result = await db.prepare(
+  const row = await db.prepare(
     `UPDATE realtime_events
      SET payload_json = json_set(
        payload_json,
@@ -253,7 +253,10 @@ export async function markRealtimeCommentTranslationPending(db, input) {
      )
      WHERE organization_id = ?2 AND live_session_id = ?3
        AND source_comment_id = ?4 AND event_type = ?5
-       AND expires_at > ?6`
+       AND expires_at > ?6
+     RETURNING id, organization_id, live_session_id, sequence,
+               event_type, payload_json, source_comment_id,
+               created_at, expires_at`
   ).bind(
     String(input.targetLanguage || ""),
     input.organizationId,
@@ -261,15 +264,9 @@ export async function markRealtimeCommentTranslationPending(db, input) {
     input.commentId,
     input.eventType || "message:new",
     nowIso
-  ).run();
-  if (changesOf(result) !== 1) throw new AuthError(404, "REALTIME_EVENT_NOT_FOUND");
-  return findRealtimeEventForComment(db, {
-    organizationId: input.organizationId,
-    liveSessionId: input.liveSessionId,
-    commentId: input.commentId,
-    eventType: input.eventType || "message:new",
-    now: input.now
-  });
+  ).first();
+  if (!row) throw new AuthError(404, "REALTIME_EVENT_NOT_FOUND");
+  return realtimeEventResponse(row);
 }
 
 export async function getRealtimeSync(db, input) {

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>組織管理 | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav1">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-min1">
 </head>
 <body class="page internal-page">
   <a class="skip-link" href="#mainContent">本文へ移動</a>
@@ -26,7 +26,6 @@
       <div class="auth-intro">
         <p class="eyebrow">Owner・Admin</p>
         <h1>組織管理へログイン</h1>
-        <p>メンバー、権限、招待、組織内の授業を管理します。授業を作成するだけの場合は授業管理を使用してください。</p>
         <a class="button" href="/admin">授業管理へ</a>
       </div>
       <div class="auth-form-panel">
@@ -53,18 +52,12 @@
       <div class="internal-two-column">
         <section class="workspace-panel">
           <h2>メンバーを招待</h2>
-          <p class="muted small-text">確認メールを送り、承認後に組織へ追加します。</p>
           <label class="label" for="memberEmail">メールアドレス</label>
           <input id="memberEmail" class="input" type="email" autocomplete="off" placeholder="teacher@example.com">
           <label class="label" for="memberRole">権限</label>
           <select id="memberRole" class="select"><option value="teacher">Teacher</option><option value="admin">Admin</option><option value="owner">Owner</option></select>
           <button id="inviteMemberButton" class="button primary full-button">招待メールを送る</button>
           <p id="quotaStatus" class="muted"></p>
-        </section>
-        <section class="workspace-panel">
-          <h2>権限の目安</h2>
-          <dl class="compact-definition-list"><div><dt>Teacher</dt><dd>自分の授業を作成・操作</dd></div><div><dt>Admin</dt><dd>メンバーと組織内授業を管理</dd></div><div><dt>Owner</dt><dd>Admin権限に加えて所有者を管理</dd></div></dl>
-          <p class="muted small-text">Ownerを一人も残さない変更は拒否されます。</p>
         </section>
       </div>
 
@@ -82,13 +75,13 @@
       </section>
       <section class="workspace-detail" open>
         <div class="detail-body">
-          <div class="row between wrap"><div><h2>進行中の授業</h2><p class="muted small-text">OwnerとAdminは組織内の全授業を操作できます。</p></div><button id="refreshSessionsButton" class="button">再読み込み</button></div>
+          <div class="row between wrap"><h2>進行中の授業</h2><button id="refreshSessionsButton" class="button">再読み込み</button></div>
           <div id="masterSessionList" class="teacher-list"></div>
         </div>
       </section>
       <details class="workspace-detail">
         <summary>監査ログ</summary>
-        <div class="detail-body"><div class="row between wrap"><p class="muted small-text">直近50件を表示します。</p><button id="refreshAuditButton" class="button">再読み込み</button></div><div id="auditList" class="teacher-list"></div></div>
+        <div class="detail-body"><div class="row wrap"><button id="refreshAuditButton" class="button">再読み込み</button></div><div id="auditList" class="teacher-list"></div></div>
       </details>
     </section>
 

@@ -110,7 +110,7 @@ export async function createAiJobsForComment(db, input) {
        WHERE id = ?4 AND detected_language = 'und' AND retained_until > ?5`
     ).bind(context.detected_language, detected.confidenceMilli, context.unsupported_language, context.id, nowIso).run();
   }
-  const statements = [];
+  const plannedJobs = [];
   const unsupportedAiReview = Boolean(context.filter_enabled)
     && Boolean(context.unsupported_language)
     && context.unsupported_language_mode === "ai_review";
@@ -119,10 +119,10 @@ export async function createAiJobsForComment(db, input) {
     || context.filter_ai_routing_mode === "all"
     || (context.filter_ai_routing_mode === "ambiguous" && context.filter_ai_required);
   if ((context.moderation_enabled || unsupportedAiReview) && moderationRouted) {
-    statements.push(aiJobInsertStatement(db, {
+    plannedJobs.push({
       id: makeId("aij"), organizationId: input.organizationId, liveSessionId: input.liveSessionId,
       commentId: input.commentId, jobType: "moderation", targetLanguage: "", nowIso
-    }));
+    });
   }
   const sourceLanguage = String(context.detected_language || "und");
   const translationUseful = context.translation_enabled
@@ -131,13 +131,21 @@ export async function createAiJobsForComment(db, input) {
     && sourceLanguage !== "neutral"
     && sourceLanguage !== context.target_language;
   if (translationUseful) {
-    statements.push(aiJobInsertStatement(db, {
+    plannedJobs.push({
       id: makeId("aij"), organizationId: input.organizationId, liveSessionId: input.liveSessionId,
       commentId: input.commentId, jobType: "translation", targetLanguage: context.target_language, nowIso
-    }));
+    });
   }
-  if (!statements.length) return [];
-  await db.batch(statements);
+  if (!plannedJobs.length) return [];
+  const results = await db.batch(plannedJobs.map((job) => aiJobInsertStatement(db, job)));
+  const hasChangeMetadata = Array.isArray(results)
+    && results.length === plannedJobs.length
+    && results.every((result) => Number.isFinite(Number(result?.meta?.changes)));
+  if (hasChangeMetadata) {
+    return plannedJobs
+      .filter((_, index) => Number(results[index]?.meta?.changes || 0) === 1)
+      .map((job) => ({ id: job.id, jobType: job.jobType, targetLanguage: job.targetLanguage || null, status: "queued" }));
+  }
   const result = await db.prepare(
     `SELECT id, job_type, target_language, status
      FROM ai_jobs

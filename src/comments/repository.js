@@ -9,17 +9,15 @@ const POST_INTERVAL_MS = 10_000;
 export async function persistComment(db, input) {
   const now = new Date(input.now ?? Date.now());
   const nowIso = now.toISOString();
-  await releaseExpiredIdempotencyKey(db, input.liveSessionId, input.idempotencyKey, nowIso);
-  const existing = await findCommentByIdempotency(
-    db,
-    input.liveSessionId,
-    input.idempotencyKey,
-    input.participantTokenHash,
-    nowIso
-  );
-  if (existing) return { comment: commentResponse(existing), duplicate: true };
-  if (await activeIdempotencyKeyExists(db, input.liveSessionId, input.idempotencyKey, nowIso)) {
-    throw new AuthError(409, "IDEMPOTENCY_KEY_CONFLICT");
+  const keyState = await inspectIdempotencyKey(db, input.liveSessionId, input.idempotencyKey, nowIso);
+  if (keyState?.expired) {
+    await deleteExpiredIdempotencyKey(db, keyState.commentId, nowIso);
+  } else if (keyState) {
+    if (keyState.participantTokenHash !== input.participantTokenHash) {
+      throw new AuthError(409, "IDEMPOTENCY_KEY_CONFLICT");
+    }
+    const existing = await findCommentById(db, keyState.commentId);
+    if (existing) return { comment: commentResponse(existing), duplicate: true };
   }
 
   const nextPostAt = new Date(now.getTime() + POST_INTERVAL_MS).toISOString();
@@ -124,16 +122,15 @@ export async function persistComment(db, input) {
   const inserted = await findCommentById(db, commentId);
   if (inserted) return { comment: commentResponse(inserted), duplicate: false };
 
-  const racedDuplicate = await findCommentByIdempotency(
-    db,
-    input.liveSessionId,
-    input.idempotencyKey,
-    input.participantTokenHash,
-    nowIso
-  );
-  if (racedDuplicate) return { comment: commentResponse(racedDuplicate), duplicate: true };
-  if (await activeIdempotencyKeyExists(db, input.liveSessionId, input.idempotencyKey, nowIso)) {
-    throw new AuthError(409, "IDEMPOTENCY_KEY_CONFLICT");
+  const racedKeyState = await inspectIdempotencyKey(db, input.liveSessionId, input.idempotencyKey, nowIso);
+  if (racedKeyState?.expired) {
+    await deleteExpiredIdempotencyKey(db, racedKeyState.commentId, nowIso);
+  } else if (racedKeyState) {
+    if (racedKeyState.participantTokenHash !== input.participantTokenHash) {
+      throw new AuthError(409, "IDEMPOTENCY_KEY_CONFLICT");
+    }
+    const racedDuplicate = await findCommentById(db, racedKeyState.commentId);
+    if (racedDuplicate) return { comment: commentResponse(racedDuplicate), duplicate: true };
   }
 
   const session = await db.prepare(
@@ -269,6 +266,28 @@ export async function runCommentRetention(db, options = {}) {
     participantsDeleted: changesOf(results?.[1]),
     limit
   };
+}
+
+async function inspectIdempotencyKey(db, liveSessionId, key, nowIso) {
+  const row = await db.prepare(
+    `SELECT c.id AS comment_id, c.retained_until, p.token_hash AS participant_token_hash
+     FROM comments c
+     LEFT JOIN participants p ON p.id = c.participant_id
+     WHERE c.live_session_id = ?1 AND c.idempotency_key = ?2
+     LIMIT 1`
+  ).bind(liveSessionId, key).first();
+  if (!row) return null;
+  return {
+    commentId: row.comment_id,
+    participantTokenHash: row.participant_token_hash || "",
+    expired: String(row.retained_until || "") <= nowIso
+  };
+}
+
+async function deleteExpiredIdempotencyKey(db, commentId, nowIso) {
+  await db.prepare(
+    `DELETE FROM comments WHERE id = ?1 AND retained_until <= ?2`
+  ).bind(commentId, nowIso).run();
 }
 
 async function findCommentByIdempotency(db, liveSessionId, key, participantTokenHash, nowIso) {

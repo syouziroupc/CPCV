@@ -108,17 +108,6 @@ export class CommentRoom {
         throw new AuthError(422, "CONTENT_REJECTED");
       }
       const result = await persistComment(this.env.DB_V2, { ...input, filterDecision });
-      let event = null;
-      if (!result.duplicate && result.comment.moderationState === "visible") {
-        event = await findRealtimeEventForComment(this.env.DB_V2, {
-          organizationId: input.organizationId,
-          liveSessionId: input.liveSessionId,
-          commentId: result.comment.id,
-          eventType: "message:new"
-        });
-        if (!event) throw new AuthError(500, "REALTIME_EVENT_MISSING");
-      }
-
       let ai = { jobs: [], dispatched: 0 };
       if (!result.duplicate) {
         try {
@@ -133,18 +122,30 @@ export class CommentRoom {
       }
 
       const translationJob = ai.jobs.find((job) => job.jobType === "translation");
-      if (event && translationJob) {
-        try {
-          event = await markRealtimeCommentTranslationPending(this.env.DB_V2, {
+      let event = null;
+      if (!result.duplicate && result.comment.moderationState === "visible") {
+        if (!result.duplicate && translationJob) {
+          try {
+            event = await markRealtimeCommentTranslationPending(this.env.DB_V2, {
+              organizationId: input.organizationId,
+              liveSessionId: input.liveSessionId,
+              commentId: result.comment.id,
+              eventType: "message:new",
+              targetLanguage: translationJob.targetLanguage
+            });
+          } catch (error) {
+            console.error("Translation pending marker failed", String(error?.code || error?.name || "ERROR"));
+          }
+        }
+        if (!event) {
+          event = await findRealtimeEventForComment(this.env.DB_V2, {
             organizationId: input.organizationId,
             liveSessionId: input.liveSessionId,
             commentId: result.comment.id,
-            eventType: "message:new",
-            targetLanguage: translationJob.targetLanguage
+            eventType: "message:new"
           });
-        } catch (error) {
-          console.error("Translation pending marker failed", String(error?.code || error?.name || "ERROR"));
         }
+        if (!event) throw new AuthError(500, "REALTIME_EVENT_MISSING");
       }
       if (event) await this.broadcastEvent(event);
       if (!result.duplicate && ai.jobs.length) {
