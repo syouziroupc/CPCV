@@ -36,8 +36,9 @@ max_batch_timeout = 0
 max_retries = 3
 
 # Translation and moderation scale independently. max_concurrency is intentionally
-# unset so Cloudflare Queues can autoscale consumers as backlog grows. Keep each
-# invocation small so a slow AI request does not hold a large batch and delay scale-out.
+# unset so Cloudflare Queues can autoscale consumers as backlog grows. Translation
+# stays at the measured batch size 3. Embedding moderation can safely fan out a
+# larger batch because it uses the independent high-RPM Text Embeddings task.
 [[queues.producers]]
 binding = "AI_TRANSLATION_QUEUE"
 queue = "cpcv-ai-translation-jobs"
@@ -55,7 +56,7 @@ queue = "cpcv-ai-moderation-jobs"
 
 [[queues.consumers]]
 queue = "cpcv-ai-moderation-jobs"
-max_batch_size = 3
+max_batch_size = 10
 max_batch_timeout = 0
 max_retries = 100
 dead_letter_queue = "cpcv-ai-moderation-dlq"
@@ -137,7 +138,7 @@ AI_TRANSLATION_BALANCED_TIMEOUT_MS = "18000"
 AI_TRANSLATION_ACCURATE_TIMEOUT_MS = "30000"
 AI_QUEUE_PARALLELISM = "5"
 AI_TRANSLATION_QUEUE_PARALLELISM = "3"
-AI_MODERATION_QUEUE_PARALLELISM = "3"
+AI_MODERATION_QUEUE_PARALLELISM = "10"
 AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 AUTH_EMAIL_FROM = "noreply@szworld.uk"
