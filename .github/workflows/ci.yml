@@ -87,6 +87,7 @@ jobs:
           set -euo pipefail
           npm ci
           python3 scripts/apply-user-stability-patch.py
+          python3 scripts/apply-stage7-language-test-update.py
           node --check public/assets/admin.js
           node --check public/assets/master.js
           node --check public/assets/account.js
@@ -98,10 +99,10 @@ jobs:
           npm run test:owner-bootstrap
           npm run deploy:dry-run
           git checkout origin/master -- .github/workflows/ci.yml
-          git rm scripts/apply-user-stability-patch.py
+          git rm scripts/apply-user-stability-patch.py scripts/apply-stage7-language-test-update.py
           git config user.name "cpcv-stability-fix"
           git config user.email "actions@users.noreply.github.com"
-          git add SOURCE_SHA256SUMS.override.txt package.json public src scripts/test-user-facing-stability.mjs
+          git add SOURCE_SHA256SUMS.override.txt package.json public src scripts/test-user-facing-stability.mjs scripts/test-ai-v2.mjs
           git commit -m "Fix navigation auth state selections and language support"
           node scripts/verify-source-manifest.mjs
           test -z "$(git status --porcelain)"
