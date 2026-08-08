@@ -1,0 +1,15 @@
+{
+  "name": "cpcv-desktop-overlay-poc",
+  "version": "0.1.2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build:poc": "tauri build --debug --no-bundle",
+    "check:ui": "node --check ui/app.js"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4"
+  }
+}
