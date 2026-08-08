@@ -6,7 +6,7 @@ const M2M = "@cf/meta/m2m100-1.2b";
 const KIMI = "@cf/moonshotai/kimi-k2.6";
 const LLAMA4 = "@cf/meta/llama-4-scout-17b-16e-instruct";
 const LLAMA3 = "@cf/meta/llama-3.2-3b-instruct";
-const EMBED = "@cf/google/embeddinggemma-300m";
+const RERANKER = "@cf/baai/bge-reranker-base";
 
 await accurateUsesKimiNoThinkingAndSharedCapacity();
 await balancedKnownLanguageUsesDedicatedTranslationFirst();
@@ -23,13 +23,16 @@ moderationIsNotDoubleCountedAtQueueAdmission();
 const providerBaseSource = readFileSync(new URL("../src/ai/provider-base.js", import.meta.url), "utf8");
 assert.doesNotMatch(providerBaseSource, /uniqueItems\s*:\s*true/, "moderation schema must avoid unsupported uniqueItems");
 const wranglerSource = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
-assert.match(wranglerSource, /AI_MODERATION_CLASSIFIER_MODEL = "@cf\/google\/embeddinggemma-300m"/);
+assert.match(wranglerSource, /AI_MODERATION_CLASSIFIER_MODEL = "@cf\/baai\/bge-reranker-base"/);
+assert.match(wranglerSource, /AI_MODERATION_MODEL_BATCH_SIZE = "20"/);
+assert.match(wranglerSource, /AI_MODERATION_BATCH_WINDOW_MS = "8"/);
 assert.match(wranglerSource, /AI_MODERATION_MODEL = "@cf\/meta\/llama-3\.2-3b-instruct"/);
 assert.match(wranglerSource, /AI_MODERATION_FALLBACK_MODEL = "@cf\/meta\/llama-4-scout-17b-16e-instruct"/);
 assert.match(wranglerSource, /AI_TRANSLATION_BALANCED_MODEL = "@cf\/meta\/llama-3\.2-3b-instruct"/);
 assert.match(wranglerSource, /AI_TRANSLATION_ACCURATE_MODEL = "@cf\/moonshotai\/kimi-k2\.6"/);
 assert.match(wranglerSource, /name = "AI_TRANSLATION_DEDICATED_RATE_LIMITER"[\s\S]*?limit = 700/);
-assert.match(wranglerSource, /name = "AI_MODERATION_CLASSIFIER_RATE_LIMITER"[\s\S]*?limit = 2800/);
+assert.match(wranglerSource, /name = "AI_MODERATION_CLASSIFIER_RATE_LIMITER"[\s\S]*?limit = 1900/);
+assert.match(wranglerSource, new RegExp(RERANKER.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 console.log("AI capacity and translation resilience tests passed");
 
 async function accurateUsesKimiNoThinkingAndSharedCapacity() {
