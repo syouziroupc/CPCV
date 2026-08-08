@@ -15,17 +15,22 @@ const config = readFileSync(target.configPath, "utf8");
 const failures = [];
 if (!/^\[ai\]\s*$[\s\S]*?^binding\s*=\s*"AI"\s*$/m.test(config)) failures.push("AI binding is missing.");
 
-const producer = arrayBlock(config, "queues.producers", "binding", "AI_JOBS_QUEUE");
-const producerQueue = producer.match(/^queue\s*=\s*"([^"]+)"\s*$/m)?.[1] || "";
-const consumer = [...config.matchAll(/\[\[queues\.consumers\]\]([\s\S]*?)(?=\n\[\[|\n\[[^\[]|$)/g)]
-  .map((match) => match[0])
-  .find((block) => /^queue\s*=\s*"([^"]+)"\s*$/m.test(block)) || "";
-const consumerQueue = consumer.match(/^queue\s*=\s*"([^"]+)"\s*$/m)?.[1] || "";
-if (!producerQueue) failures.push("AI queue producer is missing.");
-if (!consumerQueue) failures.push("AI queue consumer is missing.");
-if (producerQueue && consumerQueue && producerQueue !== consumerQueue) failures.push("AI queue producer and consumer must use the same queue.");
+const requiredQueues = ["AI_TRANSLATION_QUEUE", "AI_MODERATION_QUEUE"];
+const queueNames = [];
+for (const binding of requiredQueues) {
+  const producer = arrayBlock(config, "queues.producers", "binding", binding);
+  const producerQueue = producer.match(/^queue\s*=\s*"([^"]+)"\s*$/m)?.[1] || "";
+  const consumerQueue = [...config.matchAll(/\[\[queues\.consumers\]\]([\s\S]*?)(?=\n\[\[|\n\[[^\[]|$)/g)]
+    .map((match) => match[0])
+    .map((block) => block.match(/^queue\s*=\s*"([^"]+)"\s*$/m)?.[1] || "")
+    .find((queue) => queue === producerQueue) || "";
+  if (!producerQueue) failures.push(`${binding} producer is missing.`);
+  if (!consumerQueue) failures.push(`${binding} consumer is missing.`);
+  if (producerQueue) queueNames.push(producerQueue);
+}
+if (new Set(queueNames).size !== queueNames.length) failures.push("AI queue bindings must use distinct queues.");
 
-for (const name of ["AI_MODERATION_MODEL", "AI_TRANSLATION_MODEL"]) {
+for (const name of ["AI_MODERATION_CLASSIFIER_MODEL", "AI_TRANSLATION_MODEL"]) {
   const value = config.match(new RegExp(`^${name}\\s*=\\s*"([^"]+)"\\s*$`, "m"))?.[1] || "";
   if (!/^@cf\/[a-z0-9_-]+\/[A-Za-z0-9._-]+$/.test(value)) failures.push(`${name} is invalid.`);
   if (/llama-3\.1-8b-instruct$/.test(value)) failures.push(`${name} uses a deprecated model.`);
@@ -37,7 +42,7 @@ if (failures.length) {
   for (const failure of failures) console.error(`[FAIL] ${failure}`);
   process.exit(1);
 }
-console.log(`AI configuration is structurally ready. Verify remote queue ${producerQueue} and apply DB_V2 migration 0010 before cutover.`);
+console.log(`AI configuration is structurally ready. Verify remote queues ${queueNames.join(", ")} and apply DB_V2 migration 0010 before cutover.`);
 
 function arrayBlock(text, section, key, value) {
   const pattern = new RegExp(`\\[\\[${escapeRegex(section)}\\]\\]([\\s\\S]*?)(?=\\n\\[\\[|\\n\\[[^\\[]|$)`, "g");

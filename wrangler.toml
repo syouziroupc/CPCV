@@ -24,30 +24,19 @@ allowed_sender_addresses = [ "noreply@szworld.uk" ]
 [ai]
 binding = "AI"
 
-# Legacy queue remains bound so messages created by an older deployment can drain safely.
-[[queues.producers]]
-binding = "AI_JOBS_QUEUE"
-queue = "cpcv-ai-jobs"
-
-[[queues.consumers]]
-queue = "cpcv-ai-jobs"
-max_batch_size = 10
-max_batch_timeout = 0
-max_retries = 3
-
 # Translation and moderation scale independently. max_concurrency is intentionally
 # unset so Cloudflare Queues can autoscale consumers as backlog grows. Translation
-# stays at the measured batch size 3. Moderation can safely fan out a larger batch
-# because the primary path uses the independent high-RPM Text Classification task.
+# uses small low-latency batches; moderation collects up to 20 messages for one
+# Text Classification call during bursts.
 [[queues.producers]]
 binding = "AI_TRANSLATION_QUEUE"
 queue = "cpcv-ai-translation-jobs"
 
 [[queues.consumers]]
 queue = "cpcv-ai-translation-jobs"
-max_batch_size = 3
+max_batch_size = 6
 max_batch_timeout = 0
-max_retries = 100
+max_retries = 18
 dead_letter_queue = "cpcv-ai-translation-dlq"
 
 [[queues.producers]]
@@ -56,9 +45,9 @@ queue = "cpcv-ai-moderation-jobs"
 
 [[queues.consumers]]
 queue = "cpcv-ai-moderation-jobs"
-max_batch_size = 10
-max_batch_timeout = 0
-max_retries = 100
+max_batch_size = 20
+max_batch_timeout = 1
+max_retries = 6
 dead_letter_queue = "cpcv-ai-moderation-dlq"
 
 [[durable_objects.bindings]]
@@ -89,15 +78,6 @@ name = "AUTH_PUBLIC_EMAIL_LIMITER"
 namespace_id = "826071904"
 simple = { limit = 30, period = 60 }
 
-# Translation ingress is allowed above the dedicated Translation task ceiling so
-# provider routing can overflow saturated M2M100 traffic into the separately
-# limited Text Generation lane. The dedicated lane remains below Cloudflare's
-# 720 RPM Translation limit.
-[[ratelimits]]
-name = "AI_TRANSLATION_RATE_LIMITER"
-namespace_id = "826071905" # translation ingress capacity
-simple = { limit = 990, period = 60 }
-
 [[ratelimits]]
 name = "AI_TRANSLATION_DEDICATED_RATE_LIMITER"
 namespace_id = "826071908" # dedicated Translation task capacity
@@ -114,7 +94,7 @@ simple = { limit = 1900, period = 60 }
 # Text-generation translation overflow and legacy moderation fallback share a
 # single capacity namespace below the 300 RPM Text Generation task limit.
 [[ratelimits]]
-name = "AI_MODERATION_RATE_LIMITER"
+name = "AI_TEXT_GENERATION_RATE_LIMITER"
 namespace_id = "826071906" # shared Text Generation capacity
 simple = { limit = 290, period = 60 }
 
@@ -124,11 +104,9 @@ AUTH_V2_ENABLED = "1"
 EMAIL_AUTH_REQUIRED = "0"
 AI_MODERATION_CLASSIFIER_MODEL = "@cf/baai/bge-reranker-base"
 AI_MODERATION_CLASSIFIER_TIMEOUT_MS = "5000"
-AI_MODERATION_MODEL_BATCH_SIZE = "20"
-AI_MODERATION_BATCH_WINDOW_MS = "8"
-AI_MODERATION_REVIEW_SCORE = "0.46"
-AI_MODERATION_HIDE_SCORE = "0.78"
-AI_MODERATION_CLASSIFIER_FALLBACK = "1"
+AI_MODERATION_REVIEW_SCORE = "0.68"
+AI_MODERATION_HIDE_SCORE = "0.90"
+AI_MODERATION_CLASSIFIER_FALLBACK = "0"
 AI_MODERATION_MODEL = "@cf/meta/llama-3.2-3b-instruct"
 AI_MODERATION_FALLBACK_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
 AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"
@@ -138,9 +116,8 @@ AI_TIMEOUT_MS = "12000"
 AI_TRANSLATION_TIMEOUT_MS = "8000"
 AI_TRANSLATION_BALANCED_TIMEOUT_MS = "18000"
 AI_TRANSLATION_ACCURATE_TIMEOUT_MS = "30000"
-AI_QUEUE_PARALLELISM = "5"
-AI_TRANSLATION_QUEUE_PARALLELISM = "3"
-AI_MODERATION_QUEUE_PARALLELISM = "10"
+AI_TRANSLATION_QUEUE_PARALLELISM = "6"
+AI_MODERATION_QUEUE_PARALLELISM = "20"
 AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev"
 AUTH_EMAIL_FROM = "noreply@szworld.uk"

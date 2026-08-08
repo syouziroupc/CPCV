@@ -17,15 +17,14 @@ await localTextGenerationCapacityRejectionDoesNotCallWorkersAi();
 await provider429DoesNotAmplifyIntoFallbackCalls();
 await dedicatedLimiterFailureOverflowsInsteadOfParkingQueue();
 await legacyModerationFallbackConsumesCapacityPerProviderCall();
-await legacyModerationLimiterFailureFailsClosed();
+await legacyTextGenerationLimiterFailureFailsClosed();
 moderationIsNotDoubleCountedAtQueueAdmission();
 
 const providerBaseSource = readFileSync(new URL("../src/ai/provider-base.js", import.meta.url), "utf8");
 assert.doesNotMatch(providerBaseSource, /uniqueItems\s*:\s*true/, "moderation schema must avoid unsupported uniqueItems");
 const wranglerSource = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
 assert.match(wranglerSource, /AI_MODERATION_CLASSIFIER_MODEL = "@cf\/baai\/bge-reranker-base"/);
-assert.match(wranglerSource, /AI_MODERATION_MODEL_BATCH_SIZE = "20"/);
-assert.match(wranglerSource, /AI_MODERATION_BATCH_WINDOW_MS = "8"/);
+assert.match(wranglerSource, /queue = "cpcv-ai-moderation-jobs"[\s\S]*?max_batch_size = 20[\s\S]*?max_batch_timeout = 1/);
 assert.match(wranglerSource, /AI_MODERATION_MODEL = "@cf\/meta\/llama-3\.2-3b-instruct"/);
 assert.match(wranglerSource, /AI_MODERATION_FALLBACK_MODEL = "@cf\/meta\/llama-4-scout-17b-16e-instruct"/);
 assert.match(wranglerSource, /AI_TRANSLATION_BALANCED_MODEL = "@cf\/meta\/llama-3\.2-3b-instruct"/);
@@ -234,17 +233,17 @@ async function legacyModerationFallbackConsumesCapacityPerProviderCall() {
   });
   assert.equal(result.recommendation, "allow");
   assert.deepEqual(models, [KIMI, LLAMA4]);
-  assert.deepEqual(limits, ["workers-ai-moderation", "workers-ai-moderation"]);
+  assert.deepEqual(limits, ["workers-ai-text-generation", "workers-ai-text-generation"]);
 }
 
-async function legacyModerationLimiterFailureFailsClosed() {
+async function legacyTextGenerationLimiterFailureFailsClosed() {
   let aiCalls = 0;
   const limits = [];
   const env = moderationEnvironment(async () => {
     aiCalls += 1;
     return { recommendation: "allow", confidence: 1, categories: [] };
   }, limits);
-  env.AI_MODERATION_RATE_LIMITER.limit = async ({ key }) => {
+  env.AI_TEXT_GENERATION_RATE_LIMITER.limit = async ({ key }) => {
     limits.push(key);
     throw new Error("limiter unavailable");
   };
@@ -256,18 +255,19 @@ async function legacyModerationLimiterFailureFailsClosed() {
     (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
   );
   assert.equal(aiCalls, 0);
-  assert.deepEqual(limits, ["workers-ai-moderation"]);
+  assert.deepEqual(limits, ["workers-ai-text-generation"]);
 }
 
 function moderationIsNotDoubleCountedAtQueueAdmission() {
   const processor = readFileSync(new URL("../src/ai/processor.js", import.meta.url), "utf8");
-  assert.match(processor, /if \(queueKind !== QUEUE_KIND_TRANSLATION\) return true;/);
+  assert.doesNotMatch(processor, /AI_TRANSLATION_RATE_LIMITER|acquireQueueCapacity/);
+  assert.match(processor, /processModerationQueueBatch/);
 }
 
 function moderationEnvironment(run, limitCalls = []) {
   return {
     AI: { run },
-    AI_MODERATION_RATE_LIMITER: {
+    AI_TEXT_GENERATION_RATE_LIMITER: {
       async limit({ key }) {
         limitCalls.push(key);
         return { success: true };
@@ -290,7 +290,7 @@ function environment(run, limitCalls = [], options = {}) {
         return { success: dedicatedCapacity };
       }
     },
-    AI_MODERATION_RATE_LIMITER: {
+    AI_TEXT_GENERATION_RATE_LIMITER: {
       async limit({ key }) {
         limitCalls.push(`text:${key}`);
         return { success: textCapacity };

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { AI_TARGET_LANGUAGES } from "../src/ai/validation.js";
-import { runModerationModel } from "../src/ai/moderation-classifier.js";
+import { runModerationBatchModel, runModerationModel } from "../src/ai/moderation-classifier.js";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const publicRoute = read("src/routes/public-v2.js");
@@ -10,6 +10,7 @@ const realtime = read("src/realtime/repository.js");
 const room = read("src/realtime/comment-room.js");
 const aiRepository = read("src/ai/repository.js");
 const aiProvider = read("src/ai/provider.js");
+const aiProcessor = read("src/ai/processor.js");
 const moderationClassifier = read("src/ai/moderation-classifier.js");
 const wrangler = read("wrangler.toml");
 const adminJs = read("public/assets/admin.js");
@@ -30,26 +31,25 @@ assert.match(aiRepository, /hasChangeMetadata/);
 
 const translationConsumer = wrangler.match(/queue = "cpcv-ai-translation-jobs"[\s\S]*?dead_letter_queue = "cpcv-ai-translation-dlq"/)?.[0] || "";
 const moderationConsumer = wrangler.match(/queue = "cpcv-ai-moderation-jobs"[\s\S]*?dead_letter_queue = "cpcv-ai-moderation-dlq"/)?.[0] || "";
-assert.match(translationConsumer, /max_batch_size = 3/);
-assert.match(moderationConsumer, /max_batch_size = 10/);
-assert.match(wrangler, /AI_MODERATION_QUEUE_PARALLELISM = "10"/);
-assert.match(wrangler, /AI_MODERATION_MODEL_BATCH_SIZE = "20"/);
-assert.match(wrangler, /AI_MODERATION_BATCH_WINDOW_MS = "8"/);
+assert.match(translationConsumer, /max_batch_size = 6/);
+assert.match(moderationConsumer, /max_batch_size = 20/);
+assert.match(wrangler, /AI_MODERATION_QUEUE_PARALLELISM = "20"/);
 
 assert.match(moderationClassifier, /@cf\/baai\/bge-reranker-base/);
 assert.match(moderationClassifier, /contexts: messages\.map/);
 assert.match(moderationClassifier, /SAFETY_QUERY/);
-assert.match(moderationClassifier, /batchStates = new WeakMap/);
+assert.doesNotMatch(moderationClassifier, /batchStates|WeakMap/);
+assert.match(moderationClassifier, /runModerationBatchModel/);
+assert.match(aiProcessor, /processModerationQueueBatch/);
 assert.match(moderationClassifier, /AI_MODERATION_REVIEW_SCORE/);
 assert.match(aiProvider, /AI_TRANSLATION_DEDICATED_RATE_LIMITER/);
 assert.match(aiProvider, /acquireDedicatedTranslationCapacity/);
-assert.match(wrangler, /name = "AI_TRANSLATION_RATE_LIMITER"[\s\S]*?limit = 990/);
 assert.match(wrangler, /name = "AI_TRANSLATION_DEDICATED_RATE_LIMITER"[\s\S]*?limit = 700/);
 assert.match(wrangler, /name = "AI_MODERATION_CLASSIFIER_RATE_LIMITER"[\s\S]*?limit = 1900/);
-assert.match(wrangler, /name = "AI_MODERATION_RATE_LIMITER"[\s\S]*?limit = 290/);
+assert.match(wrangler, /name = "AI_TEXT_GENERATION_RATE_LIMITER"[\s\S]*?limit = 290/);
 assert.match(wrangler, /AI_MODERATION_CLASSIFIER_MODEL = "@cf\/baai\/bge-reranker-base"/);
-assert.match(wrangler, /AI_MODERATION_REVIEW_SCORE = "0\.46"/);
-assert.match(wrangler, /AI_MODERATION_HIDE_SCORE = "0\.78"/);
+assert.match(wrangler, /AI_MODERATION_REVIEW_SCORE = "0\.68"/);
+assert.match(wrangler, /AI_MODERATION_HIDE_SCORE = "0\.90"/);
 assert.match(wrangler, /AI_TRANSLATION_BALANCED_MODEL = "@cf\/meta\/llama-3\.2-3b-instruct"/);
 
 const languageMatch = adminJs.match(/AI_TARGET_LANGUAGE_CODES = Object\.freeze\((\[[^\n]+\])\);/);
@@ -119,13 +119,13 @@ const batchedEnv = {
     }
   }
 };
-const batchedResults = await Promise.all(
-  Array.from({ length: 8 }, (_, index) => runModerationModel(batchedEnv, {
-    message: `Safe classroom batch comment ${index}.`
-  }))
+const batchedResults = await runModerationBatchModel(
+  batchedEnv,
+  Array.from({ length: 8 }, (_, index) => ({ message: `Safe classroom batch comment ${index}.` })),
+  { usageEventIds: new Array(8).fill(null), allowFallback: false }
 );
 assert.ok(batchedResults.every((result) => result.recommendation === "allow"));
-assert.equal(batchedCalls, 1, "concurrent moderation comments should share one text-classification request");
+assert.equal(batchedCalls, 1, "one Queue batch should use one text-classification request");
 assert.equal(limiterCalls, 1, "classifier capacity should count batched model requests, not comments");
 
 console.log("load hardening, batched moderation capacity routing, and minimal UI regression passed");

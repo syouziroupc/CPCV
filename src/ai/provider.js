@@ -1,5 +1,5 @@
 import { normalizeTranslationResult } from "./validation.js";
-export { runModerationModel } from "./moderation-classifier.js";
+export { runModerationBatchModel, runModerationModel } from "./moderation-classifier.js";
 
 const PROMPT_VERSION = "translation-v6-capacity-routing";
 const DEDICATED_MODEL = "@cf/meta/m2m100-1.2b";
@@ -272,7 +272,7 @@ async function acquireDedicatedTranslationCapacity(env) {
 }
 
 async function acquireSharedTextGenerationCapacity(env) {
-  const limiter = env?.AI_MODERATION_RATE_LIMITER;
+  const limiter = env?.AI_TEXT_GENERATION_RATE_LIMITER;
   if (!limiter || typeof limiter.limit !== "function") return true;
   try {
     const result = await limiter.limit({ key: SHARED_TEXT_GENERATION_KEY });

@@ -30,8 +30,10 @@ const CATEGORY_RULES = Object.freeze([
 ]);
 
 export async function runModerationModel(env, input, options = {}) {
+  const configuredModel = String(env?.AI_MODERATION_CLASSIFIER_MODEL || "").trim();
+  if (!configuredModel) return runLegacyModerationModel(env, input, options);
   const usageEventId = typeof options.reserveUsage === "function"
-    ? await options.reserveUsage(primaryModel(env))
+    ? await options.reserveUsage(configuredModel)
     : null;
   const [result] = await runModerationBatchModel(env, [input], {
     usageEventIds: [usageEventId],
@@ -89,6 +91,7 @@ async function classifyBatch(env, model, inputs) {
   const messages = inputs.map((input) => String(input?.message || "").trim());
   if (messages.some((message) => !message)) throw codedError("AI_RESPONSE_INVALID", false);
 
+  console.log(JSON.stringify({ event: "ai_moderation_batch", model, size: messages.length }));
   const response = await withTimeout(
     Promise.resolve(
       env.AI.run(

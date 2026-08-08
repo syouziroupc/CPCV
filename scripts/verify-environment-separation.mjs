@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const knownProduction = { worker: "class-pdf-comment-viewer-v01", legacyDbId: "f11457fa-27af-468d-94cc-6cdf1ae814e4", queue: "cpcv-ai-jobs" };
+const knownProduction = { worker: "class-pdf-comment-viewer-v01", legacyDbId: "f11457fa-27af-468d-94cc-6cdf1ae814e4", queues: { AI_TRANSLATION_QUEUE: "cpcv-ai-translation-jobs", AI_MODERATION_QUEUE: "cpcv-ai-moderation-jobs" } };
 const args = process.argv.slice(2);
 let mode = "production-gate";
 let productionPath;
@@ -25,7 +25,19 @@ required("staging Worker name", stageName); different("Worker name", prodName, s
 const stageDb = d1(staging, "DB"), stageV2 = d1(staging, "DB_V2");
 for (const [label, db] of [["staging DB", stageDb], ["staging DB_V2", stageV2]]) { required(`${label} database_name`, db.name); uuid(`${label} database_id`, db.id); }
 different("known production legacy DB UUID", knownProduction.legacyDbId, stageDb.id);
-const stageQueue = queue(staging); required("staging queue producer", stageQueue.producer); if (stageQueue.producer !== stageQueue.consumer) failures.push("Staging queue producer and consumer must match."); different("known production Queue", knownProduction.queue, stageQueue.producer);
+for (const binding of ["AI_TRANSLATION_QUEUE", "AI_MODERATION_QUEUE"]) {
+  const prodQueue = queue(production, binding), stageQueue = queue(staging, binding);
+  required(`staging ${binding} producer`, stageQueue.producer);
+  required(`staging ${binding} consumer`, stageQueue.consumer);
+  if (stageQueue.producer && stageQueue.producer !== stageQueue.consumer) failures.push(`Staging ${binding} producer and consumer must match.`);
+  different(`known production ${binding}`, knownProduction.queues[binding], stageQueue.producer);
+  if (mode === "production-gate") {
+    required(`production ${binding} producer`, prodQueue.producer);
+    required(`production ${binding} consumer`, prodQueue.consumer);
+    if (prodQueue.producer && prodQueue.producer !== prodQueue.consumer) failures.push(`Production ${binding} producer and consumer must match.`);
+  }
+  different(`${binding} queue`, prodQueue.producer, stageQueue.producer);
+}
 const stageRates = limiterIds(staging); stageRates.forEach((id, i) => integer(`staging Rate Limiting namespace ${i + 1}`, id)); if (new Set(stageRates).size !== stageRates.length) failures.push("Staging Rate Limiting namespace IDs must be distinct.");
 for (const key of ["AUTH_ORIGIN", "PUBLIC_ORIGIN"]) { const v = value(staging, key); if (!/^https:\/\/class-pdf-comment-viewer-v01-staging\.syouziroupc\.workers\.dev$/.test(v)) failures.push(`staging ${key} must equal the staging Worker URL.`); different(key, value(production, key), v); }
 if (value(staging, "APP_ENV") !== "production") failures.push("staging APP_ENV must be production for strict remote behavior.");
@@ -50,7 +62,13 @@ if (failures.length) { failures.forEach((m) => console.error(`[FAIL] ${m}`)); pr
 console.log(`${mode} resource separation verified: ${resolve(productionPath)} <> ${resolve(stagingPath)}`);
 function value(t, k) { return t.match(new RegExp(`^${k}\\s*=\\s*"([^"]*)"\\s*$`, "m"))?.[1] || ""; }
 function d1(t, binding) { const b = block(t, "d1_databases", "binding", binding); return { name: value(b, "database_name"), id: value(b, "database_id") }; }
-function queue(t) { return { producer: value(block(t, "queues.producers", "binding", "AI_JOBS_QUEUE"), "queue"), consumer: value((t.match(/\[\[queues\.consumers\]\]([\s\S]*?)(?=\n\[\[|\n\[[^\[]|$)/) || [])[0] || "", "queue") }; }
-function limiterIds(t) { return ["AUTH_LOGIN_IP_LIMITER", "AUTH_LOGIN_ACCOUNT_LIMITER", "PUBLIC_COMMENT_RATE_LIMITER", "AUTH_PUBLIC_EMAIL_LIMITER"].map((n) => value(block(t, "ratelimits", "name", n), "namespace_id")); }
+function queue(t, binding) {
+  const producer = value(block(t, "queues.producers", "binding", binding), "queue");
+  const consumer = [...t.matchAll(/\[\[queues\.consumers\]\]([\s\S]*?)(?=\n\[\[|\n\[[^\[]|$)/g)]
+    .map((m) => value(m[0], "queue"))
+    .find((name) => name === producer) || "";
+  return { producer, consumer };
+}
+function limiterIds(t) { return [...t.matchAll(/\[\[ratelimits\]\]([\s\S]*?)(?=\n\[\[|\n\[[^\[]|$)/g)].map((m) => value(m[0], "namespace_id")).filter(Boolean); }
 function block(t, section, key, val) { return [...t.matchAll(new RegExp(`\\[\\[${section.replace(/\./g, "\\.")}\\]\\]([\\s\\S]*?)(?=\\n\\[\\[|\\n\\[[^\\[]|$)`, "g"))].find((m) => new RegExp(`^${key}\\s*=\\s*"${val}"\\s*$`, "m").test(m[0]))?.[0] || ""; }
 function required(l, v) { if (!v) failures.push(`${l} must be set.`); } function validUuid(v) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v); } function uuid(l, v) { if (!validUuid(v)) failures.push(`${l} must be a real UUID.`); } function validInteger(v) { return /^[1-9][0-9]*$/.test(v); } function integer(l, v) { if (!validInteger(v)) failures.push(`${l} must be a positive integer string.`); } function different(l, a, b) { if (!a || !b) { if (mode === "production-gate") failures.push(`${l} must be present in both configurations.`); } else if (a === b) failures.push(`${l} must differ between production and staging.`); } function die(m, c) { console.error(m); process.exit(c); }
