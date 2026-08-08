@@ -1,0 +1,24 @@
+name: Temporary system bug audit
+
+on:
+  push:
+    branches:
+      - agent/ai-response-hardening-20260808
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: System-wide static audit
+        run: node scripts/system-bug-audit.mjs
