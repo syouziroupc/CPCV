@@ -103,12 +103,12 @@ name = "AI_TRANSLATION_DEDICATED_RATE_LIMITER"
 namespace_id = "826071908" # dedicated Translation task capacity
 simple = { limit = 700, period = 60 }
 
-# Normal moderation uses multilingual embeddings. Keep a margin below the
-# 3000 RPM Text Embeddings task limit. This lane can later be raised without
-# changing moderation code if account limits are increased.
+# Normal moderation uses multilingual embeddings. This limiter counts batched
+# embedding inference requests, not comments, and keeps a margin below the
+# 3000 RPM Text Embeddings task limit.
 [[ratelimits]]
 name = "AI_MODERATION_CLASSIFIER_RATE_LIMITER"
-namespace_id = "826071907" # multilingual embedding moderation capacity
+namespace_id = "826071907" # multilingual embedding request capacity
 simple = { limit = 2800, period = 60 }
 
 # Text-generation translation overflow and legacy moderation fallback share a
@@ -124,6 +124,8 @@ AUTH_V2_ENABLED = "1"
 EMAIL_AUTH_REQUIRED = "0"
 AI_MODERATION_CLASSIFIER_MODEL = "@cf/google/embeddinggemma-300m"
 AI_MODERATION_CLASSIFIER_TIMEOUT_MS = "5000"
+AI_MODERATION_MODEL_BATCH_SIZE = "20"
+AI_MODERATION_BATCH_WINDOW_MS = "8"
 AI_MODERATION_REVIEW_MARGIN = "0.035"
 AI_MODERATION_HIDE_MARGIN = "0.12"
 AI_MODERATION_CLASSIFIER_FALLBACK = "1"
