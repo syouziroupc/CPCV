@@ -15,8 +15,9 @@ const accountHtml = read("public/account/index.html");
 const homeHtml = read("public/index.html");
 
 assert.match(publicRoute, /loadPublicMessageSession/);
-assert.match(publicRoute, /COMMENT_ROOM_RETRY_DELAYS_MS = Object\.freeze\(\[40, 120\]\)/);
-assert.match(publicRoute, /code was updated/i);
+assert.match(publicRoute, /COMMENT_ROOM_RETRY_DELAYS_MS = Object\.freeze\(\[80, 240, 720, 1600, 3200\]\)/);
+assert.doesNotMatch(publicRoute, /isDurableObjectDeploymentReset/);
+assert.match(publicRoute, /CommentRoom transport retry/);
 assert.match(comments, /inspectIdempotencyKey/);
 assert.match(realtime, /UPDATE realtime_events[\s\S]*RETURNING id, organization_id/);
 assert.match(room, /if \(!event\) \{[\s\S]*findRealtimeEventForComment/);
