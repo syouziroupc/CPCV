@@ -1,0 +1,35 @@
+name: Finalize reranker manifest 2026-08-08
+on:
+  push:
+    branches: [agent/ai-capacity-v2-20260808]
+    paths: [.github/workflows/finalize-reranker-manifest-20260808.yml]
+permissions:
+  contents: write
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ai-capacity-v2-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Commit helper deletion, regenerate manifest, validate, push
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/finalize-reranker-manifest-20260808.yml
+          git commit -m "Finalize reranker source tree"
+          npm run manifest:source
+          git add SOURCE_SHA256SUMS.txt
+          git commit --amend --no-edit
+          npm run verify:source-manifest
+          node scripts/test-ai-translation-resilience.mjs
+          node scripts/test-load-hardening.mjs
+          git push origin HEAD:agent/ai-capacity-v2-20260808
