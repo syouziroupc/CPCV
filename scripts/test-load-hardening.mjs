@@ -18,6 +18,8 @@ assert.match(publicRoute, /loadPublicMessageSession/);
 assert.match(publicRoute, /COMMENT_ROOM_RETRY_DELAYS_MS = Object\.freeze\(\[80, 240, 720, 1600, 3200\]\)/);
 assert.doesNotMatch(publicRoute, /isDurableObjectDeploymentReset/);
 assert.match(publicRoute, /CommentRoom transport retry/);
+assert.match(publicRoute, /CommentRoom 5xx retry/);
+assert.match(publicRoute, /response\.status < 500/);
 assert.match(comments, /inspectIdempotencyKey/);
 assert.match(realtime, /UPDATE realtime_events[\s\S]*RETURNING id, organization_id/);
 assert.match(room, /if \(!event\) \{[\s\S]*findRealtimeEventForComment/);

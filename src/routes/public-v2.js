@@ -89,7 +89,10 @@ async function fetchCommentRoomMessage(stub, init) {
   let lastError = null;
   for (let attempt = 0; attempt <= COMMENT_ROOM_RETRY_DELAYS_MS.length; attempt += 1) {
     try {
-      return await stub.fetch("https://comment-room/message", init);
+      const response = await stub.fetch("https://comment-room/message", init);
+      if (response.status < 500 || attempt >= COMMENT_ROOM_RETRY_DELAYS_MS.length) return response;
+      console.warn("CommentRoom 5xx retry", attempt + 1, response.status);
+      await new Promise((resolve) => setTimeout(resolve, COMMENT_ROOM_RETRY_DELAYS_MS[attempt]));
     } catch (error) {
       lastError = error;
       if (attempt >= COMMENT_ROOM_RETRY_DELAYS_MS.length) throw error;
