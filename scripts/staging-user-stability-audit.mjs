@@ -53,6 +53,10 @@ async function api(path, { method = 'GET', body, cookie = true } = {}) {
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 async function seed() {
+  // A newly published Worker can briefly coexist with the previous version at the edge.
+  // Give the deployment time to propagate before testing version-specific language behavior.
+  await sleep(12_000);
+
   // Remove only artifacts created by this audit harness in earlier interrupted runs.
   d1("DELETE FROM auth_sessions WHERE id LIKE 'as_stability_%'");
 
