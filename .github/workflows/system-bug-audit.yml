@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - agent/ai-response-hardening-20260808
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions:
