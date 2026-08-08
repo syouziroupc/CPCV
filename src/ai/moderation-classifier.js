@@ -2,15 +2,12 @@ import { AI_CATEGORIES, normalizeModerationResult } from "./validation.js";
 import { runModerationModel as runLegacyModerationModel } from "./provider-base.js";
 
 const DEFAULT_MODEL = "@cf/baai/bge-reranker-base";
-const PROMPT_VERSION = "moderation-reranker-v1-batched";
+const PROMPT_VERSION = "moderation-reranker-v2-queue-batch";
 const DEFAULT_TIMEOUT_MS = 5000;
-const DEFAULT_BATCH_SIZE = 20;
-const DEFAULT_BATCH_WINDOW_MS = 8;
-const DEFAULT_REVIEW_SCORE = 0.46;
-const DEFAULT_HIDE_SCORE = 0.78;
+const DEFAULT_REVIEW_SCORE = 0.68;
+const DEFAULT_HIDE_SCORE = 0.9;
 const CLASSIFIER_LIMIT_KEY = "workers-ai-moderation-text-classification";
 const VALID_CATEGORIES = new Set(AI_CATEGORIES);
-const batchStates = new WeakMap();
 
 const SAFETY_QUERY = [
   "Unsafe or disruptive classroom comment:",
@@ -33,97 +30,59 @@ const CATEGORY_RULES = Object.freeze([
 ]);
 
 export async function runModerationModel(env, input, options = {}) {
+  const usageEventId = typeof options.reserveUsage === "function"
+    ? await options.reserveUsage(primaryModel(env))
+    : null;
+  const [result] = await runModerationBatchModel(env, [input], {
+    usageEventIds: [usageEventId],
+    allowFallback: true,
+    reserveFallbackUsage: typeof options.reserveUsage === "function"
+      ? async (model) => options.reserveUsage(model)
+      : null
+  });
+  return result;
+}
+
+export async function runModerationBatchModel(env, inputs, options = {}) {
+  if (!Array.isArray(inputs) || !inputs.length) return [];
   if (!env?.AI || typeof env.AI.run !== "function") {
-    return runLegacyModerationModel(env, input, options);
+    return runLegacyBatch(env, inputs, options);
   }
 
   const configuredModel = String(env?.AI_MODERATION_CLASSIFIER_MODEL || "").trim();
-  if (!configuredModel) {
-    return runLegacyModerationModel(env, input, options);
-  }
+  if (!configuredModel) return runLegacyBatch(env, inputs, options);
   const model = configuredModel || DEFAULT_MODEL;
-  const usageEventId = typeof options.reserveUsage === "function"
-    ? await options.reserveUsage(model)
-    : null;
+  const usageEventIds = Array.isArray(options.usageEventIds)
+    ? options.usageEventIds
+    : new Array(inputs.length).fill(null);
 
   try {
-    const result = await enqueueClassification(env, model, input);
-    return {
+    const capacity = await acquireClassifierCapacity(env);
+    if (!capacity) throw codedError("AI_CLASSIFIER_RATE_LIMITED", true);
+    const classified = await classifyBatch(env, model, inputs);
+    return classified.map((result, index) => ({
       ...result.normalized,
       provider: "workers_ai",
       model,
       promptVersion: PROMPT_VERSION,
       rawOutputLength: result.rawOutputLength,
-      usageEventId
-    };
+      usageEventId: usageEventIds[index] || null
+    }));
   } catch (error) {
-    if (error?.code === "AI_DAILY_LIMIT_REACHED") throw error;
     const normalized = normalizeClassifierError(error);
-    if (allowLegacyFallback(env, normalized)) {
-      return runLegacyModerationModel(env, input, options);
+    if (options.allowFallback !== false && allowLegacyFallback(env, normalized)) {
+      return runLegacyBatch(env, inputs, options);
     }
     throw normalized;
   }
 }
 
-function enqueueClassification(env, model, input) {
-  return new Promise((resolve, reject) => {
-    const state = batchState(env.AI, model);
-    state.items.push({ env, input, resolve, reject });
-    const limit = classifierBatchSize(env);
-    if (state.items.length >= limit && !state.flushing) {
-      if (state.timer) clearTimeout(state.timer);
-      state.timer = null;
-      queueMicrotask(() => flushClassificationBatch(state, model));
-      return;
-    }
-    scheduleBatchFlush(state, model, env);
-  });
-}
-
-function batchState(binding, model) {
-  let byModel = batchStates.get(binding);
-  if (!byModel) {
-    byModel = new Map();
-    batchStates.set(binding, byModel);
-  }
-  let state = byModel.get(model);
-  if (!state) {
-    state = { items: [], timer: null, flushing: false };
-    byModel.set(model, state);
-  }
-  return state;
-}
-
-function scheduleBatchFlush(state, model, env) {
-  if (state.timer || state.flushing || !state.items.length) return;
-  state.timer = setTimeout(() => {
-    state.timer = null;
-    void flushClassificationBatch(state, model);
-  }, classifierBatchWindowMs(env));
-}
-
-async function flushClassificationBatch(state, model) {
-  if (state.flushing || !state.items.length) return;
-  state.flushing = true;
-  if (state.timer) clearTimeout(state.timer);
-  state.timer = null;
-
-  const env = state.items[0].env;
-  const size = Math.min(classifierBatchSize(env), state.items.length);
-  const batch = state.items.splice(0, size);
-  try {
-    const capacity = await acquireClassifierCapacity(env);
-    if (!capacity) throw codedError("AI_CLASSIFIER_RATE_LIMITED", true);
-    const results = await classifyBatch(env, model, batch.map((item) => item.input));
-    if (results.length !== batch.length) throw codedError("AI_RESPONSE_INVALID", true);
-    for (let index = 0; index < batch.length; index += 1) batch[index].resolve(results[index]);
-  } catch (error) {
-    for (const item of batch) item.reject(error);
-  } finally {
-    state.flushing = false;
-    if (state.items.length) queueMicrotask(() => flushClassificationBatch(state, model));
-  }
+async function runLegacyBatch(env, inputs, options) {
+  return Promise.all(inputs.map((input, index) => runLegacyModerationModel(env, input, {
+    reserveUsage: typeof options.reserveFallbackUsage === "function"
+      ? (model) => options.reserveFallbackUsage(model, index)
+      : undefined
+  })));
 }
 
 async function classifyBatch(env, model, inputs) {
@@ -182,7 +141,6 @@ function extractScores(value, expected) {
     }
   }
   if (usedIndexedRows && output.every(Number.isFinite)) return output;
-
   if (rows.length === expected) {
     return rows.map((row) => Number(
       typeof row === "number"
@@ -204,19 +162,19 @@ function classifyScore(input, rawScore, env) {
     env?.AI_MODERATION_REVIEW_SCORE,
     DEFAULT_REVIEW_SCORE,
     0.05,
-    0.95
+    0.97
   );
   const hideScore = Math.max(
     reviewScore + 0.03,
-    configuredNumber(env?.AI_MODERATION_HIDE_SCORE, DEFAULT_HIDE_SCORE, 0.08, 0.99)
+    configuredNumber(env?.AI_MODERATION_HIDE_SCORE, DEFAULT_HIDE_SCORE, 0.08, 0.995)
   );
   const dictionarySignal = Array.isArray(input?.dictionaryCandidates) && input.dictionaryCandidates.length > 0;
-  const adjustedReview = dictionarySignal ? Math.max(0.08, reviewScore - 0.12) : reviewScore;
-  const adjustedHide = categories.length ? Math.max(adjustedReview + 0.03, hideScore - 0.08) : hideScore;
 
   let recommendation = "allow";
-  if (input?.promptInjection || score >= adjustedHide) recommendation = "hide";
-  else if (score >= adjustedReview || (dictionarySignal && score >= adjustedReview - 0.05)) recommendation = "review";
+  if (input?.promptInjection) recommendation = "hide";
+  else if (categories.length) recommendation = score >= hideScore ? "hide" : "review";
+  else if (score >= hideScore) recommendation = "hide";
+  else if (score >= reviewScore || (dictionarySignal && score >= reviewScore - 0.08)) recommendation = "review";
 
   const resultCategories = recommendation === "allow"
     ? []
@@ -283,12 +241,8 @@ function allowLegacyFallback(env, error) {
   ].includes(String(error?.aiCode || ""));
 }
 
-function classifierBatchSize(env) {
-  return Math.round(configuredNumber(env?.AI_MODERATION_MODEL_BATCH_SIZE, DEFAULT_BATCH_SIZE, 1, 100));
-}
-
-function classifierBatchWindowMs(env) {
-  return Math.round(configuredNumber(env?.AI_MODERATION_BATCH_WINDOW_MS, DEFAULT_BATCH_WINDOW_MS, 0, 25));
+function primaryModel(env) {
+  return String(env?.AI_MODERATION_CLASSIFIER_MODEL || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
 }
 
 function classifierTimeoutMs(env) {
