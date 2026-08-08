@@ -3,13 +3,14 @@ const RETRYABLE_RESPONSE_STATUSES = new Set([500, 502, 503, 504]);
 
 export async function dispatchRealtimeEvent(env, sessionId, event, closeAfter = false) {
   if (!event || !env?.COMMENT_ROOM || !sessionId) return false;
+  const dispatchType = String(event?.payload?.type || event?.type || "");
   const path = closeAfter
     ? "/close"
-    : event.type === "settings:update"
+    : dispatchType === "settings:update"
       ? "/settings"
-      : event.type === "message:clear"
+      : dispatchType === "message:clear"
         ? "/clear"
-        : ["message:remove", "message:restore"].includes(event.type)
+        : ["message:remove", "message:restore"].includes(dispatchType)
           ? "/moderation"
           : "/event";
   const body = JSON.stringify({
