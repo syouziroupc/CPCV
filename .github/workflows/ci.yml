@@ -28,6 +28,19 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Preserve duplicate broadcast semantics
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/apply-final-load-ui.py')
+          s = p.read_text()
+          old = '      if (result.comment.moderationState === "visible") {'
+          new = '      if (!result.duplicate && result.comment.moderationState === "visible") {'
+          if s.count(old) != 1:
+              raise SystemExit(f'expected one duplicate-broadcast patch point, got {s.count(old)}')
+          p.write_text(s.replace(old, new, 1))
+          PY
       - name: Apply product patch
         run: python .github/apply-final-load-ui.py
       - name: Remove temporary patch machinery
