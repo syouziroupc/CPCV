@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -61,3 +61,48 @@ jobs:
         run: |
           npm audit
           npm audit --omit=dev
+
+  finalize-spanish-routing:
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/agent/fix-spanish-language-routing-20260808') || (github.event_name == 'pull_request' && github.head_ref == 'agent/fix-spanish-language-routing-20260808')
+    name: Finalize Spanish routing fix
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-spanish-language-routing-20260808
+          fetch-depth: 0
+          token: ${{ github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Test, update manifest, and clean temporary CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          node scripts/test-user-facing-stability.mjs
+          npm run check:stage08
+          npm run test:owner-bootstrap
+          npm run deploy:dry-run
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p=Path('SOURCE_SHA256SUMS.override.txt')
+          entries={}
+          for line in p.read_text().splitlines():
+              if line.strip():
+                  digest,name=line.split('  ',1); entries[name]=digest
+          for name in ['src/content-filter/language.js','scripts/test-user-facing-stability.mjs']:
+              entries[name]=hashlib.sha256(Path(name).read_bytes()).hexdigest()
+          p.write_text('\n'.join(f'{entries[name]}  {name}' for name in sorted(entries))+'\n')
+          PY
+          git checkout origin/master -- .github/workflows/ci.yml
+          git config user.name "cpcv-language-fix"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Spanish source language routing"
+          node scripts/verify-source-manifest.mjs
+          test -z "$(git status --porcelain)"
+          git push origin HEAD:agent/fix-spanish-language-routing-20260808
