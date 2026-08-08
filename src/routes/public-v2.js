@@ -83,7 +83,7 @@ export async function handlePublicV2Api(request, env) {
   return authJson({ ok: false, error: "NOT_FOUND" }, 404);
 }
 
-const COMMENT_ROOM_RETRY_DELAYS_MS = Object.freeze([40, 120]);
+const COMMENT_ROOM_RETRY_DELAYS_MS = Object.freeze([80, 240, 720, 1600, 3200]);
 
 async function fetchCommentRoomMessage(stub, init) {
   let lastError = null;
@@ -92,17 +92,14 @@ async function fetchCommentRoomMessage(stub, init) {
       return await stub.fetch("https://comment-room/message", init);
     } catch (error) {
       lastError = error;
-      if (!isDurableObjectDeploymentReset(error) || attempt >= COMMENT_ROOM_RETRY_DELAYS_MS.length) throw error;
+      if (attempt >= COMMENT_ROOM_RETRY_DELAYS_MS.length) throw error;
+      console.warn("CommentRoom transport retry", attempt + 1, String(error?.name || "ERROR"));
       await new Promise((resolve) => setTimeout(resolve, COMMENT_ROOM_RETRY_DELAYS_MS[attempt]));
     }
   }
   throw lastError || new Error("COMMENT_ROOM_UNAVAILABLE");
 }
 
-function isDurableObjectDeploymentReset(error) {
-  const message = String(error?.message || error || "");
-  return /durable object.*reset|reset.*durable object|code was updated/i.test(message);
-}
 
 async function loadPublicMessageSession(db, publicCode) {
   return db.prepare(
