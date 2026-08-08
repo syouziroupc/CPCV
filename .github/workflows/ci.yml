@@ -44,6 +44,11 @@ jobs:
           if s.count(radius) != 1:
               raise SystemExit(f'expected one minimal radius patch point, got {s.count(radius)}')
           s = s.replace(radius, '  border-radius: 0;', 1)
+          short_password = 'このフォームを送信した場合だけ変更されます。'
+          safe_password = 'このフォームを送信した場合だけパスワードを変更します。'
+          if s.count(short_password) != 1:
+              raise SystemExit(f'expected one password safety patch point, got {s.count(short_password)}')
+          s = s.replace(short_password, safe_password, 1)
           start = s.find('# Bump shared CSS query on remaining HTML pages to avoid stale cached styling.')
           end = s.find('# Flat, high-contrast, low-decoration finish.')
           if start < 0 or end <= start:
