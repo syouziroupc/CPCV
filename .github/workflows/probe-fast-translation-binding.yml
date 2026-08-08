@@ -1,0 +1,161 @@
+name: Probe dedicated translation AI binding
+
+on:
+  push:
+    branches:
+      - agent/deploy-ai-translation-throughput-staging
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-fast-translation-binding
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: e11301117017f59960e02181d9fc8b190c59d04b
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Benchmark stable dedicated translation binding and delete temporary Worker
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 7cea58251b35319648343e0dd9f7cb76
+          PROBE_WORKER: cpcv-ai-binding-probe-e1130111
+          PROBE_PATH: 4b7e1c2f-9347-4b14-a34d-d88a697d3fc0
+        run: |
+          set -euo pipefail
+          mkdir -p probe-records/responses
+          cleanup() {
+            curl --silent --show-error --request DELETE \
+              --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/$PROBE_WORKER" \
+              > probe-records/05-delete.json || true
+          }
+          trap cleanup EXIT
+
+          cat > .ai-binding-probe.js <<'JS'
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url);
+              if (url.pathname !== "/4b7e1c2f-9347-4b14-a34d-d88a697d3fc0") {
+                return new Response("Not found", { status: 404 });
+              }
+              const started = Date.now();
+              try {
+                const result = await env.AI.run("@cf/meta/m2m100-1.2b", {
+                  text: "授業内容を確認しました",
+                  source_lang: "ja",
+                  target_lang: "en"
+                });
+                return Response.json({ ok: true, elapsed_ms: Date.now() - started, result });
+              } catch (error) {
+                return Response.json({
+                  ok: false,
+                  elapsed_ms: Date.now() - started,
+                  error_name: String(error?.name || "Error"),
+                  error_message: String(error?.message || "").slice(0, 300)
+                }, { status: 502 });
+              }
+            }
+          };
+          JS
+
+          cat > .ai-binding-probe.toml <<TOML
+          name = "$PROBE_WORKER"
+          main = ".ai-binding-probe.js"
+          compatibility_date = "2026-06-17"
+          workers_dev = true
+
+          [ai]
+          binding = "AI"
+          TOML
+
+          npx wrangler deploy --config .ai-binding-probe.toml > probe-records/00-deploy.txt 2>&1
+          url="https://$PROBE_WORKER.syouziroupc.workers.dev/$PROBE_PATH"
+          route_http=000
+          for attempt in $(seq 1 30); do
+            sleep 2
+            route_http=$(curl --silent --show-error --output probe-records/01-first-warmup.json --write-out '%{http_code}' "$url" || true)
+            printf 'attempt=%s http=%s\n' "$attempt" "$route_http" >> probe-records/01-route-readiness.txt
+            if [ "$route_http" = "200" ]; then
+              break
+            fi
+          done
+          test "$route_http" = "200"
+
+          sleep 30
+          second_http=$(curl --silent --show-error --output probe-records/02-second-warmup.json --write-out '%{http_code}' "$url" || true)
+          printf 'second_warmup_http=%s\n' "$second_http" > probe-records/02-stability.txt
+          test "$second_http" = "200"
+
+          for i in $(seq 1 20); do
+            (
+              http=$(curl --silent --show-error --output "probe-records/responses/$i.json" --write-out '%{http_code}' "$url" || true)
+              printf '%s\n' "$http" > "probe-records/responses/$i.http"
+            ) &
+          done
+          wait
+
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const records = [];
+          for (let i = 1; i <= 20; i += 1) {
+            const http = fs.readFileSync(path.join('probe-records/responses', `${i}.http`), 'utf8').trim();
+            const raw = fs.readFileSync(path.join('probe-records/responses', `${i}.json`), 'utf8');
+            let payload;
+            try { payload = JSON.parse(raw); } catch { payload = { raw }; }
+            const result = payload?.result;
+            const translated = typeof result === 'string' ? result
+              : result?.translated_text ?? result?.translation ?? result?.translatedText
+                ?? result?.translation_text ?? result?.generated_text ?? result?.text ?? '';
+            records.push({
+              i,
+              http,
+              ok: http === '200' && payload?.ok === true && typeof translated === 'string' && Boolean(translated.trim()),
+              elapsed_ms: Number(payload?.elapsed_ms || 0),
+              result_keys: result && typeof result === 'object' ? Object.keys(result).sort() : [],
+              error_name: payload?.error_name || '',
+              error_message: payload?.error_message || '',
+              raw_error: payload?.raw || ''
+            });
+          }
+          const successes = records.filter((record) => record.ok);
+          const latencies = successes.map((record) => record.elapsed_ms).sort((a, b) => a - b);
+          const percentile = (p) => latencies[Math.min(latencies.length - 1, Math.max(0, Math.ceil(latencies.length * p) - 1))] ?? 0;
+          const summary = {
+            requested: records.length,
+            succeeded: successes.length,
+            failed: records.length - successes.length,
+            p50_ms: percentile(0.50),
+            p95_ms: percentile(0.95),
+            max_ms: latencies.at(-1) ?? 0,
+            result_keys: [...new Set(successes.flatMap((record) => record.result_keys))].sort(),
+            failures: records.filter((record) => !record.ok)
+          };
+          fs.writeFileSync('probe-records/03-concurrency-summary.json', JSON.stringify(summary, null, 2));
+          fs.writeFileSync('probe-records/04-concurrency-records.json', JSON.stringify(records, null, 2));
+          console.log(JSON.stringify(summary));
+          if (summary.succeeded !== 20 || !summary.result_keys.includes('translated_text')) process.exit(1);
+          NODE
+      - name: Upload probe records
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-ai-binding-stable-concurrency-e1130111
+          path: probe-records/
+          if-no-files-found: warn
+          retention-days: 30
