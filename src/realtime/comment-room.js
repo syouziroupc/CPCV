@@ -117,7 +117,7 @@ export class CommentRoom {
 
       const translationJob = ai.jobs.find((job) => job.jobType === "translation");
       let event = null;
-      if (result.comment.moderationState === "visible") {
+      if (!result.duplicate && result.comment.moderationState === "visible") {
         if (!result.duplicate && translationJob) {
           try {
             event = await markRealtimeCommentTranslationPending(this.env.DB_V2, {

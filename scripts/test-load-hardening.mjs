@@ -31,7 +31,7 @@ assert.match(realtime, /UPDATE realtime_events[\s\S]*RETURNING id, organization_
 assert.match(room, /if \(!event\) \{[\s\S]*findRealtimeEventForComment/);
 assert.match(room, /scheduleAiForAcceptedComment/);
 assert.match(room, /retryAiScheduling/);
-assert.match(room, /if \(result\.comment\.moderationState === "visible"\)/);
+assert.match(room, /if \(!result\.duplicate && result\.comment\.moderationState === "visible"\)/);
 assert.match(aiRepository, /hasChangeMetadata/);
 assert.match(joinJs, /AbortController/);
 assert.match(joinJs, /postCommentWithRetry/);
