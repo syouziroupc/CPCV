@@ -257,8 +257,9 @@ async function testHibernationHandlers(h) {
   await alarmRoom.scheduleAuthRevalidation();
   check("new connections do not postpone an earlier auth revalidation alarm", alarmWrites.length === 0, alarmWrites);
   currentAlarm = Date.now() + 600_000;
+  const lateAlarm = currentAlarm;
   await alarmRoom.scheduleAuthRevalidation();
-  check("a missing or excessively late auth alarm is moved earlier", alarmWrites.length === 1 && alarmWrites[0] < currentAlarm + 1, alarmWrites);
+  check("a missing or excessively late auth alarm is moved earlier", alarmWrites.length === 1 && alarmWrites[0] < lateAlarm, alarmWrites);
 
   const bulkSockets = [];
   for (let index = 0; index < 85; index += 1) {

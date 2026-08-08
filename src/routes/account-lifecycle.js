@@ -1085,7 +1085,9 @@ function requirePublicPost(request, env) {
 }
 
 function schedule(ctx, promise) {
-  const guarded = Promise.resolve(promise).catch(() => undefined);
+  const guarded = Promise.resolve(promise).catch((error) => {
+    console.error("Background account email task failed", String(error?.code || error?.name || "ERROR").slice(0, 80));
+  });
   if (typeof ctx?.waitUntil === "function") ctx.waitUntil(guarded);
   else return guarded;
 }

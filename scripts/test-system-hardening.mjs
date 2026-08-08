@@ -70,6 +70,11 @@ function testStaticHardening() {
   const organization = readFileSync(new URL("../public/assets/organization-settings.js", import.meta.url), "utf8");
   const viewer = readFileSync(new URL("../public/assets/viewer.js", import.meta.url), "utf8");
   const smoke = readFileSync(new URL("./smoke-production.mjs", import.meta.url), "utf8");
+  const confirmEmail = readFileSync(new URL("../public/assets/confirm-email-change.js", import.meta.url), "utf8");
+  const verifyEmail = readFileSync(new URL("../public/assets/verify-email.js", import.meta.url), "utf8");
+  const resetPassword = readFileSync(new URL("../public/assets/reset-password.js", import.meta.url), "utf8");
+  const emailAuth = readFileSync(new URL("../src/routes/email-auth.js", import.meta.url), "utf8");
+  const lifecycle = readFileSync(new URL("../src/routes/account-lifecycle.js", import.meta.url), "utf8");
 
   assert.doesNotMatch(privateRoute, /void scheduleAiForComment/);
   assert.match(privateRoute, /ctx\.waitUntil\(task\)/);
@@ -88,6 +93,15 @@ function testStaticHardening() {
   assert.match(invitation, /session\.response\.status !== 401/);
   assert.match(account, /error\?\.status === 401/);
   assert.equal((smoke.match(/AbortSignal\.timeout\(10_000\)/g) || []).length, 2);
+  for (const source of [confirmEmail, verifyEmail, resetPassword]) {
+    assert.match(source, /catch \(error\)/, "token/action pages must handle network exceptions");
+    assert.match(source, /NETWORK_ERROR/);
+  }
+  assert.match(resetPassword, /button\.disabled = false/);
+  assert.doesNotMatch(emailAuth, /catch\(\(\) => undefined\)/);
+  assert.doesNotMatch(lifecycle, /catch\(\(\) => undefined\)/);
+  assert.match(emailAuth, /Background email task failed/);
+  assert.match(lifecycle, /Background account email task failed/);
 }
 
 await testRealtimeRetry();

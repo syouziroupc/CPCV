@@ -344,7 +344,9 @@ function personalWorkspaceName(displayName) {
 }
 
 function schedule(ctx, promise) {
-  const guarded = Promise.resolve(promise).catch(() => undefined);
+  const guarded = Promise.resolve(promise).catch((error) => {
+    console.error("Background email task failed", safeErrorCode(error));
+  });
   if (typeof ctx?.waitUntil === "function") ctx.waitUntil(guarded);
   else return guarded;
 }
