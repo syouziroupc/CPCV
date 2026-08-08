@@ -13,51 +13,186 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: Full local validation
+  staging-user-stability:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/staging-user-stability-20260808'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    environment: production
+    timeout-minutes: 35
+    env:
+      RELEASE_COMMIT: 66123c3a976b42315cf0d8c5d6f47d7d14e7061b
+      STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
     steps:
-      - name: Checkout
+      - name: Checkout operational branch
         uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+        with:
+          ref: agent/staging-user-stability-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
-      - name: Pin npm
-        run: npm install --global npm@11.18.0
-
-      - name: Install dependencies
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Deploy exact release and run authenticated stability audit
         shell: bash
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          set -o pipefail
-          npm ci || {
-            echo "npm ci failed once; clearing the npm cache and retrying."
-            npm cache clean --force
-            npm ci
-          }
+          set -euo pipefail
+          account=""
+          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do value="${!key:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
+          test -n "$TOKEN"; test -n "$account"
+          echo "::add-mask::$TOKEN"; echo "::add-mask::$account"
+          export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$account"
 
-      - name: Run static project and documentation checks
-        run: |
-          npm run verify:source-manifest
-          npm run check
-          npm run check:project
-          npm run check:pdf-links
-          npm run verify:final-docs
+          cp scripts/staging-user-stability-audit.mjs /tmp/staging-user-stability-audit.mjs
+          cp scripts/staging-user-stability-browser.py /tmp/staging-user-stability-browser.py
+          git reset --hard "$RELEASE_COMMIT"
+          git clean -fd
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          npm ci
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
 
-      - name: Run all implemented-stage tests
-        run: npm run check:stage08
+          cat > .staging-stability.wrangler.toml <<'TOML'
+          #:schema node_modules/wrangler/config-schema.json
+          name = "class-pdf-comment-viewer-v01-staging"
+          main = "src/index.js"
+          compatibility_date = "2026-06-17"
+          workers_dev = true
+          assets = { directory = "./public", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "class_comment_db_staging"
+          database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"
+          [[d1_databases]]
+          binding = "DB_V2"
+          database_name = "class_comment_db_v2_staging"
+          database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"
+          migrations_dir = "migrations-v2"
+          [[send_email]]
+          name = "EMAIL"
+          allowed_sender_addresses = [ "noreply@szworld.uk" ]
+          [ai]
+          binding = "AI"
+          [[queues.producers]]
+          binding = "AI_JOBS_QUEUE"
+          queue = "cpcv-ai-jobs-staging"
+          [[queues.consumers]]
+          queue = "cpcv-ai-jobs-staging"
+          max_batch_size = 10
+          max_batch_timeout = 0
+          max_retries = 3
+          [[queues.producers]]
+          binding = "AI_TRANSLATION_QUEUE"
+          queue = "cpcv-ai-translation-jobs-staging"
+          [[queues.consumers]]
+          queue = "cpcv-ai-translation-jobs-staging"
+          max_batch_size = 6
+          max_batch_timeout = 0
+          max_retries = 100
+          dead_letter_queue = "cpcv-ai-translation-dlq-staging"
+          [[queues.producers]]
+          binding = "AI_MODERATION_QUEUE"
+          queue = "cpcv-ai-moderation-jobs-staging"
+          [[queues.consumers]]
+          queue = "cpcv-ai-moderation-jobs-staging"
+          max_batch_size = 6
+          max_batch_timeout = 0
+          max_retries = 100
+          dead_letter_queue = "cpcv-ai-moderation-dlq-staging"
+          [[durable_objects.bindings]]
+          name = "COMMENT_ROOM"
+          class_name = "CommentRoom"
+          [[migrations]]
+          tag = "v1"
+          new_sqlite_classes = [ "CommentRoom" ]
+          [[ratelimits]]
+          name = "AUTH_LOGIN_IP_LIMITER"
+          namespace_id = "826071801"
+          simple = { limit = 20, period = 60 }
+          [[ratelimits]]
+          name = "AUTH_LOGIN_ACCOUNT_LIMITER"
+          namespace_id = "826071802"
+          simple = { limit = 10, period = 60 }
+          [[ratelimits]]
+          name = "PUBLIC_COMMENT_RATE_LIMITER"
+          namespace_id = "826071803"
+          simple = { limit = 30, period = 60 }
+          [[ratelimits]]
+          name = "AUTH_PUBLIC_EMAIL_LIMITER"
+          namespace_id = "826071804"
+          simple = { limit = 30, period = 60 }
+          [[ratelimits]]
+          name = "AI_TRANSLATION_RATE_LIMITER"
+          namespace_id = "826071805"
+          simple = { limit = 700, period = 60 }
+          [[ratelimits]]
+          name = "AI_MODERATION_RATE_LIMITER"
+          namespace_id = "826071806"
+          simple = { limit = 290, period = 60 }
+          [vars]
+          APP_ENV = "production"
+          AUTH_V2_ENABLED = "1"
+          EMAIL_AUTH_REQUIRED = "0"
+          AI_MODERATION_MODEL = "@cf/moonshotai/kimi-k2.6"
+          AI_MODERATION_FALLBACK_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+          AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"
+          AI_TRANSLATION_BALANCED_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+          AI_TRANSLATION_ACCURATE_MODEL = "@cf/moonshotai/kimi-k2.6"
+          AI_TIMEOUT_MS = "12000"
+          AI_TRANSLATION_TIMEOUT_MS = "8000"
+          AI_TRANSLATION_BALANCED_TIMEOUT_MS = "18000"
+          AI_TRANSLATION_ACCURATE_TIMEOUT_MS = "30000"
+          AI_QUEUE_PARALLELISM = "5"
+          AI_TRANSLATION_QUEUE_PARALLELISM = "3"
+          AI_MODERATION_QUEUE_PARALLELISM = "3"
+          AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          AUTH_EMAIL_FROM = "noreply@szworld.uk"
+          AUTH_EMAIL_REPLY_TO = "noreply@szworld.uk"
+          TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
+          [triggers]
+          crons = [ "*/5 * * * *", "17 3 * * *" ]
+          TOML
 
-      - name: Run Owner bootstrap regression
-        run: npm run test:owner-bootstrap
+          node scripts/verify-deployment-config.mjs .staging-stability.wrangler.toml
+          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .staging-stability.wrangler.toml
+          node scripts/verify-ai-readiness.mjs --config .staging-stability.wrangler.toml
+          npx wrangler d1 migrations apply class_comment_db_staging --remote --config .staging-stability.wrangler.toml
+          npx wrangler d1 migrations apply class_comment_db_v2_staging --remote --config .staging-stability.wrangler.toml
+          node scripts/verify-remote-d1.mjs --database class_comment_db_v2_staging --config .staging-stability.wrangler.toml
+          npx wrangler deploy --config .staging-stability.wrangler.toml --keep-vars 2>&1 | tee staging-stability-deploy.txt
+          node scripts/smoke-production.mjs --config .staging-stability.wrangler.toml --origin "$STAGING_ORIGIN" | tee staging-stability-smoke.txt
 
-      - name: Validate Wrangler bundle
-        run: npm run deploy:dry-run
+          STABILITY_SESSION_TOKEN=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")
+          STABILITY_CSRF_TOKEN=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")
+          echo "::add-mask::$STABILITY_SESSION_TOKEN"; echo "::add-mask::$STABILITY_CSRF_TOKEN"
+          export STABILITY_SESSION_TOKEN STABILITY_CSRF_TOKEN STAGING_WRANGLER_CONFIG=.staging-stability.wrangler.toml
+          cleanup() { node /tmp/staging-user-stability-audit.mjs cleanup || true; }
+          trap cleanup EXIT
 
-      - name: Audit all dependencies
-        run: |
-          npm audit
-          npm audit --omit=dev
+          node /tmp/staging-user-stability-audit.mjs seed
+          python /tmp/staging-user-stability-browser.py
+          node /tmp/staging-user-stability-audit.mjs verify
+          node /tmp/staging-user-stability-audit.mjs cleanup
+          trap - EXIT
+      - name: Upload authenticated staging evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-staging-user-stability-${{ github.run_id }}
+          path: |
+            stability-fixture.json
+            stability-runtime-report.json
+            stability-browser-report.json
+            stability-browser/
+            staging-stability-deploy.txt
+            staging-stability-smoke.txt
+          if-no-files-found: warn
+          retention-days: 30
