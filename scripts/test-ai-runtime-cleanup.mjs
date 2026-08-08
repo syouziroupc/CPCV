@@ -1,0 +1,16 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+const read=(p)=>readFileSync(new URL(`../${p}`,import.meta.url),"utf8");
+const wrangler=read("wrangler.toml");
+const processor=read("src/ai/processor.js");
+const classifier=read("src/ai/moderation-classifier.js");
+assert.doesNotMatch(wrangler,/AI_JOBS_QUEUE|queue = "cpcv-ai-jobs"/);
+assert.doesNotMatch(wrangler,/AI_TRANSLATION_RATE_LIMITER/);
+assert.match(wrangler,/AI_TEXT_GENERATION_RATE_LIMITER[\s\S]*?limit = 290/);
+assert.match(wrangler,/queue = "cpcv-ai-moderation-jobs"[\s\S]*?max_batch_size = 20[\s\S]*?max_batch_timeout = 1[\s\S]*?max_retries = 6/);
+assert.match(wrangler,/queue = "cpcv-ai-translation-jobs"[\s\S]*?max_batch_size = 6[\s\S]*?max_retries = 18/);
+assert.doesNotMatch(classifier,/batchStates|WeakMap/);
+assert.match(classifier,/if \(!configuredModel\) return runLegacyModerationModel/);
+assert.match(processor,/processModerationQueueBatch/);
+assert.doesNotMatch(processor,/AI_TRANSLATION_RATE_LIMITER|AI_JOBS_QUEUE/);
+console.log("AI runtime cleanup regression passed");

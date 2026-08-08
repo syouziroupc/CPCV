@@ -9,7 +9,7 @@ const DEFAULT_TRANSLATION_BALANCED_TIMEOUT_MS = 6_000;
 const DEFAULT_TRANSLATION_ACCURATE_TIMEOUT_MS = 12_000;
 const DEDICATED_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b";
 const DEDICATED_SOURCE_LANGUAGES = new Set(["ja", "en", "ru", "tr"]);
-const SHARED_TEXT_GENERATION_KEY = "workers-ai-moderation";
+const SHARED_TEXT_GENERATION_KEY = "workers-ai-text-generation";
 
 const MODERATION_SCHEMA = Object.freeze({
   type: "object",
@@ -307,7 +307,7 @@ function moderationRequestForModel(model, request) {
 }
 
 async function acquireSharedTextGenerationCapacity(env) {
-  const limiter = env?.AI_MODERATION_RATE_LIMITER;
+  const limiter = env?.AI_TEXT_GENERATION_RATE_LIMITER || env?.AI_MODERATION_RATE_LIMITER;
   if (!limiter || typeof limiter.limit !== "function") return true;
   try {
     const result = await limiter.limit({ key: SHARED_TEXT_GENERATION_KEY });
