@@ -92,7 +92,7 @@ jobs:
 
       - name: Remove temporary machinery and restore permanent CI
         run: |
-          git rm scripts/ai-response-hardening-patch.py .github/workflows/ai-response-hardening-patch.yml
+          git rm -f scripts/ai-response-hardening-patch.py .github/workflows/ai-response-hardening-patch.yml
           git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
           git add .github/workflows/ci.yml src public/assets scripts wrangler.toml
 
