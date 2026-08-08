@@ -49,7 +49,8 @@ jobs:
 
           cat > /tmp/quality.mjs <<'NODE'
           import { writeFile } from 'node:fs/promises';
-          import { runModerationModel } from `${process.cwd()}/src/ai/moderation-classifier.js`;
+          import { pathToFileURL } from 'node:url';
+          const { runModerationModel } = await import(pathToFileURL(`${process.cwd()}/src/ai/moderation-classifier.js`).href);
 
           const token=process.env.CLOUDFLARE_API_TOKEN;
           const account=process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -135,7 +136,6 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           p=Path('/tmp/load.mjs'); s=p.read_text()
-          # Moderation-only system load. Keep translation out of this measurement.
           s=s.replace("SET moderation_enabled=1,translation_enabled=1,translation_quality=?3", "SET moderation_enabled=1,translation_enabled=0,translation_quality=?3")
           s=s.replace("expectedJobsPerComment: 2", "expectedJobsPerComment: 1")
           s=s.replace("count: 40, concurrency: 10", "count: 40, concurrency: 20")
@@ -159,9 +159,7 @@ jobs:
             const five=Object.entries(p.httpStatusCounts||{}).filter(([k])=>/^5/.test(k)).reduce((n,[,v])=>n+Number(v),0);
             if(five) errors.push(`${p.name}: 5xx=${five}`);
             if(p.ai?.expectedJobs!=null && (p.ai.failed||p.ai.retried||p.ai.nonTerminal||p.ai.totalJobs!==p.ai.expectedJobs)) errors.push(`${p.name}: AI=${JSON.stringify(p.ai)}`);
-            if(p.ai?.modelCalls){
-              for(const m of p.ai.modelCalls.filter(x=>x.job_type==='moderation')) if(m.model!=='@cf/google/embeddinggemma-300m') errors.push(`${p.name}: unexpected moderation model ${m.model}`);
-            }
+            if(p.ai?.modelCalls){for(const m of p.ai.modelCalls.filter(x=>x.job_type==='moderation')) if(m.model!=='@cf/google/embeddinggemma-300m') errors.push(`${p.name}: unexpected moderation model ${m.model}`);}
           }
           const burst=(r.phases||[]).find(p=>p.name==='fast_burst_en');
           if(!burst) errors.push('fast burst missing');
