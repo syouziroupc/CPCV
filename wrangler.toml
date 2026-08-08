@@ -44,7 +44,7 @@ queue = "cpcv-ai-translation-jobs"
 
 [[queues.consumers]]
 queue = "cpcv-ai-translation-jobs"
-max_batch_size = 6
+max_batch_size = 3
 max_batch_timeout = 0
 max_retries = 100
 dead_letter_queue = "cpcv-ai-translation-dlq"
@@ -55,7 +55,7 @@ queue = "cpcv-ai-moderation-jobs"
 
 [[queues.consumers]]
 queue = "cpcv-ai-moderation-jobs"
-max_batch_size = 6
+max_batch_size = 3
 max_batch_timeout = 0
 max_retries = 100
 dead_letter_queue = "cpcv-ai-moderation-dlq"

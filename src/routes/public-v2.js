@@ -17,7 +17,10 @@ export async function handlePublicV2Api(request, env) {
   if (parts[2] !== "sessions" || !parts[3]) return authJson({ ok: false, error: "NOT_FOUND" }, 404);
 
   const publicCode = decodePublicCode(parts[3]);
-  const session = await loadPublicSession(env.DB_V2, publicCode);
+  const messagePost = request.method === "POST" && parts[4] === "messages" && parts.length === 5;
+  const session = messagePost
+    ? await loadPublicMessageSession(env.DB_V2, publicCode)
+    : await loadPublicSession(env.DB_V2, publicCode);
   if (!isUsableSession(session)) return authJson({ ok: false, error: "SESSION_NOT_FOUND" }, 404);
 
   const participant = getOrCreateParticipantToken(request, env, publicCode);
@@ -45,7 +48,7 @@ export async function handlePublicV2Api(request, env) {
     assertOnlyFields(input, ["nickname", "message", "idempotencyKey", "clientId"]);
     const normalized = normalizeCommentInput(input);
     const stub = env.COMMENT_ROOM.get(env.COMMENT_ROOM.idFromName(session.id));
-    const roomResponse = await stub.fetch("https://comment-room/message", {
+    const roomResponse = await fetchCommentRoomMessage(stub, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -78,6 +81,34 @@ export async function handlePublicV2Api(request, env) {
   }
 
   return authJson({ ok: false, error: "NOT_FOUND" }, 404);
+}
+
+const COMMENT_ROOM_RETRY_DELAYS_MS = Object.freeze([40, 120]);
+
+async function fetchCommentRoomMessage(stub, init) {
+  let lastError = null;
+  for (let attempt = 0; attempt <= COMMENT_ROOM_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await stub.fetch("https://comment-room/message", init);
+    } catch (error) {
+      lastError = error;
+      if (!isDurableObjectDeploymentReset(error) || attempt >= COMMENT_ROOM_RETRY_DELAYS_MS.length) throw error;
+      await new Promise((resolve) => setTimeout(resolve, COMMENT_ROOM_RETRY_DELAYS_MS[attempt]));
+    }
+  }
+  throw lastError || new Error("COMMENT_ROOM_UNAVAILABLE");
+}
+
+function isDurableObjectDeploymentReset(error) {
+  const message = String(error?.message || error || "");
+  return /durable object.*reset|reset.*durable object|code was updated/i.test(message);
+}
+
+async function loadPublicMessageSession(db, publicCode) {
+  return db.prepare(
+    `SELECT id, organization_id, public_code, posting_enabled, status, expires_at
+     FROM live_sessions WHERE public_code = ?1 LIMIT 1`
+  ).bind(publicCode).first();
 }
 
 async function loadPublicSession(db, publicCode) {

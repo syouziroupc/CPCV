@@ -311,3 +311,39 @@ p, li, dd, dt, label, small, strong, span, a, button, th, td, summary {
 .grid { min-width: 0; }
 .local-log-table-wrap { width: 100%; min-width: 0; max-width: 100%; overflow: auto; }
 .local-log-table { width: 100%; min-width: 560px; }
+
+
+/* Minimal application finish: fewer decorative layers, clearer hierarchy. */
+.app-topbar, .clear-site-header, .compact-public-header {
+  box-shadow: none !important;
+  border-bottom: 1px solid #d9d9d9;
+  background: #fff;
+}
+.brand-mark, .button, .input, .select, .textarea,
+.workspace-panel, .workspace-detail, .section, .info-box,
+.state-tile, .filter-preset-button, .auth-shell, .auth-form-panel {
+  border-radius: 0;
+  box-shadow: none !important;
+}
+.admin-page .workspace-panel, .admin-page .workspace-detail,
+.account-page .workspace-panel, .account-page .workspace-detail,
+.internal-page .workspace-panel, .internal-page .workspace-detail,
+.account-page .section, .internal-page .section {
+  border: 1px solid #dedede;
+  background: #fff;
+}
+.workspace-panel-primary { border-color: #111 !important; }
+.state-tile { background: #f7f7f7 !important; }
+.admin-page .eyebrow, .account-page .eyebrow, .internal-page .eyebrow { display: none; }
+.admin-home-grid, .session-workspace, #accountSection, .internal-content { margin-top: 18px; }
+.workspace-panel, .detail-body { padding: clamp(16px, 2.2vw, 24px); }
+.settings-group { padding-block: 16px; }
+.internal-two-column { grid-template-columns: minmax(0, 1fr); }
+.account-summary-grid { grid-template-columns: minmax(0, 1fr); }
+.filter-preset-actions { gap: 8px; }
+.filter-preset-button { min-height: 44px; }
+.session-settings-savebar { border-top: 1px solid #dedede; padding-top: 16px; }
+.clear-public-page .clear-hero { grid-template-columns: minmax(0, 1fr); max-width: 920px; }
+.clear-public-page .clear-hero-copy { max-width: 760px; }
+.clear-public-page .clear-feature-grid article { border-radius: 0; box-shadow: none; }
+.clear-public-page .clear-section, .home-join-panel { box-shadow: none; border-radius: 0; }
