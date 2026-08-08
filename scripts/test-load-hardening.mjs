@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { AI_TARGET_LANGUAGES } from "../src/ai/validation.js";
 
+// CI retrigger only.
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 const publicRoute = read("src/routes/public-v2.js");
 const comments = read("src/comments/repository.js");
