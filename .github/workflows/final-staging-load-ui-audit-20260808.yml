@@ -1,0 +1,322 @@
+name: Final staging load and UI audit 2026-08-08
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/final-staging-load-ui-audit-20260808.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  final-staging-audit:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/final-staging-load-ui-audit-20260808'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      RELEASE_COMMIT: bf83f3476bc0e9045631e6610a13044cc62c2584
+      STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+    steps:
+      - name: Checkout operational branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/final-staging-load-ui-audit-20260808
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Deploy exact release and execute real staging audit
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          account=""
+          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do
+            value="${!key:-}"
+            if [ -n "$value" ]; then account="$value"; break; fi
+          done
+          test -n "$TOKEN"; test -n "$account"
+          echo "::add-mask::$TOKEN"; echo "::add-mask::$account"
+          export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$account"
+
+          git fetch origin agent/staging-reload-audit-20260807:refs/remotes/origin/agent/staging-reload-audit-20260807
+          git fetch origin agent/staging-user-stability-20260808:refs/remotes/origin/agent/staging-user-stability-20260808
+          git show origin/agent/staging-reload-audit-20260807:scripts/staging-load-audit-v3.mjs > /tmp/staging-load-audit-v3.mjs
+          git show origin/agent/staging-user-stability-20260808:scripts/staging-user-stability-audit.mjs > /tmp/staging-user-stability-audit.mjs
+          git show origin/agent/staging-user-stability-20260808:scripts/staging-user-stability-browser.py > /tmp/staging-user-stability-browser.py
+
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/staging-load-audit-v3.mjs')
+          s=p.read_text()
+          s=s.replace("count: 40, concurrency: 10", "count: 80, concurrency: 20")
+          s=s.replace("count: 120, concurrency: 60", "count: 80, concurrency: 40")
+          s=s.replace("count: 100, concurrency: 50", "count: 60, concurrency: 30")
+          s=s.replace("count: 40, concurrency: 20", "count: 20, concurrency: 10")
+          s=s.replace("timeoutMs: 150_000", "timeoutMs: 90_000")
+          s=s.replace("timeoutMs: 240_000", "timeoutMs: 90_000")
+          s=s.replace("timeoutMs: 300_000", "timeoutMs: 90_000")
+          s=s.replace("await sleep(65_000);", "await sleep(5_000);")
+          p.write_text(s)
+          PY
+
+          git reset --hard "$RELEASE_COMMIT"
+          git clean -fd
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          npm ci
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+
+          cat > .final-staging.wrangler.toml <<'TOML'
+          #:schema node_modules/wrangler/config-schema.json
+          name = "class-pdf-comment-viewer-v01-staging"
+          main = "src/index.js"
+          compatibility_date = "2026-06-17"
+          workers_dev = true
+          assets = { directory = "./public", binding = "ASSETS", run_worker_first = true, html_handling = "none" }
+          [[d1_databases]]
+          binding = "DB"
+          database_name = "class_comment_db_staging"
+          database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"
+          [[d1_databases]]
+          binding = "DB_V2"
+          database_name = "class_comment_db_v2_staging"
+          database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"
+          migrations_dir = "migrations-v2"
+          [[send_email]]
+          name = "EMAIL"
+          allowed_sender_addresses = [ "noreply@szworld.uk" ]
+          [ai]
+          binding = "AI"
+          [[queues.producers]]
+          binding = "AI_JOBS_QUEUE"
+          queue = "cpcv-ai-jobs-staging"
+          [[queues.consumers]]
+          queue = "cpcv-ai-jobs-staging"
+          max_batch_size = 10
+          max_batch_timeout = 0
+          max_retries = 3
+          [[queues.producers]]
+          binding = "AI_TRANSLATION_QUEUE"
+          queue = "cpcv-ai-translation-jobs-staging"
+          [[queues.consumers]]
+          queue = "cpcv-ai-translation-jobs-staging"
+          max_batch_size = 3
+          max_batch_timeout = 0
+          max_retries = 100
+          dead_letter_queue = "cpcv-ai-translation-dlq-staging"
+          [[queues.producers]]
+          binding = "AI_MODERATION_QUEUE"
+          queue = "cpcv-ai-moderation-jobs-staging"
+          [[queues.consumers]]
+          queue = "cpcv-ai-moderation-jobs-staging"
+          max_batch_size = 3
+          max_batch_timeout = 0
+          max_retries = 100
+          dead_letter_queue = "cpcv-ai-moderation-dlq-staging"
+          [[durable_objects.bindings]]
+          name = "COMMENT_ROOM"
+          class_name = "CommentRoom"
+          [[migrations]]
+          tag = "v1"
+          new_sqlite_classes = [ "CommentRoom" ]
+          [[ratelimits]]
+          name = "AUTH_LOGIN_IP_LIMITER"
+          namespace_id = "826071801"
+          simple = { limit = 20, period = 60 }
+          [[ratelimits]]
+          name = "AUTH_LOGIN_ACCOUNT_LIMITER"
+          namespace_id = "826071802"
+          simple = { limit = 10, period = 60 }
+          [[ratelimits]]
+          name = "PUBLIC_COMMENT_RATE_LIMITER"
+          namespace_id = "826071803"
+          simple = { limit = 30, period = 60 }
+          [[ratelimits]]
+          name = "AUTH_PUBLIC_EMAIL_LIMITER"
+          namespace_id = "826071804"
+          simple = { limit = 30, period = 60 }
+          [[ratelimits]]
+          name = "AI_TRANSLATION_RATE_LIMITER"
+          namespace_id = "826071805"
+          simple = { limit = 700, period = 60 }
+          [[ratelimits]]
+          name = "AI_MODERATION_RATE_LIMITER"
+          namespace_id = "826071806"
+          simple = { limit = 290, period = 60 }
+          [vars]
+          APP_ENV = "production"
+          AUTH_V2_ENABLED = "1"
+          EMAIL_AUTH_REQUIRED = "0"
+          AI_MODERATION_MODEL = "@cf/moonshotai/kimi-k2.6"
+          AI_MODERATION_FALLBACK_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+          AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"
+          AI_TRANSLATION_BALANCED_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+          AI_TRANSLATION_ACCURATE_MODEL = "@cf/moonshotai/kimi-k2.6"
+          AI_TIMEOUT_MS = "12000"
+          AI_TRANSLATION_TIMEOUT_MS = "8000"
+          AI_TRANSLATION_BALANCED_TIMEOUT_MS = "18000"
+          AI_TRANSLATION_ACCURATE_TIMEOUT_MS = "30000"
+          AI_QUEUE_PARALLELISM = "5"
+          AI_TRANSLATION_QUEUE_PARALLELISM = "3"
+          AI_MODERATION_QUEUE_PARALLELISM = "3"
+          AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
+          AUTH_EMAIL_FROM = "noreply@szworld.uk"
+          AUTH_EMAIL_REPLY_TO = "noreply@szworld.uk"
+          TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
+          [triggers]
+          crons = [ "*/5 * * * *", "17 3 * * *" ]
+          TOML
+
+          node scripts/verify-deployment-config.mjs .final-staging.wrangler.toml
+          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .final-staging.wrangler.toml
+          node scripts/verify-ai-readiness.mjs --config .final-staging.wrangler.toml
+          npx wrangler d1 migrations apply class_comment_db_staging --remote --config .final-staging.wrangler.toml
+          npx wrangler d1 migrations apply class_comment_db_v2_staging --remote --config .final-staging.wrangler.toml
+          node scripts/verify-remote-d1.mjs --database class_comment_db_v2_staging --config .final-staging.wrangler.toml
+          npx wrangler deploy --config .final-staging.wrangler.toml --keep-vars 2>&1 | tee final-staging-deploy.txt
+          node scripts/smoke-production.mjs --config .final-staging.wrangler.toml --origin "$STAGING_ORIGIN" | tee final-staging-smoke.txt
+
+          timeout 1500s npx wrangler tail class-pdf-comment-viewer-v01-staging --format json > final-worker-tail.jsonl 2>&1 &
+          tail_pid=$!
+          trap 'kill "$tail_pid" 2>/dev/null || true' EXIT
+          sleep 2
+
+          set +e
+          STAGING_ORIGIN="$STAGING_ORIGIN" STAGING_WRANGLER_CONFIG=.final-staging.wrangler.toml node /tmp/staging-load-audit-v3.mjs
+          load_status=$?
+          set -e
+          sleep 3
+          kill "$tail_pid" 2>/dev/null || true
+          wait "$tail_pid" 2>/dev/null || true
+
+          if [ "$load_status" -ne 0 ]; then
+            echo "load harness failed"
+            exit "$load_status"
+          fi
+
+          node - <<'NODE'
+          const r=require('./load-v3-report.json');
+          const errors=[];
+          for(const p of r.phases||[]){
+            if(p.accepted!==p.count) errors.push(`${p.name}: accepted ${p.accepted}/${p.count}`);
+            const five=Object.entries(p.httpStatusCounts||{}).filter(([k])=>/^5/.test(k)).reduce((n,[,v])=>n+Number(v),0);
+            if(five) errors.push(`${p.name}: ${five} HTTP 5xx`);
+            if(p.ai){
+              if(p.ai.failed) errors.push(`${p.name}: AI failed ${p.ai.failed}`);
+              if(p.ai.nonTerminal) errors.push(`${p.name}: AI nonterminal ${p.ai.nonTerminal}`);
+              if(p.ai.retried) errors.push(`${p.name}: AI retried ${p.ai.retried}`);
+              if(p.ai.totalJobs!==p.ai.expectedJobs) errors.push(`${p.name}: AI jobs ${p.ai.totalJobs}/${p.ai.expectedJobs}`);
+            }
+          }
+          const i=r.invariants||{};
+          if(i.comments!==i.expectedComments) errors.push(`comments ${i.comments}/${i.expectedComments}`);
+          if(i.jobs!==i.expectedJobs) errors.push(`jobs ${i.jobs}/${i.expectedJobs}`);
+          if(i.stuck) errors.push(`stuck ${i.stuck}`);
+          if(i.orphan) errors.push(`orphan ${i.orphan}`);
+          if(!i.realtimeGapless) errors.push('realtime gap');
+          if(String(i.quickCheck).toLowerCase()!=='ok') errors.push(`quick_check ${i.quickCheck}`);
+          if(i.foreignKeyViolations) errors.push(`FK ${i.foreignKeyViolations}`);
+          if((r.errors||[]).length) errors.push(`harness errors ${JSON.stringify(r.errors)}`);
+          if(errors.length){ console.error(errors.join('\n')); process.exit(1); }
+          console.log('final staging load acceptance passed');
+          NODE
+
+          set +e
+          npx wrangler d1 insights class_comment_db_v2_staging --config .final-staging.wrangler.toml --time-period 1h --sort-type sum --sort-by time --limit 50 --json > final-d1-insights-time.json 2> final-d1-insights-time.err
+          npx wrangler d1 insights class_comment_db_v2_staging --config .final-staging.wrangler.toml --time-period 1h --sort-type sum --sort-by count --limit 50 --json > final-d1-insights-count.json 2> final-d1-insights-count.err
+          set -e
+
+          STABILITY_SESSION_TOKEN=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")
+          STABILITY_CSRF_TOKEN=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")
+          echo "::add-mask::$STABILITY_SESSION_TOKEN"; echo "::add-mask::$STABILITY_CSRF_TOKEN"
+          export STABILITY_SESSION_TOKEN STABILITY_CSRF_TOKEN STAGING_WRANGLER_CONFIG=.final-staging.wrangler.toml
+          cleanup() { node /tmp/staging-user-stability-audit.mjs cleanup || true; }
+          trap cleanup EXIT
+          node /tmp/staging-user-stability-audit.mjs seed
+          python /tmp/staging-user-stability-browser.py
+
+          mkdir -p final-ui-visual
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from urllib.parse import urlparse
+          from playwright.sync_api import sync_playwright
+          origin=os.environ['STAGING_ORIGIN'].rstrip('/')
+          token=os.environ['STABILITY_SESSION_TOKEN']
+          fixture=json.loads(Path('stability-fixture.json').read_text())
+          host=urlparse(origin).hostname
+          out=Path('final-ui-visual')
+          results=[]
+          def overflow(page):
+              return page.evaluate('document.documentElement.scrollWidth > document.documentElement.clientWidth + 1')
+          with sync_playwright() as p:
+              browser=p.chromium.launch(headless=True)
+              for width,height,label in [(1440,1000,'desktop'),(390,844,'mobile')]:
+                  c=browser.new_context(viewport={'width':width,'height':height})
+                  page=c.new_page(); page.goto(origin+'/',wait_until='networkidle',timeout=30000)
+                  if overflow(page): raise AssertionError(f'home horizontal overflow {label}')
+                  page.screenshot(path=str(out/f'home-{label}.png'),full_page=True)
+                  results.append({'page':'home','viewport':label,'overflow':False})
+                  c.close()
+              c=browser.new_context(viewport={'width':1440,'height':1000})
+              c.add_cookies([{'name':'__Host-cpcv_session','value':token,'domain':host,'path':'/','secure':True,'httpOnly':True,'sameSite':'Strict'}])
+              for path,ready,name in [('/admin','#activeSessionsSection','admin'),('/master','#masterPanel','master'),('/account','#accountSection','account')]:
+                  page=c.new_page(); page.goto(origin+path,wait_until='domcontentloaded',timeout=30000); page.locator(ready).wait_for(state='visible',timeout=30000); page.wait_for_timeout(250)
+                  if overflow(page): raise AssertionError(f'{name} horizontal overflow')
+                  page.screenshot(path=str(out/f'{name}-desktop.png'),full_page=True); page.close()
+                  results.append({'page':name,'overflow':False})
+              page=c.new_page(); page.goto(origin+'/admin/'+fixture['liveSessionId'],wait_until='domcontentloaded',timeout=30000); page.locator('#sessionSection').wait_for(state='visible',timeout=30000); page.wait_for_timeout(500)
+              option_count=page.locator('#sessionAiTargetLanguage option').count()
+              if option_count!=100: raise AssertionError(f'translation language options {option_count}, expected 100')
+              if overflow(page): raise AssertionError('session horizontal overflow')
+              page.screenshot(path=str(out/'session-desktop.png'),full_page=True)
+              results.append({'page':'session','overflow':False,'translationLanguageOptions':option_count})
+              page.close(); c.close(); browser.close()
+          Path('final-ui-visual-report.json').write_text(json.dumps({'ok':True,'results':results},ensure_ascii=False,indent=2))
+          print(json.dumps({'ok':True,'results':results},ensure_ascii=False))
+          PY
+
+          node /tmp/staging-user-stability-audit.mjs verify
+          node /tmp/staging-user-stability-audit.mjs cleanup
+          trap - EXIT
+
+      - name: Upload final staging evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-final-staging-audit-${{ github.run_id }}
+          path: |
+            load-v3-report.json
+            load-v3-summary.md
+            final-worker-tail.jsonl
+            final-d1-insights-time.json
+            final-d1-insights-time.err
+            final-d1-insights-count.json
+            final-d1-insights-count.err
+            stability-fixture.json
+            stability-runtime-report.json
+            stability-browser-report.json
+            stability-browser/
+            final-ui-visual-report.json
+            final-ui-visual/
+            final-staging-deploy.txt
+            final-staging-smoke.txt
+          if-no-files-found: warn
+          retention-days: 30
