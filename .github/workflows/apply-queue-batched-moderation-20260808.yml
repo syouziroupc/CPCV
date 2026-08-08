@@ -1,15 +1,19 @@
-name: Apply queue-batched moderation 2026-08-08
+name: Apply final AI capacity patch 2026-08-08
 
 on:
-  push:
-    branches: [agent/ai-capacity-v2-20260808]
-    paths: [.github/workflows/apply-queue-batched-moderation-20260808.yml]
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/apply-queue-batched-moderation-20260808.yml
+      - scripts/finalize-ai-capacity-20260808.py
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/ai-capacity-v2-20260808'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -21,73 +25,27 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - name: Move moderation batching to Queue consumer
+
+      - name: Apply deterministic runtime cleanup
+        run: python scripts/finalize-ai-capacity-20260808.py
+
+      - name: Remove operational patch files and regenerate manifest
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          provider=Path('src/ai/provider.js')
-          s=provider.read_text()
-          old='export { runModerationModel } from "./moderation-classifier.js";'
-          new='export { runModerationBatchModel, runModerationModel } from "./moderation-classifier.js";'
-          if old not in s: raise SystemExit('provider export anchor missing')
-          provider.write_text(s.replace(old,new,1))
-
-          p=Path('src/ai/processor.js')
-          s=p.read_text()
-          old='import { runModerationModel, runTranslationModel } from "./provider.js";'
-          new='import { runModerationBatchModel, runModerationModel, runTranslationModel } from "./provider.js";'
-          if old not in s: raise SystemExit('processor import anchor missing')
-          s=s.replace(old,new,1)
-          old='''  const queueKind = queueKindFromName(batch?.queue);\n  const parallelism = queueParallelism(env, queueKind, messages.length);\n  await runWithConcurrency(messages, parallelism, (message) => processAiQueueMessage(message, env, queueKind));\n}\n\nasync function processAiQueueMessage(message, env, queueKind) {'''
-          new='''  const queueKind = queueKindFromName(batch?.queue);\n  if (queueKind === QUEUE_KIND_MODERATION && String(env?.AI_MODERATION_CLASSIFIER_MODEL || "").trim()) {\n    await processModerationQueueBatch(messages, env);\n    return;\n  }\n  const parallelism = queueParallelism(env, queueKind, messages.length);\n  await runWithConcurrency(messages, parallelism, (message) => processAiQueueMessage(message, env, queueKind));\n}\n\nasync function processModerationQueueBatch(messages, env) {\n  const prepared = await Promise.all(messages.map(async (message) => {\n    try {\n      return await prepareModerationQueueMessage(message, env);\n    } catch (error) {\n      console.error("AI moderation queue preparation failed", safeCode(error));\n      return { message, kind: "done", outcome: { retry: true, delaySeconds: 30 } };\n    }\n  }));\n\n  for (const item of prepared) {\n    if (item?.kind === "done") settleQueueMessage(item.message, item.outcome);\n  }\n\n  const candidates = prepared.filter((item) => item?.kind === "provider");\n  if (!candidates.length) return;\n\n  const model = String(env?.AI_MODERATION_CLASSIFIER_MODEL || "").trim();\n  const usage = await Promise.allSettled(candidates.map((item) =>\n    reserveAiUsage(env.DB_V2, item.job, item.now, model)\n  ));\n  const ready = [];\n  for (let index = 0; index < candidates.length; index += 1) {\n    const candidate = candidates[index];\n    const reservation = usage[index];\n    if (reservation.status === "fulfilled") {\n      ready.push({ ...candidate, usageEventId: reservation.value });\n      continue;\n    }\n    const outcome = await failPreparedModerationJob(env, candidate.job, reservation.reason, candidate.now);\n    settleQueueMessage(candidate.message, outcome);\n  }\n  if (!ready.length) return;\n\n  let results;\n  try {\n    results = await runModerationBatchModel(\n      env,\n      ready.map((item) => item.input),\n      {\n        usageEventIds: ready.map((item) => item.usageEventId),\n        allowFallback: false\n      }\n    );\n    if (!Array.isArray(results) || results.length !== ready.length) {\n      const error = new Error("AI_RESPONSE_INVALID");\n      error.aiCode = "AI_RESPONSE_INVALID";\n      error.retryable = true;\n      throw error;\n    }\n  } catch (error) {\n    await Promise.all(ready.map(async (item) => {\n      const outcome = await failPreparedModerationJob(env, item.job, error, item.now);\n      settleQueueMessage(item.message, outcome);\n    }));\n    return;\n  }\n\n  await Promise.all(ready.map(async (item, index) => {\n    try {\n      const result = results[index];\n      const categories = item.privacy.promptInjection\n        ? [...new Set([...result.categories, "prompt_injection"])]\n        : result.categories;\n      await completeModerationJob(env.DB_V2, {\n        job: item.job,\n        recommendation: result.recommendation,\n        confidenceMilli: result.confidenceMilli,\n        categories,\n        source: "provider",\n        provider: result.provider,\n        model: result.model,\n        promptVersion: result.promptVersion,\n        outputCharacters: result.rawOutputLength,\n        usageEventId: item.usageEventId,\n        now: Date.now()\n      });\n      settleQueueMessage(item.message, { retry: false, completed: true });\n    } catch (error) {\n      const outcome = await failPreparedModerationJob(env, item.job, error, Date.now());\n      settleQueueMessage(item.message, outcome);\n    }\n  }));\n}\n\nasync function prepareModerationQueueMessage(message, env) {\n  const now = Date.now();\n  const jobId = normalizeJobId(message?.body?.jobId ?? message?.body);\n  if (!jobId) return { message, kind: "done", outcome: { retry: false, ignored: true } };\n\n  const job = await claimAiJob(env.DB_V2, jobId, now);\n  if (!job) return { message, kind: "done", outcome: { retry: false, ignored: true } };\n  if (job.job_type !== QUEUE_KIND_MODERATION) {\n    const failed = await failOrRetryAiJob(env.DB_V2, job, "AI_QUEUE_KIND_MISMATCH", false, now);\n    return { message, kind: "done", outcome: { ...failed, errorCode: "AI_QUEUE_KIND_MISMATCH" } };\n  }\n  if (Date.parse(job.retained_until || "") <= now) {\n    await skipAiJob(env.DB_V2, job, "COMMENT_EXPIRED", now);\n    return { message, kind: "done", outcome: { retry: false, skipped: "COMMENT_EXPIRED" } };\n  }\n  if (!job.organization_ai_enabled || job.organization_status !== "active") {\n    await skipAiJob(env.DB_V2, job, "AI_DISABLED", now);\n    return { message, kind: "done", outcome: { retry: false, skipped: "AI_DISABLED" } };\n  }\n  if (job.moderation_state === "deleted") {\n    await skipAiJob(env.DB_V2, job, "COMMENT_DELETED", now);\n    return { message, kind: "done", outcome: { retry: false, skipped: "COMMENT_DELETED" } };\n  }\n  const unsupportedAiReview = Boolean(job.session_filter_enabled)\n    && Boolean(job.unsupported_language)\n    && job.unsupported_language_mode === "ai_review";\n  if (!job.session_moderation_enabled && !unsupportedAiReview) {\n    await skipAiJob(env.DB_V2, job, "AI_DISABLED", now);\n    return { message, kind: "done", outcome: { retry: false, skipped: "AI_DISABLED" } };\n  }\n\n  const privacy = inspectCommentPrivacy(job.message);\n  if (privacy.sensitive) {\n    await completePrivacyGuardModeration(env.DB_V2, {\n      job,\n      promptInjection: privacy.promptInjection,\n      now\n    });\n    return { message, kind: "done", outcome: { retry: false, completed: true, source: "local_privacy_guard" } };\n  }\n\n  return {\n    message,\n    kind: "provider",\n    job,\n    now,\n    privacy,\n    input: {\n      message: job.message,\n      promptInjection: privacy.promptInjection,\n      dictionaryCandidates: parseFilterContext(job.filter_context_json)\n    }\n  };\n}\n\nasync function failPreparedModerationJob(env, job, error, now = Date.now()) {\n  if (error instanceof AuthError && error.code === "AI_JOB_STATE_CONFLICT") {\n    return { retry: false, ignored: true, conflict: true };\n  }\n  if (error instanceof AuthError && error.code === "AI_DAILY_LIMIT_REACHED") {\n    await skipAiJob(env.DB_V2, job, "AI_DAILY_LIMIT_REACHED", now);\n    return { retry: false, skipped: "AI_DAILY_LIMIT_REACHED" };\n  }\n  const code = String(error?.aiCode || error?.code || "AI_PROVIDER_FAILED").slice(0, 80);\n  const retryable = shouldRetryAiJob(job, error, code);\n  const failed = await failOrRetryAiJob(env.DB_V2, job, code, retryable, now);\n  return { ...failed, errorCode: code };\n}\n\nfunction settleQueueMessage(message, outcome) {\n  if (outcome?.retry) message?.retry?.({ delaySeconds: outcome.delaySeconds });\n  else message?.ack?.();\n}\n\nasync function processAiQueueMessage(message, env, queueKind) {'''
-          if old not in s: raise SystemExit('processor queue batch anchor missing')
-          s=s.replace(old,new,1)
-          old='''    const outcome = await processAiJob(env, jobId);\n    if (outcome.retry) message?.retry?.({ delaySeconds: outcome.delaySeconds });\n    else message?.ack?.();'''
-          new='''    const outcome = await processAiJob(env, jobId);\n    settleQueueMessage(message, outcome);'''
-          if old not in s: raise SystemExit('processor settle anchor missing')
-          s=s.replace(old,new,1)
-          p.write_text(s)
-
-          w=Path('wrangler.toml')
-          s=w.read_text()
-          s=s.replace('AI_MODERATION_REVIEW_SCORE = "0.46"','AI_MODERATION_REVIEW_SCORE = "0.68"')
-          s=s.replace('AI_MODERATION_HIDE_SCORE = "0.78"','AI_MODERATION_HIDE_SCORE = "0.90"')
-          s=s.replace('AI_MODERATION_MODEL_BATCH_SIZE = "20"\nAI_MODERATION_BATCH_WINDOW_MS = "8"\n','')
-          w.write_text(s)
-
-          t=Path('scripts/test-load-hardening.mjs')
-          s=t.read_text()
-          s=s.replace('import { runModerationModel } from "../src/ai/moderation-classifier.js";', 'import { runModerationBatchModel, runModerationModel } from "../src/ai/moderation-classifier.js";')
-          s=s.replace('const aiProvider = read("src/ai/provider.js");', 'const aiProvider = read("src/ai/provider.js");\nconst aiProcessor = read("src/ai/processor.js");')
-          s=s.replace('assert.match(wrangler, /AI_MODERATION_MODEL_BATCH_SIZE = "20"/);\nassert.match(wrangler, /AI_MODERATION_BATCH_WINDOW_MS = "8"/);\n','')
-          s=s.replace('assert.match(moderationClassifier, /batchStates = new WeakMap/);', 'assert.match(moderationClassifier, /runModerationBatchModel/);\nassert.match(aiProcessor, /processModerationQueueBatch/);\nassert.match(aiProcessor, /runModerationBatchModel/);')
-          s=s.replace('assert.match(wrangler, /AI_MODERATION_REVIEW_SCORE = "0\\.46"/);\nassert.match(wrangler, /AI_MODERATION_HIDE_SCORE = "0\\.78"/);', 'assert.match(wrangler, /AI_MODERATION_REVIEW_SCORE = "0\\.68"/);\nassert.match(wrangler, /AI_MODERATION_HIDE_SCORE = "0\\.90"/);')
-          old='''const batchedResults = await Promise.all(\n  Array.from({ length: 8 }, (_, index) => runModerationModel(batchedEnv, {\n    message: `Safe classroom batch comment ${index}.`\n  }))\n);'''
-          new='''const batchedResults = await runModerationBatchModel(\n  batchedEnv,\n  Array.from({ length: 8 }, (_, index) => ({\n    message: `Safe classroom batch comment ${index}.`\n  })),\n  { usageEventIds: new Array(8).fill(null), allowFallback: false }\n);'''
-          if old not in s: raise SystemExit('load hardening batch test anchor missing')
-          s=s.replace(old,new,1)
-          t.write_text(s)
-          PY
-
-      - name: Remove helper workflow and regenerate exact source manifest
-        shell: bash
-        run: |
-          set -euo pipefail
+          rm scripts/finalize-ai-capacity-20260808.py
           rm .github/workflows/apply-queue-batched-moderation-20260808.yml
           npm ci
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Batch moderation at Queue consumer boundary"
+          git commit -m "Finalize high-throughput AI runtime"
           npm run manifest:source
           git add SOURCE_SHA256SUMS.txt
           git commit --amend --no-edit
           test -z "$(git status --porcelain)"
 
-      - name: Validate exact candidate
+      - name: Validate exact candidate before push
         shell: bash
         run: |
           set -euo pipefail
@@ -98,6 +56,7 @@ jobs:
           npm run verify:final-docs
           node scripts/test-ai-translation-resilience.mjs
           node scripts/test-load-hardening.mjs
+          node scripts/test-ai-runtime-cleanup.mjs
           npm run check:stage08
           npm run test:owner-bootstrap
           npm run deploy:dry-run
@@ -106,5 +65,3 @@ jobs:
 
       - name: Push verified candidate
         run: git push origin HEAD:agent/ai-capacity-v2-20260808
-
-# trigger: queue-batch-v2
