@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright
@@ -33,9 +34,11 @@ def audit_page(context, path, ready_selector, screenshot_name, login_selector=No
     page = context.new_page()
     requests = []
     page.on('request', lambda request: requests.append(request.url) if '/api/auth/session' in request.url else None)
-    started = page.evaluate('Date.now()') if page.url != 'about:blank' else None
+    started = time.monotonic()
     page.goto(origin + path, wait_until='domcontentloaded', timeout=30000)
+    dom_ms = round((time.monotonic() - started) * 1000)
     page.locator(ready_selector).wait_for(state='visible', timeout=30000)
+    ready_ms = round((time.monotonic() - started) * 1000)
     page.wait_for_timeout(300)
     login_seen = page.evaluate('window.__cpcvLoginEverUnhidden === true')
     if login_seen:
@@ -46,7 +49,13 @@ def audit_page(context, path, ready_selector, screenshot_name, login_selector=No
     if auth_count != 1:
         raise AssertionError(f'{path} requested /api/auth/session {auth_count} times, expected 1')
     page.screenshot(path=str(out / screenshot_name), full_page=True)
-    results.append({'path': path, 'authSessionRequests': auth_count, 'loginEverUnhidden': login_seen})
+    results.append({
+        'path': path,
+        'authSessionRequests': auth_count,
+        'loginEverUnhidden': login_seen,
+        'domContentLoadedMs': dom_ms,
+        'readyMs': ready_ms
+    })
     return page
 
 with sync_playwright() as p:
@@ -69,9 +78,11 @@ with sync_playwright() as p:
     account.close()
 
     page = context.new_page()
+    started = time.monotonic()
     page.goto(f'{origin}/admin/{session_id}', wait_until='domcontentloaded', timeout=30000)
     page.locator('#sessionSection').wait_for(state='visible', timeout=30000)
-    checkboxes = page.locator('#moderationTableBody input[type="checkbox"]')
+    session_ready_ms = round((time.monotonic() - started) * 1000)
+    checkboxes = page.locator('#moderationBody input[type="checkbox"]')
     deadline = 15000
     waited = 0
     while checkboxes.count() < 1 and waited < deadline:
@@ -85,11 +96,16 @@ with sync_playwright() as p:
     if not first.is_checked():
         raise AssertionError('checkbox could not be selected')
     page.wait_for_timeout(6500)
-    same = page.locator(f'#moderationTableBody input[type="checkbox"][value="{value}"]')
+    same = page.locator(f'#moderationBody input[type="checkbox"][value="{value}"]')
     if same.count() != 1 or not same.is_checked():
         raise AssertionError('moderation selection was lost after automatic refresh')
     page.screenshot(path=str(out / 'admin-selection-after-refresh.png'), full_page=True)
-    results.append({'path': f'/admin/{session_id}', 'selectionPersistedAfterMs': 6500, 'selectionPersisted': True})
+    results.append({
+        'path': f'/admin/{session_id}',
+        'readyMs': session_ready_ms,
+        'selectionPersistedAfterMs': 6500,
+        'selectionPersisted': True
+    })
     page.close()
     browser.close()
 
