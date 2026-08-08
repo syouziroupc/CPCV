@@ -106,3 +106,5 @@ jobs:
 
       - name: Push verified candidate
         run: git push origin HEAD:agent/ai-capacity-v2-20260808
+
+# trigger: queue-batch-v2
