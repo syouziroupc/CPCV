@@ -20,26 +20,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
       - name: Pin npm
         run: npm install --global npm@11.18.0
-
       - name: Install dependencies
         shell: bash
         run: |
           set -o pipefail
-          npm ci || {
-            echo "npm ci failed once; clearing the npm cache and retrying."
-            npm cache clean --force
-            npm ci
-          }
-
+          npm ci || { npm cache clean --force; npm ci; }
       - name: Run static project and documentation checks
         run: |
           npm run verify:source-manifest
@@ -47,17 +39,115 @@ jobs:
           npm run check:project
           npm run check:pdf-links
           npm run verify:final-docs
-
       - name: Run all implemented-stage tests
         run: npm run check:stage08
-
       - name: Run Owner bootstrap regression
         run: npm run test:owner-bootstrap
-
       - name: Validate Wrangler bundle
         run: npm run deploy:dry-run
-
       - name: Audit all dependencies
         run: |
           npm audit
           npm audit --omit=dev
+
+  deploy-production:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/deploy-user-stability-20260808'
+    name: Deploy verified release to production
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: production
+    env:
+      SOURCE_COMMIT: 0373502a78315c035eba228deea961d7f3c1843a
+      PRODUCTION_ORIGIN: https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev
+    steps:
+      - name: Checkout exact release
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Resolve Cloudflare credentials
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          account=""
+          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do value="${!key:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
+          test -n "$TOKEN"; test -n "$account"
+          echo "::add-mask::$TOKEN"; echo "::add-mask::$account"
+          echo "CLOUDFLARE_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "CLOUDFLARE_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
+      - name: Revalidate exact release
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run verify:source-manifest
+          node scripts/test-user-facing-stability.mjs
+          npm run check:stage08
+          npm run test:owner-bootstrap
+          npm run deploy:dry-run
+          npm audit
+          npm audit --omit=dev
+      - name: Production preflight and no-active-class gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p deployment-records
+          npx wrangler secret list > deployment-records/secrets-before.txt
+          for name in AUTH_RATE_LIMIT_PEPPER PUBLIC_RATE_LIMIT_PEPPER TURNSTILE_SECRET_KEY; do grep -F "$name" deployment-records/secrets-before.txt >/dev/null; done
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/db-before.txt
+          npx wrangler d1 time-travel info class_comment_db_v2 2>&1 | tee deployment-records/time-travel.txt
+          npx wrangler deployments status 2>&1 | tee deployment-records/deployments-before.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/versions-before.txt
+          npx wrangler d1 execute class_comment_db_v2 --remote --command "SELECT COUNT(*) AS active_count FROM live_sessions WHERE status='active' AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now');" --json > deployment-records/active-sessions.json
+          active=$(node -e "const x=require('./deployment-records/active-sessions.json');let n=null;const walk=v=>{if(n!==null)return;if(Array.isArray(v))for(const i of v)walk(i);else if(v&&typeof v==='object'){if(Object.prototype.hasOwnProperty.call(v,'active_count'))n=Number(v.active_count);else for(const k of Object.keys(v))walk(v[k]);}};walk(x);if(n===null)process.exit(2);process.stdout.write(String(n));")
+          echo "active_sessions=$active" | tee deployment-records/active-session-gate.txt
+          if [ "$active" -ne 0 ]; then echo "Production deployment blocked: active class exists."; exit 42; fi
+      - name: Apply migrations and deploy exact release
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee deployment-records/legacy-migrations.txt
+          npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee deployment-records/v2-migrations.txt
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/db-after-migrations.txt
+          npx wrangler deploy 2>&1 | tee deployment-records/deploy.txt
+          deployment_id=$(grep -Eo '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' deployment-records/deploy.txt | tail -n 1)
+          test -n "$deployment_id"
+          echo "PRODUCTION_DEPLOYMENT_ID=$deployment_id" >> "$GITHUB_ENV"
+          printf '%s\n' "$deployment_id" > deployment-records/deployment-id.txt
+      - name: Verify production
+        shell: bash
+        run: |
+          set -euo pipefail
+          sleep 12
+          node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/db-after.txt
+          node scripts/smoke-production.mjs --origin "$PRODUCTION_ORIGIN" 2>&1 | tee deployment-records/http-smoke.txt
+          curl -fsS "$PRODUCTION_ORIGIN/admin" > deployment-records/admin.html
+          curl -fsS "$PRODUCTION_ORIGIN/account" > deployment-records/account.html
+          grep -F 'id="adminBootSection"' deployment-records/admin.html >/dev/null
+          grep -E 'id="loginSection" class="[^"]*hidden' deployment-records/admin.html >/dev/null
+          grep -F 'id="passwordForm"' deployment-records/account.html >/dev/null
+          grep -F 'このフォームを送信した場合だけパスワードを変更します' deployment-records/account.html >/dev/null
+          npx wrangler deployments status 2>&1 | tee deployment-records/deployments-after.txt
+          npx wrangler versions list 2>&1 | tee deployment-records/versions-after.txt
+          npx wrangler secret list > deployment-records/secrets-after.txt
+          for name in AUTH_RATE_LIMIT_PEPPER PUBLIC_RATE_LIMIT_PEPPER TURNSTILE_SECRET_KEY; do grep -F "$name" deployment-records/secrets-after.txt >/dev/null; done
+          printf 'result=PASSED\nrelease_commit=%s\nproduction_deployment_id=%s\ncompleted_at_utc=%s\n' "$SOURCE_COMMIT" "$PRODUCTION_DEPLOYMENT_ID" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > deployment-records/result.txt
+      - name: Upload deployment evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-user-stability-production-${{ env.SOURCE_COMMIT }}
+          path: deployment-records/
+          if-no-files-found: warn
+          retention-days: 90
