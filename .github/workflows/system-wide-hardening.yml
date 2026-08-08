@@ -1,0 +1,58 @@
+name: Apply system-wide reliability hardening
+
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/ai-response-hardening-20260808'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/ai-response-hardening-20260808
+          fetch-depth: 0
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Apply audited fixes
+        run: python scripts/system-wide-hardening-patch.py
+      - name: Remove temporary audit machinery
+        run: |
+          git rm -f scripts/system-wide-hardening-patch.py scripts/system-bug-audit.mjs \
+            .github/workflows/system-wide-hardening.yml .github/workflows/system-bug-audit.yml
+          git add src public/assets scripts
+      - name: Regenerate source manifest
+        run: |
+          npm run manifest:source
+          git add SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt
+      - name: Run focused system regressions
+        run: |
+          node scripts/test-system-hardening.mjs
+          node --no-warnings scripts/test-realtime-v2.mjs
+          node --no-warnings scripts/test-moderation-v2.mjs
+          node --no-warnings scripts/test-comments-v2.mjs
+          node scripts/test-user-facing-stability.mjs
+          node --no-warnings scripts/test-email-auth-v2.mjs
+          npm run check
+          npm run deploy:dry-run
+          git diff --cached --check
+      - name: Commit validated hardening
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Harden system reliability beyond AI"
+          npm run verify:source-manifest
+          git push origin HEAD:agent/ai-response-hardening-20260808
