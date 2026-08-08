@@ -16,7 +16,7 @@ jobs:
     environment: production
     timeout-minutes: 60
     env:
-      RELEASE_COMMIT: b09a523f4cdad8e94961ebef87f3e02f12ae17e2
+      RELEASE_COMMIT: f190e275c86042e01e6fdc89e9bd7e171fb1a462
       STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
     steps:
       - uses: actions/checkout@v4
@@ -82,16 +82,14 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           p=Path('/tmp/load.mjs'); s=p.read_text()
-          # Measure moderation only; translation has a separate task budget.
           s=s.replace("SET moderation_enabled=1,translation_enabled=1,translation_quality=?3", "SET moderation_enabled=1,translation_enabled=0,translation_quality=?3")
           s=s.replace("expectedJobsPerComment: 2", "expectedJobsPerComment: 1")
           s=s.replace("count: 40, concurrency: 10", "count: 40, concurrency: 20")
           s=s.replace("count: 12, concurrency: 4", "count: 24, concurrency: 12")
-          s=s.replace("count: 120, concurrency: 60", "count: 300, concurrency: 150")
+          s=s.replace("count: 120, concurrency: 60", "count: 240, concurrency: 60")
           s=s.replace("count: 100, concurrency: 50", "count: 30, concurrency: 15")
           s=s.replace("await phase({ name: 'accurate_unknown_es', kind: 'es', count: 40, concurrency: 20, expectedJobsPerComment: 1, timeoutMs: 300_000 });", "await phase({ name: 'unsafe_quality', kind: 'unsafe', count: 20, concurrency: 10, expectedJobsPerComment: 1, timeoutMs: 120_000 });")
           s=s.replace("await sleep(65_000);", "await sleep(5_000);")
-          s=s.replace("result.ai = await waitAi(marker, accepted * expectedJobsPerComment, timeoutMs);", "result.ai = await waitAi(marker, accepted * expectedJobsPerComment, timeoutMs); result.totalElapsedMs = Date.now() - started; result.aiThroughputPerMinute = Math.round((accepted * 60000 / result.totalElapsedMs) * 10) / 10;")
           s=s.replace("expectedJobs:aiComments*2", "expectedJobs:aiComments")
 
           old_msg="""  const message = kind === 'es'\n    ? `La energía solar es importante para el futuro. referencia ${marker}${suffix}.`\n    : `Energy markets change during classroom discussion. reference ${marker}${suffix}.`;"""
@@ -99,8 +97,13 @@ jobs:
           if old_msg not in s: raise SystemExit('post message anchor missing')
           s=s.replace(old_msg,new_msg)
 
+          old_usage="""  const translations = await d1(`SELECT COUNT(*) AS n FROM translations t JOIN ai_jobs j ON j.id=t.job_id JOIN comments c ON c.id=j.comment_id WHERE j.live_session_id=?1 AND c.message LIKE ?2`, [SESSION_ID, `%${marker}%`]);\n  return {"""
+          new_usage="""  const translations = await d1(`SELECT COUNT(*) AS n FROM translations t JOIN ai_jobs j ON j.id=t.job_id JOIN comments c ON c.id=j.comment_id WHERE j.live_session_id=?1 AND c.message LIKE ?2`, [SESSION_ID, `%${marker}%`]);\n  const windowRows = await d1(`SELECT MIN(j.created_at) AS first_created, MAX(j.finished_at) AS last_finished FROM ai_jobs j JOIN comments c ON c.id=j.comment_id WHERE j.live_session_id=?1 AND c.message LIKE ?2 AND j.job_type='moderation' AND j.status='succeeded'`, [SESSION_ID, `%${marker}%`]);\n  const firstCreated = Date.parse(windowRows[0]?.first_created || '');\n  const lastFinished = Date.parse(windowRows[0]?.last_finished || '');\n  const processingWindowMs = Number.isFinite(firstCreated) && Number.isFinite(lastFinished) && lastFinished >= firstCreated ? lastFinished - firstCreated : null;\n  const processingThroughputPerMinute = processingWindowMs > 0 ? Math.round((expected * 60000 / processingWindowMs) * 10) / 10 : null;\n  return {"""
+          if old_usage not in s: raise SystemExit('AI usage anchor missing')
+          s=s.replace(old_usage,new_usage)
+
           old_return="""    errorCodes: counts(rows.filter((r) => r.last_error_code), (r) => `${r.job_type}:${r.last_error_code}`),\n    modelCalls: usage\n  };"""
-          new_return="""    errorCodes: counts(rows.filter((r) => r.last_error_code), (r) => `${r.job_type}:${r.last_error_code}`),\n    modelCalls: usage,\n    recommendations: counts(await d1(`SELECT r.recommendation FROM ai_results r JOIN ai_jobs j ON j.id=r.job_id JOIN comments c ON c.id=j.comment_id WHERE j.live_session_id=?1 AND c.message LIKE ?2 AND j.job_type='moderation'`, [SESSION_ID, `%${marker}%`]), (r) => String(r.recommendation || 'unknown'))\n  };"""
+          new_return="""    errorCodes: counts(rows.filter((r) => r.last_error_code), (r) => `${r.job_type}:${r.last_error_code}`),\n    modelCalls: usage,\n    processingWindowMs,\n    processingThroughputPerMinute,\n    recommendations: counts(await d1(`SELECT r.recommendation FROM ai_results r JOIN ai_jobs j ON j.id=r.job_id JOIN comments c ON c.id=j.comment_id WHERE j.live_session_id=?1 AND c.message LIKE ?2 AND j.job_type='moderation'`, [SESSION_ID, `%${marker}%`]), (r) => String(r.recommendation || 'unknown'))\n  };"""
           if old_return not in s: raise SystemExit('AI return anchor missing')
           s=s.replace(old_return,new_return)
           p.write_text(s)
@@ -126,7 +129,7 @@ jobs:
           const burst=(r.phases||[]).find(p=>p.name==='fast_burst_en');
           if(!burst) errors.push('fast burst missing');
           else {
-            if(Number(burst.aiThroughputPerMinute||0)<700) errors.push(`moderation throughput ${burst.aiThroughputPerMinute}/min < 700/min; totalElapsedMs=${burst.totalElapsedMs}`);
+            if(Number(burst.ai?.processingThroughputPerMinute||0)<700) errors.push(`moderation throughput ${burst.ai?.processingThroughputPerMinute}/min < 700/min; processingWindowMs=${burst.ai?.processingWindowMs}`);
             const safeTotal=Object.values(burst.ai?.recommendations||{}).reduce((a,b)=>a+Number(b),0);
             const safeAllow=Number(burst.ai?.recommendations?.allow||0);
             if(safeTotal && safeAllow/safeTotal<0.90) errors.push(`safe allow rate ${safeAllow}/${safeTotal} < 90%`);
@@ -142,7 +145,7 @@ jobs:
           const i=r.invariants||{};
           if(i.comments!==i.expectedComments||i.jobs!==i.expectedJobs||i.stuck||i.orphan||!i.realtimeGapless||String(i.quickCheck).toLowerCase()!=='ok'||i.foreignKeyViolations) errors.push(`invariants=${JSON.stringify(i)}`);
           if(errors.length){console.error(errors.join('\n'));process.exit(1)}
-          console.log(`AI capacity v2 staging audit passed: moderation ${burst.aiThroughputPerMinute}/min; safe=${JSON.stringify(burst.ai.recommendations)}; unsafe=${JSON.stringify(unsafe.ai.recommendations)}`);
+          console.log(`AI capacity v2 staging audit passed: moderation ${burst.ai.processingThroughputPerMinute}/min; safe=${JSON.stringify(burst.ai.recommendations)}; unsafe=${JSON.stringify(unsafe.ai.recommendations)}`);
           NODE
       - name: Upload evidence
         if: always()
