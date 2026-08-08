@@ -16,6 +16,8 @@ let pendingSubmission = null;
 let understandingEnabled = false;
 let currentPdfState = null;
 let sessionRefreshTimer = 0;
+let sessionRefreshRunning = false;
+let sessionLoadedOnce = false;
 
 function codePointLength(value) { return Array.from(String(value || '')).length; }
 function truncateCodePoints(value, limit) { return Array.from(String(value || '')).slice(0, limit).join(''); }
@@ -81,6 +83,8 @@ function setStatus(text, isError = false) {
 }
 
 async function loadSession() {
+  if (sessionRefreshRunning) return;
+  sessionRefreshRunning = true;
   try {
     const { response, data } = await fetchJson(`/api/public/sessions/${encodeURIComponent(publicCode)}`, { cache: 'no-store' });
     if (!response.ok || !data.ok) throw new Error(data.error || 'SESSION_ERROR');
@@ -94,14 +98,32 @@ async function loadSession() {
       ? requiresApproval ? '投稿できます。コメントは先生の承認後に表示されます。' : '投稿できます。'
       : '現在投稿停止中です。';
     sendButton.disabled = !postingEnabled || messageEl.value.trim().length === 0;
+    sessionLoadedOnce = true;
   } catch (error) {
-    titleEl.textContent = '授業が見つかりません';
-    postingEl.textContent = '授業コードを確認してください。';
-    sendButton.disabled = true;
-    understandingEnabled = false;
-    currentPdfState = null;
-    understandingSection.classList.add('hidden');
-    setStatus(error.message, true);
+    const code = error?.code || error?.message || 'SESSION_ERROR';
+    if (code === 'SESSION_NOT_FOUND') {
+      titleEl.textContent = '授業が見つかりません';
+      postingEl.textContent = '授業コードを確認してください。';
+      postingEnabled = false;
+      understandingEnabled = false;
+      currentPdfState = null;
+      understandingSection.classList.add('hidden');
+      sendButton.disabled = true;
+    } else {
+      if (!sessionLoadedOnce) {
+        titleEl.textContent = '授業情報を取得できません';
+        postingEl.textContent = '通信状況を確認して再読み込みしてください。';
+        sendButton.disabled = true;
+      }
+      const map = {
+        REQUEST_TIMEOUT: '授業情報の取得がタイムアウトしました。',
+        NETWORK_ERROR: 'ネットワークに接続できません。',
+        INVALID_SERVER_RESPONSE: 'サーバー応答を確認できませんでした。'
+      };
+      setStatus(map[code] || `授業情報の取得に失敗しました: ${code}`, true);
+    }
+  } finally {
+    sessionRefreshRunning = false;
   }
 }
 

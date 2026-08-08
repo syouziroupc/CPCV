@@ -1,5 +1,7 @@
+import { fetchWithTimeout } from "./http-client.js";
+
 export async function api(path, body) {
-  const response = await fetch(path, {
+  const response = await fetchWithTimeout(path, {
     method: "POST",
     credentials: "same-origin",
     headers: { "content-type": "application/json" },
@@ -10,8 +12,9 @@ export async function api(path, body) {
 }
 
 export async function configureTurnstile(container, onToken) {
-  const response = await fetch("/api/auth/config", { credentials: "same-origin", cache: "no-store" });
-  const config = await response.json();
+  const response = await fetchWithTimeout("/api/auth/config", { credentials: "same-origin", cache: "no-store" });
+  if (!response.ok) throw new Error("NETWORK_ERROR");
+  const config = await response.json().catch(() => { throw new Error("INVALID_RESPONSE"); });
   const siteKey = String(config.turnstileSiteKey || "");
   if (!siteKey) {
     if (config.turnstileTestBypass) {
@@ -57,6 +60,9 @@ export function errorMessage(code) {
   }
   if (code === "NETWORK_ERROR") {
     return "通信に失敗しました。ネットワーク接続を確認してから再試行してください。";
+  }
+  if (code === "REQUEST_TIMEOUT") {
+    return "通信がタイムアウトしました。ネットワーク接続を確認して再試行してください。";
   }
   return ({
     EMAIL_INVALID: "メールアドレスを確認してください。",

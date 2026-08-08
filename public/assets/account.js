@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from "./http-client.js";
+
 const $ = (id) => document.getElementById(id);
 let csrfToken = "";
 
@@ -10,7 +12,7 @@ async function api(path, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
   const headers = new Headers(options.headers || {});
   if (!["GET", "HEAD", "OPTIONS"].includes(method) && csrfToken) headers.set("x-csrf-token", csrfToken);
-  const response = await fetch(path, { cache: "no-store", credentials: "same-origin", ...options, method, headers });
+  const response = await fetchWithTimeout(path, { cache: "no-store", credentials: "same-origin", ...options, method, headers });
   const text = await response.text();
   let data = {};
   try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
@@ -37,7 +39,9 @@ function errorText(code) {
     EMAIL_UNAVAILABLE: "このメールアドレスは使用できません。",
     EMAIL_UNCHANGED: "現在と同じメールアドレスです。",
     CURRENT_PASSWORD_INVALID: "現在のパスワードが正しくありません。",
-    RATE_LIMITED: "要求回数が上限に達しました。時間を置いて再試行してください。"
+    RATE_LIMITED: "要求回数が上限に達しました。時間を置いて再試行してください。",
+    REQUEST_TIMEOUT: "通信がタイムアウトしました。もう一度試してください。",
+    NETWORK_ERROR: "ネットワークに接続できません。接続を確認してください。"
   })[code] || `処理できませんでした。${code ? ` (${code})` : ""}`;
 }
 async function load() {
@@ -61,7 +65,13 @@ async function load() {
     }
     show("loadingSection", false); show("accountSection", true);
   } catch (error) {
-    show("loadingSection", false); show("loginRequired", true);
+    if (error?.status === 401) {
+      show("loadingSection", false); show("loginRequired", true);
+      return;
+    }
+    const status = $("loadingSection")?.querySelector(".status");
+    if (status) status.textContent = errorText(error?.code || "NETWORK_ERROR");
+    show("loadingSection", true); show("loginRequired", false);
   }
 }
 $("emailForm").addEventListener("submit", async (event) => {

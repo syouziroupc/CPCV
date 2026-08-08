@@ -1,4 +1,5 @@
 import * as pdfjsLib from './pdfjs/pdf.min.mjs';
+import { fetchWithTimeout } from './http-client.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = '/assets/pdfjs/pdf.worker.min.mjs';
 
@@ -120,7 +121,7 @@ async function api(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const headers = new Headers(options.headers || {});
   if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) headers.set('x-csrf-token', csrfToken);
-  const response = await fetch(path, {
+  const response = await fetchWithTimeout(path, {
     cache: 'no-store',
     credentials: 'same-origin',
     ...options,
@@ -986,7 +987,7 @@ function runLogTransaction(database, mode, operation) {
 }
 
 async function downloadSessionLog() {
-  const response = await fetch(`/api/private/sessions/${encodeURIComponent(sessionId)}/comments/export`, {
+    const response = await fetchWithTimeout(`/api/private/sessions/${encodeURIComponent(sessionId)}/comments/export`, {
     method: 'GET',
     cache: 'no-store',
     credentials: 'same-origin'

@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from "./http-client.js";
+
 const $ = (id) => document.getElementById(id);
 const section = $('organizationSettings');
 if (section) {
@@ -23,7 +25,7 @@ if (section) {
     const method = String(options.method || 'GET').toUpperCase();
     const headers = new Headers(options.headers || {});
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && csrfToken) headers.set('x-csrf-token', csrfToken);
-    const response = await fetch(path, { cache: 'no-store', credentials: 'same-origin', ...options, method, headers });
+    const response = await fetchWithTimeout(path, { cache: 'no-store', credentials: 'same-origin', ...options, method, headers });
     const text = await response.text();
     let data = {};
     try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
@@ -59,7 +61,9 @@ if (section) {
       FORBIDDEN: 'この設定を変更する権限がありません。',
       FILTER_TERM_LIMIT_REACHED: '登録できる語句数の上限に達しました。',
       FILTER_TERM_DUPLICATE: '同じ語句がすでに登録されています。',
-      FILTER_POLICY_INVALID: '処理基準を確認してください。'
+      FILTER_POLICY_INVALID: '処理基準を確認してください。',
+      REQUEST_TIMEOUT: '通信がタイムアウトしました。もう一度試してください。',
+      NETWORK_ERROR: 'ネットワークに接続できません。接続を確認してください。'
     })[error?.code] || `処理できませんでした。${error?.code ? ` (${error.code})` : ''}`;
   }
 

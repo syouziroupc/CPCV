@@ -295,8 +295,14 @@ export class CommentRoom {
   }
 
   async scheduleAuthRevalidation() {
-    if (typeof this.state?.storage?.setAlarm !== "function") return;
-    await this.state.storage.setAlarm(Date.now() + AUTH_REVALIDATION_INTERVAL_MS);
+    const storage = this.state?.storage;
+    if (typeof storage?.setAlarm !== "function") return;
+    const target = Date.now() + AUTH_REVALIDATION_INTERVAL_MS;
+    if (typeof storage.getAlarm === "function") {
+      const current = await storage.getAlarm();
+      if (Number.isFinite(Number(current)) && Number(current) <= target) return;
+    }
+    await storage.setAlarm(target);
   }
 
   async authorizedAuthSessions(sockets) {

@@ -1669,11 +1669,13 @@ function scheduleLocalLogRefresh(delay = 0) {
   localLogRefreshTimer = setTimeout(() => loadLocalLogs(), delay);
 }
 
-setInterval(() => {
-  if (sessionId && !sessionSection.classList.contains('hidden') && document.visibilityState === 'visible') {
-    scheduleLocalLogRefresh();
-  }
-}, 5000);
+if (!localLogChannel) {
+  setInterval(() => {
+    if (sessionId && !sessionSection.classList.contains('hidden') && document.visibilityState === 'visible') {
+      scheduleLocalLogRefresh();
+    }
+  }, 5000);
+}
 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && sessionId) scheduleLocalLogRefresh();

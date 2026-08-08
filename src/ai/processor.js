@@ -1,5 +1,6 @@
 import { AuthError } from "../auth/errors.js";
 import { appendRealtimeEvent } from "../realtime/repository.js";
+import { dispatchRealtimeEvent } from "../realtime/dispatch.js";
 import { translationCommentPayload } from "./repository.js";
 import { evaluateTranslationFilter } from "../content-filter/repository.js";
 import { inspectCommentPrivacy } from "./privacy.js";
@@ -359,23 +360,7 @@ async function dispatchTranslationUnavailable(env, job, reason, now = Date.now()
 }
 
 async function dispatchTranslationRealtime(env, sessionId, event) {
-  if (!event || !env?.COMMENT_ROOM) return false;
-  try {
-    const stub = env.COMMENT_ROOM.get(env.COMMENT_ROOM.idFromName(sessionId));
-    const response = await stub.fetch("https://comment-room/event", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-realtime-internal": "true" },
-      body: JSON.stringify({
-        organizationId: event.organizationId,
-        liveSessionId: event.liveSessionId,
-        sequence: event.sequence
-      })
-    });
-    return response.ok;
-  } catch (error) {
-    console.error("AI realtime dispatch failed", safeCode(error));
-    return false;
-  }
+  return dispatchRealtimeEvent(env, sessionId, event, false);
 }
 
 function normalizeJobId(value) {
