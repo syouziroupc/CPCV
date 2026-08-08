@@ -1,0 +1,145 @@
+name: Final staging UI-only verification 2026-08-08
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - .github/workflows/final-staging-ui-only-20260808.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ui-only:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'agent/final-staging-load-ui-audit-20260808'
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    env:
+      RELEASE_COMMIT: bf83f3476bc0e9045631e6610a13044cc62c2584
+      STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/final-staging-load-ui-audit-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact staged assets and authenticated UI
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          ACCOUNT_1: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCOUNT_2: ${{ secrets.CF_ACCOUNT_ID }}
+          ACCOUNT_3: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          account=""
+          for key in ACCOUNT_1 ACCOUNT_2 ACCOUNT_3; do value="${!key:-}"; if [ -n "$value" ]; then account="$value"; break; fi; done
+          test -n "$TOKEN"; test -n "$account"
+          echo "::add-mask::$TOKEN"; echo "::add-mask::$account"
+          export CLOUDFLARE_API_TOKEN="$TOKEN" CLOUDFLARE_ACCOUNT_ID="$account"
+
+          git fetch origin agent/staging-user-stability-20260808:refs/remotes/origin/agent/staging-user-stability-20260808
+          git show origin/agent/staging-user-stability-20260808:scripts/staging-user-stability-audit.mjs > /tmp/staging-user-stability-audit.mjs
+          git show origin/agent/staging-user-stability-20260808:scripts/staging-user-stability-browser.py > /tmp/staging-user-stability-browser.py
+          git reset --hard "$RELEASE_COMMIT"
+          git clean -fd
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          npm ci
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+
+          cat > .staging-ui-db.wrangler.toml <<'TOML'
+          name = "class-pdf-comment-viewer-v01-staging"
+          main = "src/index.js"
+          compatibility_date = "2026-06-17"
+          [[d1_databases]]
+          binding = "DB_V2"
+          database_name = "class_comment_db_v2_staging"
+          database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"
+          migrations_dir = "migrations-v2"
+          TOML
+
+          curl -fsS "$STAGING_ORIGIN/assets/app.css?v=0.8.10-min1" | grep -F 'Minimal application finish' > /dev/null
+          curl -fsS "$STAGING_ORIGIN/assets/admin.js?v=0.8.10-min1" | grep -F 'AI_TARGET_LANGUAGE_CODES' > /dev/null
+          node scripts/smoke-production.mjs --config .staging-ui-db.wrangler.toml --origin "$STAGING_ORIGIN" | tee staging-ui-smoke.txt
+
+          STABILITY_SESSION_TOKEN=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")
+          STABILITY_CSRF_TOKEN=$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")
+          echo "::add-mask::$STABILITY_SESSION_TOKEN"; echo "::add-mask::$STABILITY_CSRF_TOKEN"
+          export STABILITY_SESSION_TOKEN STABILITY_CSRF_TOKEN STAGING_WRANGLER_CONFIG=.staging-ui-db.wrangler.toml
+          cleanup() { node /tmp/staging-user-stability-audit.mjs cleanup || true; }
+          trap cleanup EXIT
+
+          node /tmp/staging-user-stability-audit.mjs seed
+          python /tmp/staging-user-stability-browser.py
+
+          mkdir -p final-ui-visual
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          from urllib.parse import urlparse
+          from playwright.sync_api import sync_playwright
+          origin=os.environ['STAGING_ORIGIN'].rstrip('/')
+          token=os.environ['STABILITY_SESSION_TOKEN']
+          fixture=json.loads(Path('stability-fixture.json').read_text())
+          host=urlparse(origin).hostname
+          out=Path('final-ui-visual')
+          results=[]
+          def overflow(page): return page.evaluate('document.documentElement.scrollWidth > document.documentElement.clientWidth + 1')
+          with sync_playwright() as p:
+              browser=p.chromium.launch(headless=True)
+              for width,height,label in [(1440,1000,'desktop'),(390,844,'mobile')]:
+                  c=browser.new_context(viewport={'width':width,'height':height})
+                  page=c.new_page(); page.goto(origin+'/',wait_until='networkidle',timeout=30000)
+                  if overflow(page): raise AssertionError(f'home horizontal overflow {label}')
+                  page.screenshot(path=str(out/f'home-{label}.png'),full_page=True)
+                  results.append({'page':'home','viewport':label,'overflow':False})
+                  c.close()
+              c=browser.new_context(viewport={'width':1440,'height':1000})
+              c.add_cookies([{'name':'__Host-cpcv_session','value':token,'domain':host,'path':'/','secure':True,'httpOnly':True,'sameSite':'Strict'}])
+              for path,ready,name in [('/admin','#activeSessionsSection','admin'),('/master','#masterPanel','master'),('/account','#accountSection','account')]:
+                  page=c.new_page(); page.goto(origin+path,wait_until='domcontentloaded',timeout=30000); page.locator(ready).wait_for(state='visible',timeout=30000); page.wait_for_timeout(300)
+                  if overflow(page): raise AssertionError(f'{name} horizontal overflow')
+                  page.screenshot(path=str(out/f'{name}-desktop.png'),full_page=True); page.close()
+                  results.append({'page':name,'overflow':False})
+              page=c.new_page(); page.goto(origin+'/admin/'+fixture['liveSessionId'],wait_until='domcontentloaded',timeout=30000); page.locator('#sessionSection').wait_for(state='visible',timeout=30000); page.wait_for_timeout(500)
+              count=page.locator('#sessionAiTargetLanguage option').count()
+              if count!=100: raise AssertionError(f'translation target options {count}, expected 100')
+              if overflow(page): raise AssertionError('session horizontal overflow')
+              page.screenshot(path=str(out/'session-desktop.png'),full_page=True)
+              results.append({'page':'session','overflow':False,'translationLanguageOptions':count})
+              page.close(); c.close(); browser.close()
+          Path('final-ui-visual-report.json').write_text(json.dumps({'ok':True,'results':results},ensure_ascii=False,indent=2))
+          print(json.dumps({'ok':True,'results':results},ensure_ascii=False))
+          PY
+
+          node /tmp/staging-user-stability-audit.mjs verify
+          npx wrangler d1 insights class_comment_db_v2_staging --config .staging-ui-db.wrangler.toml --time-period 1h --sort-type sum --sort-by time --limit 50 --json > final-d1-insights-time.json
+          npx wrangler d1 insights class_comment_db_v2_staging --config .staging-ui-db.wrangler.toml --time-period 1h --sort-type sum --sort-by count --limit 50 --json > final-d1-insights-count.json
+          node /tmp/staging-user-stability-audit.mjs cleanup
+          trap - EXIT
+      - name: Upload final UI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-final-staging-ui-${{ github.run_id }}
+          path: |
+            staging-ui-smoke.txt
+            stability-fixture.json
+            stability-runtime-report.json
+            stability-browser-report.json
+            stability-browser/
+            final-ui-visual-report.json
+            final-ui-visual/
+            final-d1-insights-time.json
+            final-d1-insights-count.json
+          if-no-files-found: warn
+          retention-days: 30
