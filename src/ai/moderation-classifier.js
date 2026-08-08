@@ -56,7 +56,11 @@ export async function runModerationModel(env, input, options = {}) {
     return runLegacyModerationModel(env, input, options);
   }
 
-  const model = String(env?.AI_MODERATION_CLASSIFIER_MODEL || DEFAULT_MODEL).trim() || DEFAULT_MODEL;
+  const configuredModel = String(env?.AI_MODERATION_CLASSIFIER_MODEL || "").trim();
+  if (!configuredModel) {
+    return runLegacyModerationModel(env, input, options);
+  }
+  const model = configuredModel || DEFAULT_MODEL;
   try {
     const capacity = await acquireClassifierCapacity(env);
     if (!capacity) throw codedError("AI_CLASSIFIER_RATE_LIMITED", true);
