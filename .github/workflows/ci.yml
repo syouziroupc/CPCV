@@ -63,7 +63,7 @@ jobs:
           npm audit --omit=dev
 
   apply-user-stability-patch:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/agent/fix-ui-auth-state-language-20260808'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/agent/fix-ui-auth-state-language-20260808') || (github.event_name == 'pull_request' && github.head_ref == 'agent/fix-ui-auth-state-language-20260808')
     name: Apply user-facing stability patch
     runs-on: ubuntu-latest
     timeout-minutes: 120
