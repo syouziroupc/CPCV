@@ -31,7 +31,8 @@ assert.match(aiRepository, /hasChangeMetadata/);
 const translationConsumer = wrangler.match(/queue = "cpcv-ai-translation-jobs"[\s\S]*?dead_letter_queue = "cpcv-ai-translation-dlq"/)?.[0] || "";
 const moderationConsumer = wrangler.match(/queue = "cpcv-ai-moderation-jobs"[\s\S]*?dead_letter_queue = "cpcv-ai-moderation-dlq"/)?.[0] || "";
 assert.match(translationConsumer, /max_batch_size = 3/);
-assert.match(moderationConsumer, /max_batch_size = 3/);
+assert.match(moderationConsumer, /max_batch_size = 10/);
+assert.match(wrangler, /AI_MODERATION_QUEUE_PARALLELISM = "10"/);
 
 assert.match(moderationClassifier, /@cf\/google\/embeddinggemma-300m/);
 assert.match(moderationClassifier, /AI_MODERATION_CLASSIFIER_RATE_LIMITER/);
