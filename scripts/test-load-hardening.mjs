@@ -33,9 +33,13 @@ const moderationConsumer = wrangler.match(/queue = "cpcv-ai-moderation-jobs"[\s\
 assert.match(translationConsumer, /max_batch_size = 3/);
 assert.match(moderationConsumer, /max_batch_size = 10/);
 assert.match(wrangler, /AI_MODERATION_QUEUE_PARALLELISM = "10"/);
+assert.match(wrangler, /AI_MODERATION_MODEL_BATCH_SIZE = "20"/);
+assert.match(wrangler, /AI_MODERATION_BATCH_WINDOW_MS = "8"/);
 
 assert.match(moderationClassifier, /@cf\/google\/embeddinggemma-300m/);
 assert.match(moderationClassifier, /AI_MODERATION_CLASSIFIER_RATE_LIMITER/);
+assert.match(moderationClassifier, /classifyBatchWithEmbeddings/);
+assert.match(moderationClassifier, /batchStates = new WeakMap/);
 assert.match(aiProvider, /AI_TRANSLATION_DEDICATED_RATE_LIMITER/);
 assert.match(aiProvider, /acquireDedicatedTranslationCapacity/);
 assert.match(wrangler, /name = "AI_TRANSLATION_RATE_LIMITER"[\s\S]*?limit = 990/);
@@ -58,6 +62,8 @@ let modelCalls = 0;
 const mockEnv = {
   AI_MODERATION_CLASSIFIER_MODEL: "@cf/google/embeddinggemma-300m",
   AI_MODERATION_CLASSIFIER_FALLBACK: "0",
+  AI_MODERATION_MODEL_BATCH_SIZE: "20",
+  AI_MODERATION_BATCH_WINDOW_MS: "1",
   AI_MODERATION_CLASSIFIER_RATE_LIMITER: {
     limit: async () => ({ success: true })
   },
@@ -89,6 +95,36 @@ const unsafeModeration = await runModerationModel(mockEnv, {
 });
 assert.equal(unsafeModeration.recommendation, "hide");
 assert.ok(unsafeModeration.categories.includes("harassment"));
-assert.equal(modelCalls, 2, "classifier prototypes should be cached after the first request");
+assert.equal(modelCalls, 2, "sequential classifier requests should remain valid");
 
-console.log("load hardening, AI capacity routing, and minimal UI regression passed");
+let batchedModelCalls = 0;
+let batchedLimiterCalls = 0;
+const batchedEnv = {
+  AI_MODERATION_CLASSIFIER_MODEL: "@cf/google/embeddinggemma-300m",
+  AI_MODERATION_CLASSIFIER_FALLBACK: "0",
+  AI_MODERATION_MODEL_BATCH_SIZE: "20",
+  AI_MODERATION_BATCH_WINDOW_MS: "5",
+  AI_MODERATION_CLASSIFIER_RATE_LIMITER: {
+    limit: async () => {
+      batchedLimiterCalls += 1;
+      return { success: true };
+    }
+  },
+  AI: {
+    run: async (_model, request) => {
+      batchedModelCalls += 1;
+      const count = Array.isArray(request.text) ? request.text.length : 1;
+      return { data: Array.from({ length: count }, () => [1, 0]) };
+    }
+  }
+};
+const batchedResults = await Promise.all(
+  Array.from({ length: 8 }, (_, index) => runModerationModel(batchedEnv, {
+    message: `Safe classroom batch comment ${index}.`
+  }))
+);
+assert.ok(batchedResults.every((result) => result.recommendation === "allow"));
+assert.equal(batchedModelCalls, 1, "concurrent moderation comments should share one embedding inference");
+assert.equal(batchedLimiterCalls, 1, "classifier capacity should count embedding requests, not comments");
+
+console.log("load hardening, batched AI capacity routing, and minimal UI regression passed");
