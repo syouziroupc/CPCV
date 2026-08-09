@@ -45,9 +45,6 @@ jobs:
           git rm -f .github/workflows/finalize-email-identity-hardening.yml
           git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
 
-      - name: Regenerate source manifest
-        run: npm run manifest:source
-
       - name: Focused validation
         run: |
           node --no-warnings scripts/test-email-auth-v2.mjs
@@ -56,12 +53,19 @@ jobs:
           npm run check
           git diff --check
 
-      - name: Commit candidate locally
+      - name: Commit code candidate locally
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "Harden email identity and delivery quotas"
+
+      - name: Regenerate manifest from candidate commit
+        run: |
+          npm run manifest:source
+          git add SOURCE_SHA256SUMS.txt SOURCE_SHA256SUMS.override.txt
+          git commit --amend --no-edit
+          test -z "$(git status --porcelain)"
 
       - name: Full clean-tree validation
         run: |
