@@ -47,11 +47,14 @@ jobs:
           p.write_text(text.replace(old, new, 1))
           PY
           python3 scripts/apply-translation-language-hotfix.py
+          git checkout origin/master -- src/ai/provider-base.js
+          python3 scripts/apply-translation-provider-current.py
 
       - name: Remove temporary patch machinery and restore canonical CI
         shell: bash
         run: |
           rm -f scripts/apply-translation-language-hotfix.py
+          rm -f scripts/apply-translation-provider-current.py
           rm -f .github/workflows/translation-language-hotfix.yml
           git fetch origin master --depth=1
           git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
@@ -60,7 +63,7 @@ jobs:
         run: |
           npm run test:translation-language-hardening
           node --check src/content-filter/language.js
-          node --check src/ai/provider-base.js
+          node --check src/ai/provider.js
           node --check src/ai/processor.js
           node --check src/ai/repository.js
 
@@ -83,6 +86,7 @@ jobs:
           git status --short
           test ! -e .github/workflows/translation-language-hotfix.yml
           test ! -e scripts/apply-translation-language-hotfix.py
+          test ! -e scripts/apply-translation-provider-current.py
           git diff --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -91,7 +95,7 @@ jobs:
           printf '%s\n' "$changed"
           for path in $changed; do
             case "$path" in
-              SOURCE_SHA256SUMS.txt|package.json|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider-base.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml|scripts/apply-translation-language-hotfix.py) ;;
+              SOURCE_SHA256SUMS.txt|package.json|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml|scripts/apply-translation-language-hotfix.py|scripts/apply-translation-provider-current.py) ;;
               *) echo "unexpected changed path: $path" >&2; exit 1 ;;
             esac
           done
