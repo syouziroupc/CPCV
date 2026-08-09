@@ -30,9 +30,12 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply authorization race fixes
-        run: python scripts/finalize-membership-auth-races-v7.py
+        run: |
+          python scripts/fix-v7-delete-test.py
+          python scripts/finalize-membership-auth-races-v7.py
       - name: Remove temporary finalizer
         run: |
+          git rm -f scripts/fix-v7-delete-test.py
           git rm -f scripts/finalize-membership-auth-races-v7.py
           git rm -f .github/workflows/finalize-membership-auth-races-v7.yml
       - name: Stage sources and regenerate manifest
