@@ -40,7 +40,7 @@ form.addEventListener("submit", async (event) => {
   }
 
   if (response.status === 202) {
-    status.textContent = "登録済みの場合は再設定メールを送信しました。";
+    status.textContent = "受付しました。安全のため登録状況は表示しません。登録済みの場合のみ再設定メールが送信されます。";
   } else {
     status.textContent = errorMessage(data.error);
     challenge?.reset();

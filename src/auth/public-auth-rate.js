@@ -5,7 +5,7 @@ const RECIPIENT_LIMIT = 5;
 const IP_LIMIT = 20;
 const EDGE_RETRY_AFTER_SECONDS = 60;
 
-export async function consumePublicEmailRateLimit(request, env, email, purpose) {
+export async function consumePublicEmailRequestRateLimit(request, env, purpose) {
   const production = String(env?.APP_ENV || "").toLowerCase() === "production";
   const pepper = String(env?.AUTH_RATE_LIMIT_PEPPER || "");
   const cloudflareIp = request.headers.get("cf-connecting-ip") || "";
@@ -29,24 +29,37 @@ export async function consumePublicEmailRateLimit(request, env, email, purpose) 
   const now = new Date();
   const nowIso = now.toISOString();
   const windowStart = `${nowIso.slice(0, 10)}T00:00:00.000Z`;
-  const recipientKey = await buildRateLimitKey(email, pepper, "recipient");
   const ipKey = await buildRateLimitKey(ip, pepper, "request-ip");
+  await incrementStatement(env.DB_V2, "request_ip", ipKey, windowStart, nowIso).run();
+  const row = await env.DB_V2.prepare(
+    `SELECT count FROM auth_public_counters
+     WHERE scope = 'request_ip' AND key_hash = ?1 AND window_start = ?2 LIMIT 1`
+  ).bind(ipKey, windowStart).first();
+  const ipCount = Number(row?.count || 0);
+  if (ipCount > IP_LIMIT) throw dailyRateLimited(now);
+  return { ipCount };
+}
 
-  await env.DB_V2.batch([
-    incrementStatement(env.DB_V2, "recipient_email", recipientKey, windowStart, nowIso),
-    incrementStatement(env.DB_V2, "request_ip", ipKey, windowStart, nowIso)
-  ]);
-  const counts = await env.DB_V2.prepare(
-    `SELECT
-       COALESCE((SELECT count FROM auth_public_counters
-                 WHERE scope = 'recipient_email' AND key_hash = ?1 AND window_start = ?3), 0) AS recipient_count,
-       COALESCE((SELECT count FROM auth_public_counters
-                 WHERE scope = 'request_ip' AND key_hash = ?2 AND window_start = ?3), 0) AS ip_count`
-  ).bind(recipientKey, ipKey, windowStart).first();
-  const recipientCount = Number(counts?.recipient_count || 0);
-  const ipCount = Number(counts?.ip_count || 0);
-  if (recipientCount > RECIPIENT_LIMIT || ipCount > IP_LIMIT) throw dailyRateLimited(now);
-  return { recipientCount, ipCount };
+export async function consumeRecipientEmailRateLimit(env, email) {
+  const pepper = String(env?.AUTH_RATE_LIMIT_PEPPER || "");
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const windowStart = `${nowIso.slice(0, 10)}T00:00:00.000Z`;
+  const recipientKey = await buildRateLimitKey(email, pepper, "recipient");
+  await incrementStatement(env.DB_V2, "recipient_email", recipientKey, windowStart, nowIso).run();
+  const row = await env.DB_V2.prepare(
+    `SELECT count FROM auth_public_counters
+     WHERE scope = 'recipient_email' AND key_hash = ?1 AND window_start = ?2 LIMIT 1`
+  ).bind(recipientKey, windowStart).first();
+  const recipientCount = Number(row?.count || 0);
+  if (recipientCount > RECIPIENT_LIMIT) throw dailyRateLimited(now);
+  return { recipientCount };
+}
+
+export async function consumePublicEmailRateLimit(request, env, email, purpose) {
+  const requestResult = await consumePublicEmailRequestRateLimit(request, env, purpose);
+  const recipientResult = await consumeRecipientEmailRateLimit(env, email);
+  return { ...requestResult, ...recipientResult };
 }
 
 function incrementStatement(db, scope, keyHash, windowStart, updatedAt) {

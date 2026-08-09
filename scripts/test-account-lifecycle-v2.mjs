@@ -231,6 +231,42 @@ async function testEmailIdentityInvariants() {
     check("email change rejects an address reserved by pending registration",
       response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
 
+    const legacyConflictEmail = "legacy-pending-owner@example.com";
+    response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: { email: legacyConflictEmail, displayName: "Foreign Pending", password: "Foreign-Pending-Password-999",
+        turnstileToken: "test-turnstile" }
+    });
+    check("foreign pending registration fixture is created", response.status === 202);
+    await h.drain();
+    const foreignPendingBefore = h.row(
+      "SELECT id,revoked_at FROM pending_registrations WHERE email = ?1 AND verified_at IS NULL", legacyConflictEmail
+    );
+    const ownerEmailBeforeLegacyConflict = h.row(
+      "SELECT email,email_verified_at FROM users WHERE id = ?1", owner.data.user.id
+    );
+    const legacyMutationAt = new Date(Date.now() + 1000).toISOString();
+    h.sqlite.prepare(
+      "UPDATE users SET email = ?1, email_verified_at = NULL, email_updated_at = ?2, updated_at = ?2 WHERE id = ?3"
+    ).run(legacyConflictEmail, legacyMutationAt, owner.data.user.id);
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: legacyConflictEmail, currentPassword: PASSWORD }
+    });
+    const legacyConflictBody = await response.clone().json();
+    const foreignPendingAfter = h.row(
+      "SELECT id,revoked_at FROM pending_registrations WHERE email = ?1 AND verified_at IS NULL", legacyConflictEmail
+    );
+    check("unverified existing account cannot steal a foreign pending registration",
+      response.status === 409 && legacyConflictBody.error === "EMAIL_UNAVAILABLE"
+        && foreignPendingAfter?.id === foreignPendingBefore?.id && foreignPendingAfter?.revoked_at === null,
+      { legacyConflictBody, foreignPendingBefore, foreignPendingAfter });
+    const restoreAt = new Date(Date.now() + 2000).toISOString();
+    h.sqlite.prepare(
+      "UPDATE users SET email = ?1, email_verified_at = ?2, email_updated_at = ?3, updated_at = ?3 WHERE id = ?4"
+    ).run(ownerEmailBeforeLegacyConflict.email, ownerEmailBeforeLegacyConflict.email_verified_at,
+      restoreAt, owner.data.user.id);
+
     response = await h.api("/api/org/invitations", {
       method: "POST", auth: owner,
       body: { email: "pending-claim@example.com", role: "teacher" }
@@ -288,6 +324,13 @@ async function testEmailIdentityInvariants() {
       response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
 
     const second = await register(h, "identity-second@example.com", "Identity Second");
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "identity-second@example.com", currentPassword: PASSWORD }
+    });
+    const registeredTargetBody = await response.clone().json();
+    check("email change rejects an address already owned by another account",
+      response.status === 409 && registeredTargetBody.error === "EMAIL_UNAVAILABLE", registeredTargetBody);
     response = await h.api("/api/org/invitations", {
       method: "POST", auth: owner,
       body: { email: "invite-race@example.com", role: "teacher" }

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import worker from "../src/index.js";
 import { normalizeEmail } from "../src/auth/email.js";
 import { hashToken } from "../src/auth/passwords.js";
-import { consumePublicEmailRateLimit } from "../src/auth/public-auth-rate.js";
+import { consumeRecipientEmailRateLimit } from "../src/auth/public-auth-rate.js";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const ORIGIN = "http://localhost";
@@ -180,20 +180,16 @@ async function testRegistrationConflictRollback() {
 async function testAggregateRateLimit() {
   const h = createHarness();
   try {
-    const request = new Request(`${ORIGIN}/api/auth/registration/request`, {
-      method: "POST",
-      headers: { "cf-connecting-ip": "127.0.0.9" }
-    });
-    for (const purpose of ["registration", "registration-resend", "password-reset", "invitation", "email-change"]) {
-      await consumePublicEmailRateLimit(request, h.env, "aggregate@example.com", purpose);
+    for (let index = 0; index < 5; index += 1) {
+      await consumeRecipientEmailRateLimit(h.env, "aggregate@example.com");
     }
     let error;
     try {
-      await consumePublicEmailRateLimit(request, h.env, "aggregate@example.com", "another-purpose");
+      await consumeRecipientEmailRateLimit(h.env, "aggregate@example.com");
     } catch (caught) {
       error = caught;
     }
-    check("daily recipient limit is aggregate across email purposes", error?.status === 429 && error?.code === "RATE_LIMITED", error);
+    check("daily recipient limit is aggregate across actual deliveries", error?.status === 429 && error?.code === "RATE_LIMITED", error);
   } finally {
     h.close();
   }
@@ -209,7 +205,18 @@ async function testRateLimitAndDeliveryFailure() {
         body: { email: "rate@example.com", turnstileToken: "test-turnstile" }
       });
     }
-    check("sixth public email request is rate limited", last.status === 429 && (await last.json()).error === "RATE_LIMITED");
+    check("unknown reset requests remain enumeration-safe without consuming recipient quota",
+      last.status === 202
+        && h.row("SELECT COALESCE(SUM(count),0) AS count FROM auth_public_counters WHERE scope='recipient_email'")?.count === 0,
+      { status: last.status, counters: h.row("SELECT COALESCE(SUM(count),0) AS count FROM auth_public_counters WHERE scope='recipient_email'") });
+    for (let index = 6; index < 21; index += 1) {
+      last = await h.api("/api/auth/password/reset/request", {
+        method: "POST",
+        body: { email: `missing-${index}@example.com`, turnstileToken: "test-turnstile" }
+      });
+    }
+    check("public no-send attempts are still bounded by request IP quota",
+      last.status === 429 && (await last.json()).error === "RATE_LIMITED");
 
     h.env.EMAIL = { async send() { throw Object.assign(new Error("provider down"), { code: "PROVIDER_DOWN" }); } };
     const response = await h.api("/api/auth/registration/request", {

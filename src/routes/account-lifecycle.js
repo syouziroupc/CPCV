@@ -30,7 +30,7 @@ import {
   rejectOrganizationSelector
 } from "../auth/request.js";
 import { createSessionMaterial } from "../auth/sessions.js";
-import { consumePublicEmailRateLimit } from "../auth/public-auth-rate.js";
+import { consumePublicEmailRequestRateLimit, consumeRecipientEmailRateLimit } from "../auth/public-auth-rate.js";
 import {
   sendEmailChangeConfirmation,
   sendEmailChangedNotice,
@@ -804,15 +804,35 @@ async function handleEmailChangeRequest(request, env, ctx) {
     throw new AuthError(401, "CURRENT_PASSWORD_INVALID");
   }
   if (user.email_verified_at && normalizeEmail(user.email) === newEmail) throw new AuthError(409, "EMAIL_UNCHANGED");
-  await consumePublicEmailRateLimit(request, env, newEmail, "email-change");
+  await consumePublicEmailRequestRateLimit(request, env, "email-change");
   const now = new Date();
   const nowIso = now.toISOString();
   const hasVerifiedEmail = Boolean(user.email && user.email_verified_at);
   if (!hasVerifiedEmail && normalizeEmail(user.email) === newEmail) {
-    await env.DB_V2.prepare(
-      `UPDATE pending_registrations SET revoked_at = ?1
-       WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
-    ).bind(nowIso, newEmail).run();
+    const pendingRegistration = await env.DB_V2.prepare(
+      `SELECT id, password_scheme, password_hash, password_salt
+       FROM pending_registrations
+       WHERE email = ?1 COLLATE NOCASE
+         AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+       LIMIT 1`
+    ).bind(newEmail, nowIso).first();
+    if (pendingRegistration) {
+      const ownsPendingRegistration = await verifyPassword(
+        currentPassword,
+        pendingRegistration.password_salt,
+        pendingRegistration.password_hash,
+        pendingRegistration.password_scheme
+      );
+      if (!ownsPendingRegistration) throw new AuthError(409, "EMAIL_UNAVAILABLE");
+      const released = await env.DB_V2.prepare(
+        `UPDATE pending_registrations SET revoked_at = ?1
+         WHERE id = ?2 AND email = ?3 COLLATE NOCASE
+           AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?1`
+      ).bind(nowIso, pendingRegistration.id, newEmail).run();
+      if (Number(released?.meta?.changes || 0) !== 1) {
+        throw new AuthError(409, "EMAIL_UNAVAILABLE");
+      }
+    }
   }
   await releaseExpiredEmailReservations(env.DB_V2, newEmail, nowIso);
   if (await emailUnavailable(env.DB_V2, newEmail, auth.userId, nowIso)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
@@ -830,6 +850,7 @@ async function handleEmailChangeRequest(request, env, ctx) {
          AND created_at > ?4 LIMIT 1`
     ).bind(auth.userId, newEmail, nowIso, new Date(now.getTime() - 60_000).toISOString()).first();
   if (recentRequest) return authJson(ACCEPTED, 202);
+  await consumeRecipientEmailRateLimit(env, newEmail);
 
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);

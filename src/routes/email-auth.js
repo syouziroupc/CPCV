@@ -15,7 +15,7 @@ import {
 import { createSessionMaterial } from "../auth/sessions.js";
 import { internalLoginId, normalizeEmail, normalizeOrganizationName, requireEmail } from "../auth/email.js";
 import { requireTurnstile } from "../auth/turnstile.js";
-import { consumePublicEmailRateLimit } from "../auth/public-auth-rate.js";
+import { consumePublicEmailRequestRateLimit, consumeRecipientEmailRateLimit } from "../auth/public-auth-rate.js";
 import { sendPasswordReset, sendRegistrationVerification } from "../auth/email-service.js";
 
 const REGISTRATION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -54,7 +54,7 @@ async function handleRegistrationRequest(request, env, ctx) {
   const organizationName = personalWorkspaceName(displayName);
   requireValidPassword(password, email);
   await requireTurnstile(request, env, input.turnstileToken);
-  await consumePublicEmailRateLimit(request, env, email, "registration");
+  await consumePublicEmailRequestRateLimit(request, env, "registration");
 
   const now = new Date();
   const nowIso = now.toISOString();
@@ -84,6 +84,8 @@ async function handleRegistrationRequest(request, env, ctx) {
     return authJson(ACCEPTED, 202);
   }
   if (activePending) return authJson(ACCEPTED, 202);
+  if (await registrationEmailUnavailable(env.DB_V2, email, nowIso)) return authJson(ACCEPTED, 202);
+  await consumeRecipientEmailRateLimit(env, email);
 
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
@@ -152,7 +154,7 @@ async function handleRegistrationResend(request, env, ctx) {
   assertOnlyFields(input, ["email", "turnstileToken"]);
   const email = requireEmail(input.email);
   await requireTurnstile(request, env, input.turnstileToken);
-  await consumePublicEmailRateLimit(request, env, email, "registration-resend");
+  await consumePublicEmailRequestRateLimit(request, env, "registration-resend");
   const now = new Date();
   const nowIso = now.toISOString();
   const pending = await env.DB_V2.prepare(
@@ -172,6 +174,7 @@ async function handleRegistrationResend(request, env, ctx) {
   if (Date.parse(pending.last_sent_at) > now.getTime() - 60_000) {
     throw new AuthError(429, "RATE_LIMITED", { headers: { "retry-after": "60" } });
   }
+  await consumeRecipientEmailRateLimit(env, email);
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
   const result = await env.DB_V2.prepare(
@@ -366,7 +369,7 @@ async function handleResetRequest(request, env, ctx) {
   assertOnlyFields(input, ["email", "turnstileToken"]);
   const email = requireEmail(input.email);
   await requireTurnstile(request, env, input.turnstileToken);
-  await consumePublicEmailRateLimit(request, env, email, "password-reset");
+  await consumePublicEmailRequestRateLimit(request, env, "password-reset");
   const user = await env.DB_V2.prepare(
     `SELECT id, email FROM users
      WHERE email = ?1 COLLATE NOCASE AND email_verified_at IS NOT NULL AND status = 'active'
@@ -384,6 +387,7 @@ async function handleResetRequest(request, env, ctx) {
      LIMIT 1`
   ).bind(user.id, email, nowIso, new Date(now.getTime() - 60_000).toISOString()).first();
   if (recentReset) return authJson(ACCEPTED, 202);
+  await consumeRecipientEmailRateLimit(env, email);
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
   const expiresAt = new Date(now.getTime() + RESET_TTL_MS).toISOString();
