@@ -13,6 +13,7 @@ const results = [];
 async function main() {
   await testInvitationAndAccountLifecycle();
   await testInvitationAuthorizationAndQuotas();
+  await testMembershipAuthorizationRaces();
   await testEmailIdentityInvariants();
   await testCredentialChangeInvalidation();
   await testAccountDeletion();
@@ -20,6 +21,109 @@ async function main() {
   const failed = results.length - passed;
   console.log(`\nStage 6.5 account lifecycle summary: ${passed} passed, ${failed} failed, ${results.length} total.`);
   if (failed) process.exitCode = 1;
+}
+
+async function testMembershipAuthorizationRaces() {
+  const h = createHarness();
+  try {
+    const owner = await register(h, "race-owner@example.com", "Race Owner");
+
+    let response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner, body: { email: "race-admin@example.com", role: "admin" }
+    });
+    check("authorization-race Admin invitation is created", response.status === 202);
+    await h.drain();
+    let token = tokenFromMessage(h.emails.at(-1), "accept-invitation");
+    response = await h.api("/api/auth/invitations/accept", {
+      method: "POST", body: { token, displayName: "Race Admin", password: PASSWORD }
+    });
+    const adminData = await response.json();
+    const admin = { data: adminData, cookie: cookieFrom(response), csrf: adminData.csrfToken };
+    check("authorization-race Admin account is active", response.status === 201 && adminData.organization.role === "admin");
+
+    async function inviteTeacher(email, displayName) {
+      let r = await h.api("/api/org/invitations", {
+        method: "POST", auth: owner, body: { email, role: "teacher" }
+      });
+      if (r.status !== 202) throw new Error(`teacher invitation failed ${r.status}`);
+      await h.drain();
+      const inviteToken = tokenFromMessage(h.emails.at(-1), "accept-invitation");
+      r = await h.api("/api/auth/invitations/accept", {
+        method: "POST", body: { token: inviteToken, displayName, password: PASSWORD }
+      });
+      const data = await r.json();
+      if (r.status !== 201) throw new Error(`teacher acceptance failed ${r.status}: ${JSON.stringify(data)}`);
+      return data;
+    }
+
+    const updateTarget = await inviteTeacher("race-update@example.com", "Race Update Teacher");
+    const updateTargetId = updateTarget.user.id;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("UPDATE organization_members")
+          && statement.sql.includes("SET role = ?1, status = ?2"))) return false;
+      const changedAt = new Date(Date.now() + 5000).toISOString();
+      h.sqlite.prepare(
+        "UPDATE organization_members SET role = 'admin', updated_at = ? WHERE organization_id = ? AND user_id = ?"
+      ).run(changedAt, owner.data.organization.id, updateTargetId);
+      return true;
+    };
+    response = await h.api(`/api/org/members/${encodeURIComponent(updateTargetId)}`, {
+      method: "PATCH", auth: admin, body: { status: "suspended" }
+    });
+    check("stale Admin member update is rejected after concurrent Teacher-to-Admin promotion", response.status === 409,
+      await response.clone().json());
+    const afterUpdateRace = h.row(
+      "SELECT role,status FROM organization_members WHERE organization_id = ?1 AND user_id = ?2",
+      owner.data.organization.id, updateTargetId
+    );
+    check("stale member update cannot overwrite the concurrent promotion",
+      afterUpdateRace?.role === "admin" && afterUpdateRace?.status === "active", afterUpdateRace);
+
+    const deleteTarget = await inviteTeacher("race-delete@example.com", "Race Delete Teacher");
+    const deleteTargetId = deleteTarget.user.id;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("UPDATE organization_members")
+          && statement.sql.includes("SET role = ?1, status = ?2"))) return false;
+      const changedAt = new Date(Date.now() + 6000).toISOString();
+      h.sqlite.prepare(
+        "UPDATE organization_members SET role = 'admin', updated_at = ? WHERE organization_id = ? AND user_id = ?"
+      ).run(changedAt, owner.data.organization.id, deleteTargetId);
+      return true;
+    };
+    response = await h.api(`/api/org/members/${encodeURIComponent(deleteTargetId)}`, {
+      method: "DELETE", auth: admin, body: {}
+    });
+    check("stale Admin member removal is rejected after concurrent Teacher-to-Admin promotion", response.status === 409,
+      await response.clone().json());
+    const afterDeleteRace = h.row(
+      "SELECT role,status FROM organization_members WHERE organization_id = ?1 AND user_id = ?2",
+      owner.data.organization.id, deleteTargetId
+    );
+    check("stale member removal cannot remove the concurrently promoted Admin",
+      afterDeleteRace?.role === "admin" && afterDeleteRace?.status === "active", afterDeleteRace);
+
+    const resetTarget = await inviteTeacher("race-reset@example.com", "Race Reset Teacher");
+    const resetTargetId = resetTarget.user.id;
+    const emailsBeforeResetRace = h.emails.length;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("INSERT INTO password_reset_tokens"))) return false;
+      const changedAt = new Date(Date.now() + 7000).toISOString();
+      h.sqlite.prepare(
+        "UPDATE organization_members SET role = 'admin', updated_at = ? WHERE organization_id = ? AND user_id = ?"
+      ).run(changedAt, owner.data.organization.id, resetTargetId);
+      return true;
+    };
+    response = await h.api(`/api/org/members/${encodeURIComponent(resetTargetId)}/password-reset`, {
+      method: "POST", auth: admin, body: {}
+    });
+    const resetRaceBody = await response.clone().json();
+    check("manager reset revalidates target role at token-write time",
+      response.status === 403 && resetRaceBody.error === "ROLE_FORBIDDEN", resetRaceBody);
+    await h.drain();
+    check("lost manager-reset authorization creates no reset token or email",
+      h.emails.length === emailsBeforeResetRace
+        && h.row("SELECT COUNT(*) AS count FROM password_reset_tokens WHERE user_id = ?1", resetTargetId)?.count === 0);
+  } finally { h.close(); }
 }
 
 async function testEmailIdentityInvariants() {

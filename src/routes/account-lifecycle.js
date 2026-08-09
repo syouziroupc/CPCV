@@ -1125,8 +1125,13 @@ export async function issueMemberPasswordResetEmail(request, env, ctx, auth, tar
            WHERE u.id = ?2 AND u.email = ?3 COLLATE NOCASE
              AND u.email_verified_at IS NOT NULL AND u.status = 'active'
          )
-         AND (SELECT COUNT(*) FROM organization_members WHERE user_id = ?2 AND status = 'active') <= 1`
-    ).bind(nowIso, target.user_id, target.email),
+         AND (SELECT COUNT(*) FROM organization_members WHERE user_id = ?2 AND status = 'active') <= 1
+         AND EXISTS (
+           SELECT 1 FROM organization_members m
+           WHERE m.organization_id = ?4 AND m.user_id = ?2
+             AND m.role = ?5 AND m.status = 'active'
+         )`
+    ).bind(nowIso, target.user_id, target.email, auth.organizationId, target.role),
     env.DB_V2.prepare(
       `INSERT INTO password_reset_tokens (
          id, user_id, token_hash, created_by_user_id, created_at, expires_at,
@@ -1136,8 +1141,16 @@ export async function issueMemberPasswordResetEmail(request, env, ctx, auth, tar
        FROM users u
        WHERE u.id = ?2 AND u.email = ?7 COLLATE NOCASE
          AND u.email_verified_at IS NOT NULL AND u.status = 'active'
-         AND (SELECT COUNT(*) FROM organization_members WHERE user_id = ?2 AND status = 'active') <= 1`
-    ).bind(tokenId, target.user_id, tokenHash, auth.userId, nowIso, expiresAt, target.email),
+         AND (SELECT COUNT(*) FROM organization_members WHERE user_id = ?2 AND status = 'active') <= 1
+         AND EXISTS (
+           SELECT 1 FROM organization_members m
+           WHERE m.organization_id = ?8 AND m.user_id = ?2
+             AND m.role = ?9 AND m.status = 'active'
+         )`
+    ).bind(
+      tokenId, target.user_id, tokenHash, auth.userId, nowIso, expiresAt, target.email,
+      auth.organizationId, target.role
+    ),
     auditStatement(env.DB_V2, {
       organizationId: auth.organizationId,
       actorType: "user",
@@ -1159,15 +1172,21 @@ export async function issueMemberPasswordResetEmail(request, env, ctx, auth, tar
        AND used_at IS NULL AND revoked_at IS NULL LIMIT 1`
   ).bind(tokenId, target.user_id, tokenHash).first();
   if (!created) {
+    const freshMember = await env.DB_V2.prepare(
+      `SELECT m.role, m.status, u.email, u.email_verified_at, u.status AS user_status
+       FROM organization_members m JOIN users u ON u.id = m.user_id
+       WHERE m.organization_id = ?1 AND m.user_id = ?2 LIMIT 1`
+    ).bind(auth.organizationId, target.user_id).first();
+    if (!freshMember || freshMember.status !== "active" || freshMember.user_status !== "active") {
+      throw new AuthError(404, "MEMBER_NOT_FOUND");
+    }
+    requireRoleAssignment(auth.role, freshMember.role);
     const memberships = await env.DB_V2.prepare(
       `SELECT COUNT(*) AS count FROM organization_members WHERE user_id = ?1 AND status = 'active'`
     ).bind(target.user_id).first();
     if (Number(memberships?.count || 0) > 1) throw new AuthError(409, "RESET_REQUIRES_SYSTEM_OPERATOR");
-    const current = await env.DB_V2.prepare(
-      `SELECT email, email_verified_at, status FROM users WHERE id = ?1 LIMIT 1`
-    ).bind(target.user_id).first();
-    if (!current || current.status !== "active" || !current.email_verified_at
-        || normalizeEmail(current.email) !== normalizeEmail(target.email)) {
+    if (!freshMember.email_verified_at
+        || normalizeEmail(freshMember.email) !== normalizeEmail(target.email)) {
       throw new AuthError(409, "MEMBER_EMAIL_REQUIRED");
     }
     throw new AuthError(409, "RESET_UPDATE_CONFLICT");
