@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PUBLIC = ROOT / "public"
 OUT = ROOT / "artifacts" / "responsive-layout-audit"
 VIEWPORTS = (
+    ("pane-280", 280, 720),
     ("phone-320", 320, 720),
     ("phone-375", 375, 812),
     ("tablet-768", 768, 1024),
@@ -17,8 +18,8 @@ VIEWPORTS = (
     ("desktop-1440", 1440, 1000),
 )
 KEY_PAGES = {
-    "_admin_spa.html", "admin/index.html", "signup/index.html",
-    "forgot-password/index.html", "account/index.html", "master/index.html",
+    "_admin_spa.html", "admin/index.html", "_viewer_spa.html", "viewer/index.html",
+    "signup/index.html", "forgot-password/index.html", "account/index.html", "master/index.html",
 }
 
 
@@ -73,13 +74,29 @@ async def inspect(page, source: str, width: int) -> dict:
               }
             }
           }
+          const viewerControlFailures = [];
+          const viewerTopbar = document.querySelector('.viewer-topbar');
+          if (viewerTopbar && visible(viewerTopbar)) {
+            const tr = viewerTopbar.getBoundingClientRect();
+            if (viewerTopbar.scrollWidth > viewerTopbar.clientWidth + 1) {
+              viewerControlFailures.push({kind: 'toolbar-horizontal-overflow', scrollWidth: viewerTopbar.scrollWidth, clientWidth: viewerTopbar.clientWidth});
+            }
+            for (const control of viewerTopbar.querySelectorAll('button, label, #connectionState, #localLogState, #pdfPageControls')) {
+              if (!visible(control)) continue;
+              const r = control.getBoundingClientRect();
+              if (r.left < tr.left - 1 || r.right > tr.right + 1 || r.left < -1 || r.right > width + 1) {
+                viewerControlFailures.push({kind: 'viewer-control-outside', ...describe(control), left: r.left, right: r.right, toolbarLeft: tr.left, toolbarRight: tr.right});
+              }
+            }
+          }
           return {
             source,
             viewportWidth: width,
             documentWidth: document.documentElement.scrollWidth,
             bodyWidth: document.body.scrollWidth,
             outside,
-            authFailures
+            authFailures,
+            viewerControlFailures
           };
         }""",
         {"source": source, "width": width},
@@ -102,6 +119,18 @@ async def main() -> None:
                 await page.set_viewport_size({"width": width, "height": height})
                 await page.goto(path.resolve().as_uri(), wait_until="load")
                 await page.wait_for_timeout(80)
+                if relative in {"_admin_spa.html", "admin/index.html"}:
+                    await page.evaluate("""() => {
+                      document.getElementById('adminBootSection')?.classList.add('hidden');
+                      document.getElementById('loginSection')?.classList.add('hidden');
+                      document.getElementById('adminHome')?.classList.add('hidden');
+                      document.getElementById('sessionSection')?.classList.remove('hidden');
+                    }""")
+                if relative in {"_viewer_spa.html", "viewer/index.html"}:
+                    await page.evaluate("""() => {
+                      document.getElementById('topBar')?.classList.remove('hidden');
+                      document.getElementById('pdfPageControls')?.classList.remove('hidden');
+                    }""")
                 result = await inspect(page, relative, width)
                 result["viewport"] = viewport_name
                 result["ok"] = (
@@ -109,12 +138,13 @@ async def main() -> None:
                     and result["bodyWidth"] <= width + 1
                     and not result["outside"]
                     and not result["authFailures"]
+                    and not result["viewerControlFailures"]
                 )
                 if not result["ok"]:
                     failures.append(result)
                     safe = relative.replace("/", "__")
                     await page.screenshot(path=str(OUT / f"FAIL-{safe}-{viewport_name}.png"), full_page=True)
-                elif relative in KEY_PAGES and viewport_name in {"phone-320", "desktop-1024"}:
+                elif relative in KEY_PAGES and viewport_name in {"pane-280", "phone-320", "desktop-1024"}:
                     safe = relative.replace("/", "__")
                     await page.screenshot(path=str(OUT / f"PASS-{safe}-{viewport_name}.png"), full_page=True)
         await browser.close()

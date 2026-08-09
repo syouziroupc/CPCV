@@ -106,7 +106,14 @@ export function runStageCompatibility(stage) {
     check("single and bulk moderation APIs remain connected", moderationRoute.includes("moderate-bulk") && moderationRoute.includes("moderateSingleComment") && moderationRoute.includes("getCommentModerationHistory"));
     const realtime = read("migrations-v2/0007_realtime.sql") + read("src/realtime/comment-room.js") + read("public/assets/viewer.js");
     check("Viewer retraction and restoration events remain supported", realtime.includes("message:remove") && realtime.includes("message:restore"));
-    check("Stage 5 does not add AI or translation dependencies", !/openai|anthropic|translate|translation/i.test(read("package.json")));
+    const packageJson = JSON.parse(read("package.json"));
+    const declaredDependencies = JSON.stringify({
+      dependencies: packageJson.dependencies || {},
+      devDependencies: packageJson.devDependencies || {},
+      optionalDependencies: packageJson.optionalDependencies || {},
+      peerDependencies: packageJson.peerDependencies || {}
+    });
+    check("Stage 5 does not add AI or translation dependencies", !/openai|anthropic|translate|translation/i.test(declaredDependencies));
   }
 
   const passed = results.filter((item) => item.ok).length;

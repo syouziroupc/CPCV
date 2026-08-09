@@ -347,3 +347,68 @@ p, li, dd, dt, label, small, strong, span, a, button, th, td, summary {
 .clear-public-page .clear-hero-copy { max-width: 760px; }
 .clear-public-page .clear-feature-grid article { border-radius: 0; box-shadow: none; }
 .clear-public-page .clear-section, .home-join-panel { box-shadow: none; border-radius: 0; }
+
+
+/* Narrow viewer controls: keep every operation visible without horizontal scrolling. */
+@media (max-width: 720px) {
+  .viewer-topbar {
+    left: 12px;
+    right: 12px;
+    top: auto;
+    bottom: 12px;
+    width: auto;
+    max-width: none;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    align-items: center;
+    align-content: flex-start;
+    overflow: visible;
+  }
+  .viewer-topbar > * {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+  .viewer-topbar #viewerTitle {
+    flex: 1 0 100%;
+    max-width: 100%;
+  }
+  .viewer-topbar .local-log-state,
+  .viewer-topbar #connectionState {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .viewer-topbar .pdf-page-controls {
+    flex-wrap: nowrap;
+  }
+  .comment-panel {
+    bottom: 150px;
+    max-height: calc(100vh - 174px);
+  }
+  .comment-panel.scroll-mode {
+    inset: 54px 0 150px;
+  }
+}
+
+@media (max-width: 420px) {
+  .viewer-topbar {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    gap: 4px;
+    padding: 5px 6px;
+    font-size: 12px;
+  }
+  .viewer-file-button {
+    padding: 4px 6px;
+  }
+  .comment-panel {
+    left: 8px;
+    right: 8px;
+    bottom: 170px;
+    max-height: calc(100vh - 190px);
+  }
+  .comment-panel.scroll-mode {
+    inset: 48px 0 170px;
+  }
+}

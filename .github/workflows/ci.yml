@@ -6,107 +6,58 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: translation-hotfix-${{ github.ref }}
-  cancel-in-progress: false
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  patch-translation-language:
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/translation-language-hardening-20260809'
+  check:
+    name: Full local validation
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Checkout hotfix branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: agent/translation-language-hardening-20260809
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+
+      - name: Pin npm
+        run: npm install --global npm@11.18.0
+
       - name: Install dependencies
-        run: |
-          npm ci
-          python -m pip install --upgrade pip
-          python -m pip install playwright
-          python -m playwright install --with-deps chromium
-      - name: Apply translation and narrow-layout hardening
         shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('scripts/apply-translation-language-hotfix.py')
-          text = p.read_text()
-          old = 're.subn(pattern, replacement, text, count=1, flags=re.S)'
-          new = 're.subn(pattern, lambda _: replacement, text, count=1, flags=re.S)'
-          if old not in text: raise SystemExit('regex replacement helper shape changed')
-          p.write_text(text.replace(old, new, 1))
-          PY
-          python3 scripts/apply-translation-language-hotfix.py
-          git checkout origin/master -- src/ai/provider-base.js
-          python3 scripts/apply-translation-provider-current.py
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('scripts/test-translation-language-hardening.mjs')
-          text = p.read_text()
-          old = 'max_completion_tokens === 320'
-          new = 'max_completion_tokens === 220'
-          if old not in text: raise SystemExit('Kimi regression expectation shape changed')
-          p.write_text(text.replace(old, new, 1))
-          PY
-          python3 scripts/apply-narrow-viewer-controls-hotfix.py
-          python3 scripts/apply-ai-quality-expectation-hotfix.py
-      - name: Remove temporary machinery and restore canonical CI
-        shell: bash
-        run: |
-          rm -f scripts/apply-translation-language-hotfix.py scripts/apply-translation-provider-current.py scripts/apply-narrow-viewer-controls-hotfix.py scripts/apply-ai-quality-expectation-hotfix.py .github/workflows/translation-language-hotfix.yml
-          git fetch origin master --depth=1
-          git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
-      - name: Targeted regressions
-        run: |
-          npm run test:translation-language-hardening
-          npm run test:ai-quality-ui
-          node --check src/content-filter/language.js
-          node --check src/ai/provider.js
-          node --check src/ai/processor.js
-          node --check src/ai/repository.js
-          node --check scripts/stage-compatibility-checks.mjs
-          python scripts/audit-responsive-layout.py
-      - name: Remove generated responsive evidence before commit
-        run: rm -rf artifacts/responsive-layout-audit
-      - name: Build final clean commit
-        shell: bash
-        run: |
-          git add -A
-          npm run manifest:source
-          git add -A
-          git diff --cached --check
-          changed="$(git diff --cached --name-only | sort)"
-          printf '%s\n' "$changed"
-          for path in $changed; do
-            case "$path" in
-              SOURCE_SHA256SUMS.txt|SOURCE_SHA256SUMS.override.txt|package.json|public/assets/app.css|scripts/audit-responsive-layout.py|scripts/stage-compatibility-checks.mjs|scripts/test-ai-quality-ui-refinement.mjs|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml|scripts/apply-translation-language-hotfix.py|scripts/apply-translation-provider-current.py|scripts/apply-narrow-viewer-controls-hotfix.py|scripts/apply-ai-quality-expectation-hotfix.py) ;;
-              *) echo "unexpected changed path: $path" >&2; exit 1 ;;
-            esac
-          done
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git commit -m 'Harden multilingual translation and narrow viewer controls'
-          test -z "$(git status --porcelain)"
-      - name: Full validation on clean commit
+          set -o pipefail
+          npm ci || {
+            echo "npm ci failed once; clearing the npm cache and retrying."
+            npm cache clean --force
+            npm ci
+          }
+
+      - name: Run static project and documentation checks
         run: |
           npm run verify:source-manifest
           npm run check
-          npm run check:stage08
-          npm run test:owner-bootstrap
-          npm run deploy:dry-run
+          npm run check:project
+          npm run check:pdf-links
+          npm run verify:final-docs
+
+      - name: Run all implemented-stage tests
+        run: npm run check:stage08
+
+      - name: Run Owner bootstrap regression
+        run: npm run test:owner-bootstrap
+
+      - name: Validate Wrangler bundle
+        run: npm run deploy:dry-run
+
+      - name: Audit all dependencies
+        run: |
           npm audit
           npm audit --omit=dev
-      - name: Push validated clean commit
-        run: git push origin HEAD:agent/translation-language-hardening-20260809
