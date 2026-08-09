@@ -74,6 +74,7 @@ jobs:
           node --check src/ai/provider.js
           node --check src/ai/processor.js
           node --check src/ai/repository.js
+          node --check scripts/stage-compatibility-checks.mjs
           python scripts/audit-responsive-layout.py
       - name: Remove generated responsive evidence before commit
         run: rm -rf artifacts/responsive-layout-audit
@@ -88,7 +89,7 @@ jobs:
           printf '%s\n' "$changed"
           for path in $changed; do
             case "$path" in
-              SOURCE_SHA256SUMS.txt|SOURCE_SHA256SUMS.override.txt|package.json|public/assets/app.css|scripts/audit-responsive-layout.py|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml|scripts/apply-translation-language-hotfix.py|scripts/apply-translation-provider-current.py|scripts/apply-narrow-viewer-controls-hotfix.py) ;;
+              SOURCE_SHA256SUMS.txt|SOURCE_SHA256SUMS.override.txt|package.json|public/assets/app.css|scripts/audit-responsive-layout.py|scripts/stage-compatibility-checks.mjs|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml|scripts/apply-translation-language-hotfix.py|scripts/apply-translation-provider-current.py|scripts/apply-narrow-viewer-controls-hotfix.py) ;;
               *) echo "unexpected changed path: $path" >&2; exit 1 ;;
             esac
           done
