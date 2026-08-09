@@ -97,7 +97,7 @@ async function unknownLanguageUsesMultilingualModelAndSharedCapacity() {
   const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
-    assert.equal(model, LLAMA);
+    assert.equal(model, KIMI);
     return { response: "翻訳の精度が低い。" };
   }, limits), {
     message: "La precisione della traduzione è scarsa.",
@@ -146,7 +146,7 @@ async function provider429DoesNotAmplifyIntoFallbackCalls() {
     }),
     (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
   );
-  assert.deepEqual(calls, [LLAMA]);
+  assert.deepEqual(calls, [KIMI]);
   assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
 
