@@ -53,6 +53,227 @@ jobs:
           path.write_text("\n".join(lines) + "\n", encoding="utf-8")
           PY
           python scripts/fix-account-state-invariants.py
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"supplemental {path}: expected one match, found {count}\n{old[:500]}")
+              target.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "src/routes/email-auth.js",
+              '''  const id = makeId("reg");
+          try {
+            await env.DB_V2.batch([
+              env.DB_V2.prepare(
+                `UPDATE pending_registrations SET revoked_at = ?1
+                 WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
+              ).bind(nowIso, email),''',
+              '''  const id = makeId("reg");
+          try {
+            await env.DB_V2.batch([
+              env.DB_V2.prepare(
+                `UPDATE email_change_requests SET revoked_at = ?1
+                 WHERE new_email = ?2 COLLATE NOCASE
+                   AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at <= ?1`
+              ).bind(nowIso, email),
+              env.DB_V2.prepare(
+                `UPDATE email_enrollment_requests SET revoked_at = ?1
+                 WHERE new_email = ?2 COLLATE NOCASE
+                   AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at <= ?1`
+              ).bind(nowIso, email),
+              env.DB_V2.prepare(
+                `UPDATE pending_registrations SET revoked_at = ?1
+                 WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
+              ).bind(nowIso, email),'''
+          )
+
+          replace_once(
+              "src/routes/email-auth.js",
+              '''  if (!completed) {
+            if (await registrationEmailUnavailable(env.DB_V2, pending.email, nowIso)) {
+              throw new AuthError(409, "EMAIL_UNAVAILABLE");
+            }
+            console.error("Registration verification completion invariant failed");
+            throw new AuthError(400, "REGISTRATION_TOKEN_INVALID");
+          }
+''',
+              '''  if (!completed) {
+            const completedUser = await env.DB_V2.prepare(
+              `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
+            ).bind(pending.email).first();
+            if (completedUser) throw new AuthError(400, "REGISTRATION_ALREADY_COMPLETED");
+            if (await registrationEmailUnavailable(env.DB_V2, pending.email, nowIso)) {
+              throw new AuthError(409, "EMAIL_UNAVAILABLE");
+            }
+            console.error("Registration verification completion invariant failed");
+            throw new AuthError(400, "REGISTRATION_TOKEN_INVALID");
+          }
+'''
+          )
+
+          replace_once(
+              "src/routes/account-lifecycle.js",
+              '''  const requestId = makeId(user.email ? "emc" : "eme");
+          try {
+            if (user.email && user.email_verified_at) {''',
+              '''  const hasVerifiedEmail = Boolean(user.email && user.email_verified_at);
+          const requestId = makeId(hasVerifiedEmail ? "emc" : "eme");
+          try {
+            if (hasVerifiedEmail) {'''
+          )
+          replace_once(
+              "src/routes/account-lifecycle.js",
+              '''    enrollment: !(user.email && user.email_verified_at),''',
+              '''    enrollment: !hasVerifiedEmail,'''
+          )
+
+          replace_once(
+              "src/routes/account-lifecycle.js",
+              '''  const existingUser = await env.DB_V2.prepare(
+            `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
+          ).bind(email).first();
+          if (existingUser) {
+            const membership = await env.DB_V2.prepare(
+              `SELECT status FROM organization_members WHERE organization_id = ?1 AND user_id = ?2 LIMIT 1`
+            ).bind(auth.organizationId, existingUser.id).first();
+            if (membership && membership.status !== "removed") throw new AuthError(409, "MEMBERSHIP_ALREADY_EXISTS");
+          }
+
+          const organization = await env.DB_V2.prepare(''',
+              '''  const existingUser = await env.DB_V2.prepare(
+            `SELECT id, email_verified_at, status FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
+          ).bind(email).first();
+          if (existingUser) {
+            if (existingUser.status !== "active" || !existingUser.email_verified_at) {
+              throw new AuthError(409, "EMAIL_UNAVAILABLE");
+            }
+            const membership = await env.DB_V2.prepare(
+              `SELECT status FROM organization_members WHERE organization_id = ?1 AND user_id = ?2 LIMIT 1`
+            ).bind(auth.organizationId, existingUser.id).first();
+            if (membership && membership.status !== "removed") throw new AuthError(409, "MEMBERSHIP_ALREADY_EXISTS");
+          }
+          if (await emailReservedForAccountChange(env.DB_V2, email)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
+
+          const organization = await env.DB_V2.prepare('''
+          )
+
+          replace_once(
+              "src/routes/account-lifecycle.js",
+              '''  if (await env.DB_V2.prepare(`SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`).bind(invitation.email).first()) {
+            throw new AuthError(409, "INVITATION_LOGIN_REQUIRED");
+          }
+          const salt = createSalt();''',
+              '''  if (await env.DB_V2.prepare(`SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`).bind(invitation.email).first()) {
+            throw new AuthError(409, "INVITATION_LOGIN_REQUIRED");
+          }
+          if (await emailReservedForAccountChange(env.DB_V2, invitation.email)) {
+            throw new AuthError(409, "EMAIL_UNAVAILABLE");
+          }
+          const salt = createSalt();'''
+          )
+
+          replace_once(
+              "src/routes/account-lifecycle.js",
+              '''           FROM organization_invitations i
+                   WHERE i.id = ?8 AND i.token_hash = ?9 AND i.accepted_at IS NULL
+                     AND i.revoked_at IS NULL AND i.expires_at > ?7`''',
+              '''           FROM organization_invitations i
+                   WHERE i.id = ?8 AND i.token_hash = ?9 AND i.accepted_at IS NULL
+                     AND i.revoked_at IS NULL AND i.expires_at > ?7
+                     AND NOT EXISTS (
+                       SELECT 1 FROM email_change_requests c
+                       WHERE c.new_email = i.email COLLATE NOCASE
+                         AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?7
+                     )
+                     AND NOT EXISTS (
+                       SELECT 1 FROM email_enrollment_requests e
+                       WHERE e.new_email = i.email COLLATE NOCASE
+                         AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?7
+                     )`'''
+          )
+
+          replace_once(
+              "src/routes/account-lifecycle.js",
+              '''      invitationAuditStatement(env.DB_V2, {
+                invitationId: invitation.id,
+                claimMarker,
+                organizationId: invitation.organization_id,
+                userId,
+                role: invitation.role,
+                action: "organization.invitation.accepted",
+                createdAt: nowIso
+              })
+            ]);''',
+              '''      invitationAuditStatement(env.DB_V2, {
+                invitationId: invitation.id,
+                claimMarker,
+                organizationId: invitation.organization_id,
+                userId,
+                role: invitation.role,
+                action: "organization.invitation.accepted",
+                createdAt: nowIso
+              }),
+              env.DB_V2.prepare(
+                `UPDATE pending_registrations SET revoked_at = ?1
+                 WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL
+                   AND EXISTS (SELECT 1 FROM users WHERE id = ?3)`
+              ).bind(nowIso, invitation.email, userId)
+            ]);'''
+          )
+
+          replace_once(
+              "src/routes/account-lifecycle.js",
+              '''  if (Number(results?.[0]?.meta?.changes || 0) !== 1
+              || Number(results?.[1]?.meta?.changes || 0) !== 1
+              || Number(results?.[2]?.meta?.changes || 0) !== 1
+              || Number(results?.[3]?.meta?.changes || 0) !== 1) {
+            throw new AuthError(409, "INVITATION_UPDATE_CONFLICT");
+          }
+          return invitationAcceptedResponse(request, env, {
+            userId,
+            email: invitation.email,''',
+              '''  if (Number(results?.[0]?.meta?.changes || 0) !== 1
+              || Number(results?.[1]?.meta?.changes || 0) !== 1
+              || Number(results?.[2]?.meta?.changes || 0) !== 1
+              || Number(results?.[3]?.meta?.changes || 0) !== 1) {
+            if (await env.DB_V2.prepare(`SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`).bind(invitation.email).first()) {
+              throw new AuthError(409, "INVITATION_LOGIN_REQUIRED");
+            }
+            if (await emailReservedForAccountChange(env.DB_V2, invitation.email)) {
+              throw new AuthError(409, "EMAIL_UNAVAILABLE");
+            }
+            throw new AuthError(409, "INVITATION_UPDATE_CONFLICT");
+          }
+          return invitationAcceptedResponse(request, env, {
+            userId,
+            email: invitation.email,'''
+          )
+
+          replace_once(
+              "src/routes/account-lifecycle.js",
+              '''async function emailUnavailable(db, email, userId, nowIso = new Date().toISOString()) {''',
+              '''async function emailReservedForAccountChange(db, email, nowIso = new Date().toISOString()) {
+            const row = await db.prepare(
+              `SELECT 1 AS found FROM email_change_requests
+               WHERE new_email = ?1 COLLATE NOCASE
+                 AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+               UNION ALL
+               SELECT 1 AS found FROM email_enrollment_requests
+               WHERE new_email = ?1 COLLATE NOCASE
+                 AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+               LIMIT 1`
+            ).bind(email, nowIso).first();
+            return Boolean(row);
+          }
+
+          async function emailUnavailable(db, email, userId, nowIso = new Date().toISOString()) {'''
+          )
+          PY
 
       - name: Remove temporary machinery
         run: |
