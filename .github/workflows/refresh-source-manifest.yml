@@ -1,0 +1,38 @@
+name: Refresh source manifest
+
+on:
+  push:
+    branches:
+      - agent/translation-language-hardening-20260809
+    paths:
+      - .github/workflows/refresh-source-manifest.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: agent/translation-language-hardening-20260809
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Regenerate manifest on final tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/refresh-source-manifest.yml
+          npm run manifest:source
+          git add -A
+          git diff --cached --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m 'Refresh source manifest for translation resilience regression'
+          npm run verify:source-manifest
+          node scripts/test-ai-translation-resilience.mjs
+          git push origin HEAD:agent/translation-language-hardening-20260809
