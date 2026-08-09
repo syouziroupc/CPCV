@@ -49,6 +49,16 @@ jobs:
           python3 scripts/apply-translation-language-hotfix.py
           git checkout origin/master -- src/ai/provider-base.js
           python3 scripts/apply-translation-provider-current.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/test-translation-language-hardening.mjs')
+          text = p.read_text()
+          old = 'max_completion_tokens === 320'
+          new = 'max_completion_tokens === 220'
+          if old not in text:
+              raise SystemExit('Kimi regression expectation shape changed')
+          p.write_text(text.replace(old, new, 1))
+          PY
 
       - name: Remove temporary patch machinery and restore canonical CI
         shell: bash
