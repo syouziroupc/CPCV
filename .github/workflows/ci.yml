@@ -23,16 +23,19 @@ jobs:
         with:
           ref: agent/translation-language-hardening-20260809
           fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Install dependencies
-        run: npm ci
-
+        run: |
+          npm ci
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
       - name: Apply translation and narrow-layout hardening
         shell: bash
         run: |
@@ -42,8 +45,7 @@ jobs:
           text = p.read_text()
           old = 're.subn(pattern, replacement, text, count=1, flags=re.S)'
           new = 're.subn(pattern, lambda _: replacement, text, count=1, flags=re.S)'
-          if old not in text:
-              raise SystemExit('regex replacement helper shape changed')
+          if old not in text: raise SystemExit('regex replacement helper shape changed')
           p.write_text(text.replace(old, new, 1))
           PY
           python3 scripts/apply-translation-language-hotfix.py
@@ -55,22 +57,16 @@ jobs:
           text = p.read_text()
           old = 'max_completion_tokens === 320'
           new = 'max_completion_tokens === 220'
-          if old not in text:
-              raise SystemExit('Kimi regression expectation shape changed')
+          if old not in text: raise SystemExit('Kimi regression expectation shape changed')
           p.write_text(text.replace(old, new, 1))
           PY
           python3 scripts/apply-narrow-viewer-controls-hotfix.py
-
-      - name: Remove temporary patch machinery and restore canonical CI
+      - name: Remove temporary machinery and restore canonical CI
         shell: bash
         run: |
-          rm -f scripts/apply-translation-language-hotfix.py
-          rm -f scripts/apply-translation-provider-current.py
-          rm -f scripts/apply-narrow-viewer-controls-hotfix.py
-          rm -f .github/workflows/translation-language-hotfix.yml
+          rm -f scripts/apply-translation-language-hotfix.py scripts/apply-translation-provider-current.py scripts/apply-narrow-viewer-controls-hotfix.py .github/workflows/translation-language-hotfix.yml
           git fetch origin master --depth=1
           git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
-
       - name: Targeted regressions
         run: |
           npm run test:translation-language-hardening
@@ -78,8 +74,7 @@ jobs:
           node --check src/ai/provider.js
           node --check src/ai/processor.js
           node --check src/ai/repository.js
-          python3 scripts/audit-responsive-layout.py
-
+          python scripts/audit-responsive-layout.py
       - name: Build final clean commit
         shell: bash
         run: |
@@ -99,7 +94,6 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git commit -m 'Harden multilingual translation and narrow viewer controls'
           test -z "$(git status --porcelain)"
-
       - name: Full validation on clean commit
         run: |
           npm run verify:source-manifest
@@ -109,9 +103,5 @@ jobs:
           npm run deploy:dry-run
           npm audit
           npm audit --omit=dev
-
       - name: Push validated clean commit
-        shell: bash
-        run: |
-          test -z "$(git status --porcelain)"
-          git push origin HEAD:agent/translation-language-hardening-20260809
+        run: git push origin HEAD:agent/translation-language-hardening-20260809
