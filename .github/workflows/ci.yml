@@ -38,12 +38,13 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
-          import re, textwrap
+          import re
           workflow = Path('.github/workflows/translation-language-hotfix.yml').read_text()
           match = re.search(r"python3 <<'PY'\n(.*?)\n          PY", workflow, re.S)
           if not match:
               raise SystemExit('embedded patch body not found')
-          body = textwrap.dedent(match.group(1))
+          lines = match.group(1).splitlines()
+          body = "\n".join(re.sub(r"^          ", "", line) for line in lines)
           exec(compile(body, 'translation-language-hotfix', 'exec'), {})
           PY
 
