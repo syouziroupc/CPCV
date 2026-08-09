@@ -1,0 +1,72 @@
+name: Finalize email identity hardening
+
+on:
+  push:
+    branches:
+      - agent/ai-response-hardening-20260808
+
+permissions:
+  contents: write
+
+concurrency:
+  group: finalize-email-identity-hardening
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    if: ${{ github.actor != 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/ai-response-hardening-20260808
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply hardening patch
+        run: python scripts/fix-email-identity-invariants.py
+
+      - name: Remove temporary machinery and restore permanent CI
+        run: |
+          git rm -f scripts/fix-email-identity-invariants.py
+          git rm -f .github/workflows/finalize-email-identity-hardening.yml
+
+      - name: Regenerate source manifest
+        run: npm run manifest:source
+
+      - name: Focused email and account validation
+        run: |
+          node --no-warnings scripts/test-email-auth-v2.mjs
+          node --no-warnings scripts/test-account-lifecycle-v2.mjs
+          node scripts/test-system-hardening.mjs
+          npm run check
+          npm run verify:source-manifest
+          git diff --check
+
+      - name: Full Stage validation
+        run: npm run check:stage08
+
+      - name: Bundle and dependency validation
+        run: |
+          npm run test:owner-bootstrap
+          npm run deploy:dry-run
+          npm audit
+          npm audit --omit=dev
+
+      - name: Commit validated hardening
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Harden email identity and delivery quotas"
+          git push origin HEAD:agent/ai-response-hardening-20260808
