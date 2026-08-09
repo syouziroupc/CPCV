@@ -8,13 +8,44 @@ permissions:
   contents: read
 
 concurrency:
-  group: pr55-production-release-${{ github.ref }}
+  group: pr55-production-recovery-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  no-further-release:
-    name: Temporary release gate disabled
-    if: ${{ false }}
+  restore-predeploy-worker:
+    name: Restore exact pre-PR55 Worker version
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/deploy-pr55-staging-20260809'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
     steps:
-      - run: echo disabled
+      - name: Checkout immutable release source for Wrangler config
+        uses: actions/checkout@v7
+        with:
+          ref: 4a295ae5505a680019b9896b97e1d6f1ec2f20cd
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Restore exact previously-active Worker version
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || secrets.CF_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          echo 'Current deployment before correction:'
+          npx wrangler deployments status
+          npx wrangler rollback e91f823d-5d48-419b-acce-7d6f6c760f9c --message 'Restore exact pre-PR55 active Worker version after recovery-script target bug'
+          echo 'Deployment after correction:'
+          npx wrangler deployments status | tee /tmp/status-after.txt
+          grep -Fq 'e91f823d-5d48-419b-acce-7d6f6c760f9c' /tmp/status-after.txt
+          node scripts/smoke-production.mjs
