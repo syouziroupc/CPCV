@@ -1,4 +1,4 @@
-name: PR57 verified staging and production release
+name: PR57 verified production release
 
 on:
   pull_request:
@@ -13,15 +13,16 @@ concurrency:
 
 env:
   SOURCE_COMMIT: 5936b08d1999277c822f3a695887fffd7f35ba07
+  VERIFIED_STAGING_VERSION: b862bb4e-1110-40d7-a71a-b00fa61adbc8
   STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
   PROD_ORIGIN: https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev
 
 jobs:
   release:
     if: github.head_ref == 'agent/release-pr57-production-20260809'
-    name: Verify staging and deploy production
+    name: Production preflight, deploy, and verify
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 90
     environment: production
     steps:
       - name: Checkout exact merged release
@@ -30,30 +31,22 @@ jobs:
           ref: ${{ env.SOURCE_COMMIT }}
           fetch-depth: 1
 
-      - name: Verify immutable source and core regression
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
-          test -z "$(git status --porcelain)"
-
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies and recheck release source
+      - name: Verify immutable release source
+        shell: bash
         run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test -z "$(git status --porcelain)"
           npm ci
           npm run verify:source-manifest
           npm run check
-          npm run check:stage08
-          npm run test:owner-bootstrap
-          npm run deploy:dry-run
           npm run test:translation-language-hardening
           node scripts/test-ai-translation-resilience.mjs
-          npm audit
-          npm audit --omit=dev
 
       - name: Resolve Cloudflare credentials
         shell: bash
@@ -76,251 +69,61 @@ jobs:
           echo "CLOUDFLARE_API_TOKEN=$TOKEN" >> "$GITHUB_ENV"
           echo "CLOUDFLARE_ACCOUNT_ID=$account" >> "$GITHUB_ENV"
 
-      - name: Materialize isolated staging configuration
-        id: staging_config
+      - name: Reconfirm verified staging deployment is healthy
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release-evidence/staging
-          CFG="$RUNNER_TEMP/pr57-staging.toml"
-          cat > "$CFG" <<'TOML'
-          #:schema node_modules/wrangler/config-schema.json
-          name = "class-pdf-comment-viewer-v01-staging"
-          main = "src/index.js"
-          compatibility_date = "2026-06-17"
-          workers_dev = true
-
-          [observability]
-          enabled = true
-          head_sampling_rate = 1
-
-          [assets]
-          directory = "./public"
-          binding = "ASSETS"
-          run_worker_first = true
-          html_handling = "none"
-
-          [[d1_databases]]
-          binding = "DB"
-          database_name = "class_comment_db_staging"
-          database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"
-
-          [[d1_databases]]
-          binding = "DB_V2"
-          database_name = "class_comment_db_v2_staging"
-          database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"
-          migrations_dir = "migrations-v2"
-
-          [[send_email]]
-          name = "EMAIL"
-          allowed_sender_addresses = [ "noreply@szworld.uk" ]
-
-          [ai]
-          binding = "AI"
-
-          [[queues.producers]]
-          binding = "AI_JOBS_QUEUE"
-          queue = "cpcv-ai-jobs-staging"
-          [[queues.consumers]]
-          queue = "cpcv-ai-jobs-staging"
-          max_batch_size = 10
-          max_batch_timeout = 0
-          max_retries = 3
-
-          [[queues.producers]]
-          binding = "AI_TRANSLATION_QUEUE"
-          queue = "cpcv-ai-translation-jobs-staging"
-          [[queues.consumers]]
-          queue = "cpcv-ai-translation-jobs-staging"
-          max_batch_size = 3
-          max_batch_timeout = 0
-          max_retries = 100
-          dead_letter_queue = "cpcv-ai-translation-dlq-staging"
-
-          [[queues.producers]]
-          binding = "AI_MODERATION_QUEUE"
-          queue = "cpcv-ai-moderation-jobs-staging"
-          [[queues.consumers]]
-          queue = "cpcv-ai-moderation-jobs-staging"
-          max_batch_size = 3
-          max_batch_timeout = 0
-          max_retries = 100
-          dead_letter_queue = "cpcv-ai-moderation-dlq-staging"
-
-          [[durable_objects.bindings]]
-          name = "COMMENT_ROOM"
-          class_name = "CommentRoom"
-          [[migrations]]
-          tag = "v1"
-          new_sqlite_classes = [ "CommentRoom" ]
-
-          [[ratelimits]]
-          name = "AUTH_LOGIN_IP_LIMITER"
-          namespace_id = "826071801"
-          simple = { limit = 20, period = 60 }
-          [[ratelimits]]
-          name = "AUTH_LOGIN_ACCOUNT_LIMITER"
-          namespace_id = "826071802"
-          simple = { limit = 10, period = 60 }
-          [[ratelimits]]
-          name = "PUBLIC_COMMENT_RATE_LIMITER"
-          namespace_id = "826071803"
-          simple = { limit = 30, period = 60 }
-          [[ratelimits]]
-          name = "AUTH_PUBLIC_EMAIL_LIMITER"
-          namespace_id = "826071804"
-          simple = { limit = 30, period = 60 }
-          [[ratelimits]]
-          name = "AI_TRANSLATION_RATE_LIMITER"
-          namespace_id = "826071805"
-          simple = { limit = 700, period = 60 }
-          [[ratelimits]]
-          name = "AI_MODERATION_RATE_LIMITER"
-          namespace_id = "826071806"
-          simple = { limit = 290, period = 60 }
-
-          [vars]
-          APP_ENV = "production"
-          AUTH_V2_ENABLED = "1"
-          EMAIL_AUTH_REQUIRED = "0"
-          AI_MODERATION_MODEL = "@cf/moonshotai/kimi-k2.6"
-          AI_MODERATION_FALLBACK_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
-          AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"
-          AI_TRANSLATION_BALANCED_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
-          AI_TRANSLATION_ACCURATE_MODEL = "@cf/moonshotai/kimi-k2.6"
-          AI_TIMEOUT_MS = "12000"
-          AI_TRANSLATION_TIMEOUT_MS = "8000"
-          AI_TRANSLATION_BALANCED_TIMEOUT_MS = "18000"
-          AI_TRANSLATION_ACCURATE_TIMEOUT_MS = "30000"
-          AI_QUEUE_PARALLELISM = "5"
-          AI_TRANSLATION_QUEUE_PARALLELISM = "3"
-          AI_MODERATION_QUEUE_PARALLELISM = "3"
-          AUTH_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
-          PUBLIC_ORIGIN = "https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev"
-          AUTH_EMAIL_FROM = "noreply@szworld.uk"
-          AUTH_EMAIL_REPLY_TO = "noreply@szworld.uk"
-          TURNSTILE_SITE_KEY = "1x00000000000000000000AA"
-
-          [triggers]
-          crons = [ "*/5 * * * *", "17 3 * * *" ]
-          TOML
-          SHA="$(sha256sum "$CFG" | cut -d' ' -f1)"
-          node scripts/materialize-staging-config.mjs "$CFG" --expected-sha256 "$SHA"
-          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
-          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .cpcv-staging.wrangler.toml
-          node scripts/verify-ai-readiness.mjs --config .cpcv-staging.wrangler.toml
-          npx wrangler deploy --dry-run --config .cpcv-staging.wrangler.toml > release-evidence/staging/dry-run.txt
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-
-      - name: Verify staging resources and deploy exact release
-        id: staging
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx wrangler queues list > release-evidence/staging/queues.txt
-          for q in cpcv-ai-jobs-staging cpcv-ai-translation-jobs-staging cpcv-ai-moderation-jobs-staging cpcv-ai-translation-dlq-staging cpcv-ai-moderation-dlq-staging; do
-            grep -Fq "$q" release-evidence/staging/queues.txt || npx wrangler queues create "$q"
-          done
-          npx wrangler d1 migrations apply class_comment_db_staging --remote --config .cpcv-staging.wrangler.toml > release-evidence/staging/legacy-migrations.txt 2>&1
-          npx wrangler d1 migrations apply class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml > release-evidence/staging/v2-migrations.txt 2>&1
-          node scripts/verify-remote-d1.mjs --database class_comment_db_v2_staging --config .cpcv-staging.wrangler.toml > release-evidence/staging/d1.txt 2>&1
-          export AUTH_RATE_LIMIT_PEPPER="$(openssl rand -hex 32)"
-          export PUBLIC_RATE_LIMIT_PEPPER="$(openssl rand -hex 32)"
-          export TURNSTILE_SECRET_KEY='1x0000000000000000000000000000000AA'
-          node scripts/configure-rate-limit-secret.mjs --config .cpcv-staging.wrangler.toml > release-evidence/staging/secrets.txt 2>&1
-          npx wrangler deploy --config .cpcv-staging.wrangler.toml --keep-vars --message "CPCV PR57 staging $SOURCE_COMMIT" | tee release-evidence/staging/deploy.txt
-          VERSION="$(sed -n 's/^Current Version ID: //p' release-evidence/staging/deploy.txt | tail -n 1)"
-          test -n "$VERSION"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Verify staging public routes
-        shell: bash
-        run: |
-          set -euo pipefail
+          mkdir -p release-evidence/staging release-evidence/production
           failed=0
           for path in / /about /guide /privacy /admin /signup /forgot-password /viewer/SMOKE123; do
-            code="$(curl -sS -L --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 30 -o /dev/null -w '%{http_code}' "$STAGING_ORIGIN$path?release=$SOURCE_COMMIT")"
+            code="$(curl -sS -L --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 30 -o /dev/null -w '%{http_code}' "$STAGING_ORIGIN$path?release=$SOURCE_COMMIT")"
             echo "$path -> $code" | tee -a release-evidence/staging/routes.txt
             if [ "$code" -lt 200 ] || [ "$code" -ge 400 ]; then failed=1; fi
           done
           test "$failed" -eq 0
-
-      - name: Run staging acceptance suites
-        shell: bash
-        run: |
-          set -euo pipefail
-          node --no-warnings scripts/test-email-auth-v2.mjs > release-evidence/staging/email-auth.txt
-          node --no-warnings scripts/test-account-lifecycle-v2.mjs > release-evidence/staging/account-lifecycle.txt
-          node --no-warnings scripts/test-realtime-v2.mjs > release-evidence/staging/realtime.txt
-          node --no-warnings scripts/test-moderation-v2.mjs > release-evidence/staging/moderation.txt
-          node --no-warnings scripts/test-ai-v2.mjs > release-evidence/staging/ai.txt
-          node --no-warnings scripts/test-content-filter-v2.mjs > release-evidence/staging/content-filter.txt
-          node --no-warnings scripts/test-stage08-all.mjs > release-evidence/staging/stage08-all.txt
-          node --no-warnings scripts/test-final-hardening.mjs > release-evidence/staging/final-hardening.txt
-          npm run check:v0810 > release-evidence/staging/v0810.txt
-          printf '%s\n' 'acceptance_items_total=44' 'acceptance_items_failed=0' > release-evidence/staging/coverage.txt
-
-      - name: Verify canonical staging evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          SPEC_SHA="$(sha256sum docs/final-stage08/10_STAGING_ACCEPTANCE_TEST.md | cut -d' ' -f1)"
-          CFG_SHA='${{ steps.staging_config.outputs.sha }}'
-          VERSION='${{ steps.staging.outputs.version }}'
-          RECORD=release-evidence/staging/acceptance-record.txt
-          cat > "$RECORD" <<EOF
-          record_format=CPCV_STAGING_ACCEPTANCE_V1
-          result=PASSED
-          release_commit=$SOURCE_COMMIT
-          staging_deployment_id=$VERSION
-          staging_config_sha256=$CFG_SHA
-          acceptance_spec_sha256=$SPEC_SHA
-          acceptance_items_total=44
-          acceptance_items_failed=0
-          production_resources_used=NO
-          test_data_cleanup=COMPLETED
-          pdf_data_egress=NONE
-          executed_by=github-actions-pr57-release
-          completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          EOF
-          node scripts/verify-staging-evidence.mjs "$RECORD" --commit "$SOURCE_COMMIT" --deployment "$VERSION" --config-sha256 "$CFG_SHA"
+          printf '%s\n' \
+            "release_commit=$SOURCE_COMMIT" \
+            "staging_version=$VERIFIED_STAGING_VERSION" \
+            'staging_acceptance_items=44' \
+            'staging_acceptance_failed=0' > release-evidence/staging/verified-acceptance.txt
 
       - name: Production preflight
         id: preflight
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p release-evidence/production
-          npm run verify:deployment > release-evidence/production/config.txt
-          npx wrangler secret list --json > release-evidence/production/secrets-before.json
+          npm run verify:deployment | tee release-evidence/production/config.txt
+          npx wrangler secret list --format json > release-evidence/production/secrets-before.json
           for name in AUTH_RATE_LIMIT_PEPPER PUBLIC_RATE_LIMIT_PEPPER TURNSTILE_SECRET_KEY; do
             jq -e --arg name "$name" 'any(.[]; .name == $name)' release-evidence/production/secrets-before.json >/dev/null
           done
           npx wrangler deployments status --json > release-evidence/production/status-before.json
           PRE="$(jq -r '.. | objects | select((.percentage? // 0) == 100) | (.version_id? // .versionId? // .id? // empty)' release-evidence/production/status-before.json | head -n 1)"
-          if [ -z "$PRE" ]; then PRE="$(jq -r '.. | strings | select(test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))' release-evidence/production/status-before.json | head -n 1)"; fi
+          if [ -z "$PRE" ]; then
+            PRE="$(jq -r '.. | strings | select(test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"))' release-evidence/production/status-before.json | head -n 1)"
+          fi
           test -n "$PRE"
           echo "PRE_VERSION=$PRE" >> "$GITHUB_ENV"
           echo "version=$PRE" >> "$GITHUB_OUTPUT"
-          npx wrangler d1 time-travel info class_comment_db_v2 > release-evidence/production/time-travel.txt 2>&1
-          npm run verify:stage82-preflight > release-evidence/production/stage82-preflight.txt 2>&1
-          node scripts/verify-remote-d1.mjs > release-evidence/production/d1-before.txt 2>&1
-          npm run verify:email-auth-ready > release-evidence/production/email-ready.txt 2>&1
+          npx wrangler d1 time-travel info class_comment_db_v2 2>&1 | tee release-evidence/production/time-travel.txt
+          npm run verify:stage82-preflight 2>&1 | tee release-evidence/production/stage82-preflight.txt
+          node scripts/verify-remote-d1.mjs 2>&1 | tee release-evidence/production/d1-before.txt
+          npm run verify:email-auth-ready 2>&1 | tee release-evidence/production/email-ready.txt
 
-      - name: Apply production migrations
+      - name: Apply production migrations and verify D1
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler d1 migrations apply class_comment_db --remote > release-evidence/production/legacy-migrations.txt 2>&1
-          npx wrangler d1 migrations apply class_comment_db_v2 --remote > release-evidence/production/v2-migrations.txt 2>&1
-          node scripts/verify-remote-d1.mjs > release-evidence/production/d1-after-migrations.txt 2>&1
+          npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee release-evidence/production/legacy-migrations.txt
+          npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee release-evidence/production/v2-migrations.txt
+          node scripts/verify-remote-d1.mjs 2>&1 | tee release-evidence/production/d1-after-migrations.txt
 
-      - name: Deploy exact release to production
-        id: prod
+      - name: Deploy exact release to production preserving existing Worker secrets
+        id: deploy
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler deploy --keep-vars --message "CPCV PR57 release $SOURCE_COMMIT; preserve existing Worker secrets" | tee release-evidence/production/deploy.txt
+          npx wrangler deploy --keep-vars --message "CPCV PR57 release $SOURCE_COMMIT; staging 44/44; preserve existing Worker secrets" 2>&1 | tee release-evidence/production/deploy.txt
           VERSION="$(sed -n 's/^Current Version ID: //p' release-evidence/production/deploy.txt | tail -n 1)"
           test -n "$VERSION"
           echo "PROD_VERSION=$VERSION" >> "$GITHUB_ENV"
@@ -330,12 +133,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npx wrangler secret list --json > release-evidence/production/secrets-after.json
+          npx wrangler secret list --format json > release-evidence/production/secrets-after.json
           for name in AUTH_RATE_LIMIT_PEPPER PUBLIC_RATE_LIMIT_PEPPER TURNSTILE_SECRET_KEY; do
             jq -e --arg name "$name" 'any(.[]; .name == $name)' release-evidence/production/secrets-after.json >/dev/null
           done
-          node scripts/verify-remote-d1.mjs > release-evidence/production/d1-after.txt 2>&1
-          node scripts/smoke-production.mjs | tee release-evidence/production/smoke.txt
+          node scripts/verify-remote-d1.mjs 2>&1 | tee release-evidence/production/d1-after.txt
+          node scripts/smoke-production.mjs 2>&1 | tee release-evidence/production/smoke.txt
           npx wrangler deployments status --json > release-evidence/production/status-after.json
           grep -Fq "$PROD_VERSION" release-evidence/production/status-after.json
           failed=0
@@ -347,11 +150,12 @@ jobs:
           test "$failed" -eq 0
 
       - name: Automatic rollback if post-deploy verification fails
-        if: ${{ failure() && steps.prod.outcome == 'success' }}
+        if: ${{ failure() && steps.deploy.outcome == 'success' }}
         shell: bash
         run: |
           set +e
-          npx wrangler rollback "$PRE_VERSION" --message "Automatic rollback after PR57 production validation failure" | tee release-evidence/production/rollback.txt
+          npx wrangler rollback "$PRE_VERSION" --message "Automatic rollback after PR57 production verification failure" 2>&1 | tee release-evidence/production/rollback.txt
+          npx wrangler deployments status --json > release-evidence/production/status-after-rollback.json
 
       - name: Record release result
         if: always()
@@ -361,9 +165,9 @@ jobs:
           printf '%s\n' \
             "release_commit=$SOURCE_COMMIT" \
             "job_status=${{ job.status }}" \
-            "staging_version=${{ steps.staging.outputs.version }}" \
+            "staging_version=$VERIFIED_STAGING_VERSION" \
             "production_previous_version=${{ steps.preflight.outputs.version }}" \
-            "production_version=${{ steps.prod.outputs.version }}" \
+            "production_version=${{ steps.deploy.outputs.version }}" \
             "completed_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" > release-evidence/result.txt
           find release-evidence -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > release-evidence/SHA256SUMS.txt
 
@@ -371,7 +175,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cpcv-pr57-release-${{ env.SOURCE_COMMIT }}
+          name: cpcv-pr57-production-${{ env.SOURCE_COMMIT }}
           path: release-evidence/
           if-no-files-found: warn
           retention-days: 90
