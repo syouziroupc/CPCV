@@ -134,7 +134,7 @@ async function handleAccountDelete(request, env) {
 
   const currentPassword = typeof input.currentPassword === "string" ? input.currentPassword : "";
   const user = await env.DB_V2.prepare(
-    `SELECT password_scheme, password_hash, password_salt
+    `SELECT email, password_scheme, password_hash, password_salt
      FROM users WHERE id = ?1 AND status = 'active' LIMIT 1`
   ).bind(auth.userId).first();
   if (!user || !await verifyPassword(currentPassword, user.password_salt, user.password_hash, user.password_scheme)) {
@@ -181,6 +181,10 @@ async function handleAccountDelete(request, env) {
     env.DB_V2.prepare(`UPDATE password_reset_tokens SET revoked_at = ?1 WHERE user_id = ?2 AND used_at IS NULL AND revoked_at IS NULL`).bind(nowIso, auth.userId),
     env.DB_V2.prepare(`UPDATE email_change_requests SET revoked_at = ?1 WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`).bind(nowIso, auth.userId),
     env.DB_V2.prepare(`UPDATE email_enrollment_requests SET revoked_at = ?1 WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`).bind(nowIso, auth.userId),
+    env.DB_V2.prepare(
+      `UPDATE pending_registrations SET revoked_at = ?1
+       WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
+    ).bind(nowIso, user.email || ""),
     env.DB_V2.prepare(
       `UPDATE live_sessions
        SET status = 'deleted', posting_enabled = 0, comments_visible = 0,
@@ -294,17 +298,66 @@ async function handleInvitationCreate(request, env, ctx) {
       env.DB_V2.prepare(
         `UPDATE organization_invitations SET revoked_at = ?1
          WHERE organization_id = ?2 AND email = ?3 COLLATE NOCASE
-           AND accepted_at IS NULL AND revoked_at IS NULL`
+           AND accepted_at IS NULL AND revoked_at IS NULL
+           AND NOT EXISTS (
+             SELECT 1 FROM email_change_requests c
+             WHERE c.new_email = ?3 COLLATE NOCASE
+               AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?1
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM email_enrollment_requests e
+             WHERE e.new_email = ?3 COLLATE NOCASE
+               AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?1
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM users u
+             WHERE u.email = ?3 COLLATE NOCASE
+               AND (u.status <> 'active' OR u.email_verified_at IS NULL)
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM users u
+             JOIN organization_members m ON m.user_id = u.id
+             WHERE u.email = ?3 COLLATE NOCASE AND m.organization_id = ?2
+               AND m.status <> 'removed'
+           )`
       ).bind(nowIso, auth.organizationId, email),
       env.DB_V2.prepare(
         `INSERT INTO organization_invitations (
            id, organization_id, email, role, token_hash, invited_by_user_id,
            created_at, expires_at, accepted_at, accepted_user_id, revoked_at,
            last_sent_at, resend_count
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, NULL, ?7, 0)`
+         )
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, NULL, NULL, ?7, 0
+         WHERE NOT EXISTS (
+           SELECT 1 FROM email_change_requests c
+           WHERE c.new_email = ?3 COLLATE NOCASE
+             AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?7
+         )
+           AND NOT EXISTS (
+             SELECT 1 FROM email_enrollment_requests e
+             WHERE e.new_email = ?3 COLLATE NOCASE
+               AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?7
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM users u
+             WHERE u.email = ?3 COLLATE NOCASE
+               AND (u.status <> 'active' OR u.email_verified_at IS NULL)
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM users u
+             JOIN organization_members m ON m.user_id = u.id
+             WHERE u.email = ?3 COLLATE NOCASE AND m.organization_id = ?2
+               AND m.status <> 'removed'
+           )`
       ).bind(invitationId, auth.organizationId, email, role, tokenHash, auth.userId, nowIso, expiresAt),
-      organizationEmailEventStatement(env.DB_V2, eventId, auth.organizationId, nowIso),
-      auditStatement(env.DB_V2, {
+      conditionalOrganizationEmailEventStatement(env.DB_V2, {
+        id: eventId,
+        organizationId: auth.organizationId,
+        createdAt: nowIso,
+        invitationId,
+        tokenHash
+      }),
+      conditionalInvitationAuditStatement(env.DB_V2, {
         organizationId: auth.organizationId,
         actorType: "user",
         actorUserId: auth.userId,
@@ -312,11 +365,22 @@ async function handleInvitationCreate(request, env, ctx) {
         action: "organization.invitation.created",
         targetType: "organization_invitation",
         targetId: invitationId,
-        details: { role, emailMask: maskEmail(email), expiresAt }
+        details: { role, emailMask: maskEmail(email), expiresAt },
+        invitationId,
+        tokenHash
       })
     ]);
   } catch (error) {
     throw mapInvitationDatabaseError(error);
+  }
+  const created = await env.DB_V2.prepare(
+    `SELECT 1 AS found FROM organization_invitations
+     WHERE id = ?1 AND organization_id = ?2 AND token_hash = ?3
+       AND accepted_at IS NULL AND revoked_at IS NULL LIMIT 1`
+  ).bind(invitationId, auth.organizationId, tokenHash).first();
+  if (!created) {
+    await assertInvitationTargetAvailable(env.DB_V2, auth.organizationId, email, nowIso);
+    throw new AuthError(409, "INVITATION_CONFLICT");
   }
   schedule(ctx, sendOrganizationInvitation(env, {
     organizationId: auth.organizationId,
@@ -382,7 +446,28 @@ async function handleInvitationResend(request, env, ctx, invitationId) {
         `UPDATE organization_invitations
          SET token_hash = ?1, last_sent_at = ?2, expires_at = ?3, resend_count = resend_count + 1
          WHERE id = ?4 AND organization_id = ?5 AND token_hash = ?6
-           AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?2`
+           AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+           AND NOT EXISTS (
+             SELECT 1 FROM email_change_requests c
+             WHERE c.new_email = organization_invitations.email COLLATE NOCASE
+               AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?2
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM email_enrollment_requests e
+             WHERE e.new_email = organization_invitations.email COLLATE NOCASE
+               AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?2
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM users u
+             WHERE u.email = organization_invitations.email COLLATE NOCASE
+               AND (u.status <> 'active' OR u.email_verified_at IS NULL)
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM users u
+             JOIN organization_members m ON m.user_id = u.id
+             WHERE u.email = organization_invitations.email COLLATE NOCASE
+               AND m.organization_id = ?5 AND m.status <> 'removed'
+           )`
       ).bind(tokenHash, nowIso, newExpiry, invitationId, auth.organizationId, invitation.token_hash),
       conditionalOrganizationEmailEventStatement(env.DB_V2, {
         id: eventId,
@@ -410,6 +495,7 @@ async function handleInvitationResend(request, env, ctx, invitationId) {
   if (Number(results?.[0]?.meta?.changes || 0) !== 1
       || Number(results?.[1]?.meta?.changes || 0) !== 1
       || Number(results?.[2]?.meta?.changes || 0) !== 1) {
+    await assertInvitationTargetAvailable(env.DB_V2, auth.organizationId, invitation.email, nowIso);
     throw new AuthError(409, "INVITATION_UPDATE_CONFLICT");
   }
   schedule(ctx, sendOrganizationInvitation(env, {
@@ -723,20 +809,48 @@ async function handleEmailChangeRequest(request, env, ctx) {
       await env.DB_V2.batch([
         env.DB_V2.prepare(
           `UPDATE email_change_requests SET revoked_at = ?1
-           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`
-        ).bind(nowIso, auth.userId),
+           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?3 COLLATE NOCASE AND u.id <> ?2)
+             AND NOT EXISTS (
+               SELECT 1 FROM pending_registrations p
+               WHERE p.email = ?3 COLLATE NOCASE AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?1
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_change_requests c
+               WHERE c.new_email = ?3 COLLATE NOCASE AND c.user_id <> ?2
+                 AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?1
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_enrollment_requests e
+               WHERE e.new_email = ?3 COLLATE NOCASE AND e.user_id <> ?2
+                 AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?1
+             )`
+        ).bind(nowIso, auth.userId, newEmail),
         env.DB_V2.prepare(
           `UPDATE email_enrollment_requests SET revoked_at = ?1
-           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`
-        ).bind(nowIso, auth.userId),
+           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?3 COLLATE NOCASE AND u.id <> ?2)
+             AND NOT EXISTS (
+               SELECT 1 FROM pending_registrations p
+               WHERE p.email = ?3 COLLATE NOCASE AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?1
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_change_requests c
+               WHERE c.new_email = ?3 COLLATE NOCASE AND c.user_id <> ?2
+                 AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?1
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_enrollment_requests e
+               WHERE e.new_email = ?3 COLLATE NOCASE AND e.user_id <> ?2
+                 AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?1
+             )`
+        ).bind(nowIso, auth.userId, newEmail),
         env.DB_V2.prepare(
           `INSERT INTO email_change_requests (
              id, user_id, old_email, new_email, token_hash, created_at, expires_at, confirmed_at, revoked_at
            )
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL
-           WHERE NOT EXISTS (
-             SELECT 1 FROM users u WHERE u.email = ?4 COLLATE NOCASE AND u.id <> ?2
-           )
+           WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?4 COLLATE NOCASE AND u.id <> ?2)
              AND NOT EXISTS (
                SELECT 1 FROM pending_registrations p
                WHERE p.email = ?4 COLLATE NOCASE AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?6
@@ -761,30 +875,55 @@ async function handleEmailChangeRequest(request, env, ctx) {
           targetType: "user",
           targetId: auth.userId,
           details: { newEmailMask: maskEmail(newEmail), expiresAt },
-          condition: {
-            sql: "EXISTS (SELECT 1 FROM email_change_requests WHERE id = ?11)",
-            bindings: [requestId]
-          }
+          condition: { sql: "EXISTS (SELECT 1 FROM email_change_requests WHERE id = ?11)", bindings: [requestId] }
         })
       ]);
     } else {
       await env.DB_V2.batch([
         env.DB_V2.prepare(
           `UPDATE email_enrollment_requests SET revoked_at = ?1
-           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`
-        ).bind(nowIso, auth.userId),
+           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?3 COLLATE NOCASE AND u.id <> ?2)
+             AND NOT EXISTS (
+               SELECT 1 FROM pending_registrations p
+               WHERE p.email = ?3 COLLATE NOCASE AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?1
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_change_requests c
+               WHERE c.new_email = ?3 COLLATE NOCASE AND c.user_id <> ?2
+                 AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?1
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_enrollment_requests e
+               WHERE e.new_email = ?3 COLLATE NOCASE AND e.user_id <> ?2
+                 AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?1
+             )`
+        ).bind(nowIso, auth.userId, newEmail),
         env.DB_V2.prepare(
           `UPDATE email_change_requests SET revoked_at = ?1
-           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`
-        ).bind(nowIso, auth.userId),
+           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
+             AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?3 COLLATE NOCASE AND u.id <> ?2)
+             AND NOT EXISTS (
+               SELECT 1 FROM pending_registrations p
+               WHERE p.email = ?3 COLLATE NOCASE AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?1
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_change_requests c
+               WHERE c.new_email = ?3 COLLATE NOCASE AND c.user_id <> ?2
+                 AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?1
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_enrollment_requests e
+               WHERE e.new_email = ?3 COLLATE NOCASE AND e.user_id <> ?2
+                 AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?1
+             )`
+        ).bind(nowIso, auth.userId, newEmail),
         env.DB_V2.prepare(
           `INSERT INTO email_enrollment_requests (
              id, user_id, new_email, token_hash, created_at, expires_at, confirmed_at, revoked_at
            )
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL
-           WHERE NOT EXISTS (
-             SELECT 1 FROM users u WHERE u.email = ?3 COLLATE NOCASE AND u.id <> ?2
-           )
+           WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?3 COLLATE NOCASE AND u.id <> ?2)
              AND NOT EXISTS (
                SELECT 1 FROM pending_registrations p
                WHERE p.email = ?3 COLLATE NOCASE AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?5
@@ -809,10 +948,7 @@ async function handleEmailChangeRequest(request, env, ctx) {
           targetType: "user",
           targetId: auth.userId,
           details: { newEmailMask: maskEmail(newEmail), expiresAt },
-          condition: {
-            sql: "EXISTS (SELECT 1 FROM email_enrollment_requests WHERE id = ?11)",
-            bindings: [requestId]
-          }
+          condition: { sql: "EXISTS (SELECT 1 FROM email_enrollment_requests WHERE id = ?11)", bindings: [requestId] }
         })
       ]);
     }
@@ -1030,6 +1166,20 @@ async function optionalAuth(request, env) {
     if (error instanceof AuthError && error.status === 401) return null;
     throw error;
   }
+}
+
+async function assertInvitationTargetAvailable(db, organizationId, email, nowIso = new Date().toISOString()) {
+  const user = await db.prepare(
+    `SELECT id, email_verified_at, status FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
+  ).bind(email).first();
+  if (user) {
+    if (user.status !== "active" || !user.email_verified_at) throw new AuthError(409, "EMAIL_UNAVAILABLE");
+    const membership = await db.prepare(
+      `SELECT status FROM organization_members WHERE organization_id = ?1 AND user_id = ?2 LIMIT 1`
+    ).bind(organizationId, user.id).first();
+    if (membership && membership.status !== "removed") throw new AuthError(409, "MEMBERSHIP_ALREADY_EXISTS");
+  }
+  if (await emailReservedForAccountChange(db, email, nowIso)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
 }
 
 async function emailReservedForAccountChange(db, email, nowIso = new Date().toISOString()) {
