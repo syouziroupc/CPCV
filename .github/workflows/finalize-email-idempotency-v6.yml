@@ -30,10 +30,13 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply final email identity/idempotency fixes
-        run: python scripts/finalize-email-idempotency-v6.py
+        run: |
+          python scripts/finalize-email-idempotency-v6.py
+          python scripts/fix-v6-lifecycle-client-ips.py
       - name: Remove temporary finalizer
         run: |
           git rm -f scripts/finalize-email-idempotency-v6.py
+          git rm -f scripts/fix-v6-lifecycle-client-ips.py
           git rm -f .github/workflows/finalize-email-idempotency-v6.yml
       - name: Stage sources and regenerate manifest
         run: |
