@@ -278,6 +278,7 @@ export async function processAiJob(env, jobId, options = {}) {
     const result = await runTranslationModel(env, {
       message: job.message,
       sourceLanguage: job.detected_language,
+      sourceLanguageConfidenceMilli: job.language_confidence_milli,
       targetLanguage: job.target_language,
       quality: job.session_translation_quality || "balanced"
     }, {

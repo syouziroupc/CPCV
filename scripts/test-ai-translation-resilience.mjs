@@ -7,8 +7,8 @@ const KIMI = "@cf/moonshotai/kimi-k2.6";
 const LLAMA = "@cf/meta/llama-4-scout-17b-16e-instruct";
 
 await accurateUsesKimiNoThinkingAndSharedCapacity();
-await balancedKnownLanguageUsesDedicatedTranslationFirst();
-await balancedFallsBackAfterDedicatedOutage();
+await balancedKnownLanguageUsesBalancedTranslationFirst();
+await balancedFallsBackThroughAccurateToDedicated();
 await unknownLanguageUsesMultilingualModelAndSharedCapacity();
 await localCapacityRejectionDoesNotCallWorkersAi();
 await provider429DoesNotAmplifyIntoFallbackCalls();
@@ -46,50 +46,50 @@ async function accurateUsesKimiNoThinkingAndSharedCapacity() {
   assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
 
-async function balancedKnownLanguageUsesDedicatedTranslationFirst() {
+async function balancedKnownLanguageUsesBalancedTranslationFirst() {
   const calls = [];
   const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
-    assert.equal(model, M2M);
-    assert.equal(request.source_lang, "en");
-    assert.equal(request.target_lang, "ja");
-    return { translated_text: "専用翻訳モデルを優先します。" };
+    assert.equal(model, LLAMA);
+    assert.equal(request.max_tokens, 220);
+    assert.equal(request.max_completion_tokens, undefined);
+    assert.match(request.messages[1].content, /"sourceLanguage":"en"/);
+    return { choices: [{ message: { content: "バランス翻訳モデルを優先します。" } }] };
   }, limits), {
-    message: "Prefer the dedicated translation model.",
+    message: "Prefer the balanced translation model.",
     sourceLanguage: "en",
     targetLanguage: "ja",
     quality: "balanced"
   });
-  assert.equal(result.translatedText, "専用翻訳モデルを優先します。");
-  assert.deepEqual(calls.map((call) => call.model), [M2M]);
-  assert.deepEqual(limits, []);
+  assert.equal(result.translatedText, "バランス翻訳モデルを優先します。");
+  assert.deepEqual(calls.map((call) => call.model), [LLAMA]);
+  assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
 
-async function balancedFallsBackAfterDedicatedOutage() {
+async function balancedFallsBackThroughAccurateToDedicated() {
   const calls = [];
   const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
-    if (model === M2M) {
+    if (model === LLAMA || model === KIMI) {
       const error = new Error("temporary model capacity");
       error.status = 503;
       throw error;
     }
-    assert.equal(model, LLAMA);
-    assert.equal(request.max_tokens, 220);
-    assert.equal(request.max_completion_tokens, undefined);
-    assert.equal(request.reasoning_effort, undefined);
-    return { choices: [{ message: { content: "代替モデルで翻訳しました。" } }] };
+    assert.equal(model, M2M);
+    assert.equal(request.source_lang, "en");
+    assert.equal(request.target_lang, "ja");
+    return { translated_text: "専用モデルまでフォールバックしました。" };
   }, limits), {
     message: "Fallback translation.",
     sourceLanguage: "en",
     targetLanguage: "ja",
     quality: "balanced"
   });
-  assert.equal(result.translatedText, "代替モデルで翻訳しました。");
-  assert.deepEqual(calls.map((call) => call.model), [M2M, LLAMA]);
-  assert.deepEqual(limits, ["workers-ai-moderation"]);
+  assert.equal(result.translatedText, "専用モデルまでフォールバックしました。");
+  assert.deepEqual(calls.map((call) => call.model), [LLAMA, KIMI, M2M]);
+  assert.deepEqual(limits, ["workers-ai-moderation", "workers-ai-moderation"]);
 }
 
 async function unknownLanguageUsesMultilingualModelAndSharedCapacity() {
@@ -97,7 +97,7 @@ async function unknownLanguageUsesMultilingualModelAndSharedCapacity() {
   const limits = [];
   const result = await runTranslationModel(environment(async (model, request) => {
     calls.push({ model, request });
-    assert.equal(model, LLAMA);
+    assert.equal(model, KIMI);
     return { response: "翻訳の精度が低い。" };
   }, limits), {
     message: "La precisione della traduzione è scarsa.",
@@ -146,10 +146,9 @@ async function provider429DoesNotAmplifyIntoFallbackCalls() {
     }),
     (error) => error?.aiCode === "AI_PROVIDER_RATE_LIMITED" && error?.retryable === true
   );
-  assert.deepEqual(calls, [LLAMA]);
+  assert.deepEqual(calls, [KIMI]);
   assert.deepEqual(limits, ["workers-ai-moderation"]);
 }
-
 
 async function translationLimiterFailureFailsClosed() {
   let aiCalls = 0;

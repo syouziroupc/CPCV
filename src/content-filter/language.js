@@ -3,7 +3,8 @@ const HAN = /\p{Script=Han}/u;
 const LATIN = /\p{Script=Latin}/u;
 const CYRILLIC = /\p{Script=Cyrillic}/u;
 const LETTER_OR_MARK = /[\p{L}\p{M}]/u;
-const TURKISH_DISTINCTIVE = /[çğıöşüÇĞİÖŞÜ]/u;
+const AZERBAIJANI_DISTINCTIVE = /[əƏ]/u;
+const TURKIC_SHARED_DISTINCTIVE = /[çğıöşüÇĞİÖŞÜ]/u;
 const UKRAINIAN_DISTINCTIVE = /[іїєґІЇЄҐ]/u;
 const RUSSIAN_DISTINCTIVE = /[ыэёъЫЭЁЪ]/u;
 
@@ -29,6 +30,7 @@ const SCRIPT_LANGUAGES = [
 const JAPANESE_HAN_ONLY = new Set(`賛成 反対 同意 質問 回答 先生 学生 日本 社会 政治 政府批判 経済 環境 授業 課題 意見 原因 結果 問題 改善 必要 不要 可能 不可能 良い 悪い 重要 理由`.split(/\s+/));
 const RUSSIAN_COMMON = new Set(`и в не на что я с он как это по но они мы к у вы за от о из для так да нет есть был быть урок студент учитель спасибо`.split(/\s+/));
 const UKRAINIAN_COMMON = new Set(`і в не на що я з він як це але вони ми ви для так так ні є був бути урок студент вчитель дякую`.split(/\s+/));
+const ENGLISH_CASUAL = new Set(`aint ain't arent aren't cant can't couldnt couldn't didnt didn't doesnt doesn't dont don't gonna gotta wanna yall y'all idk imo imho ngl tbh btw rn lol lmao wtf bro dude lowkey highkey kinda sorta cuz bc pls plz thx yep yeah nah`.split(/\s+/));
 
 const LATIN_HINTS = Object.freeze({
   en: new Set(`a an and are as at be because but by can could did do does during for from had has have he her here how i if in into is it its may my no not of on or our over she should so than that the their them there they this through to very was we were what when where which who why will with without would you your classroom discussion`.split(/\s+/)),
@@ -37,7 +39,8 @@ const LATIN_HINTS = Object.freeze({
   de: new Set(`aber als am an auch auf aus bei das dem den der die ein eine einer eines er es für hat ich im in ist mit nicht oder sie sind und von was wir zu zum zur danke hallo klasse student lehrer`.split(/\s+/)),
   it: new Set(`a al alla che con da del della di e è gli ha il in io la le ma non o per più questo se si sono su un una grazie ciao classe studente insegnante`.split(/\s+/)),
   pt: new Set(`a ao com da de do e ela ele em é eu não o os para por que se sem sua um uma você nós mas obrigado olá aula estudante professor`.split(/\s+/)),
-  tr: new Set(`ama ben bir bu çok da de değil ders evet hayır için ile iyi katılıyorum merhaba mi nasıl ne neden o olarak öğrenci öğretmen siz teşekkür var yok`.split(/\s+/)),
+  tr: new Set(`ama ben bir bu çok da de değil ders evet hayır için ile iyi katılıyorum merhaba mi nasıl ne neden o olarak öğrenci öğretmen siz teşekkür var yok çünkü bence anlamadım hocam`.split(/\s+/)),
+  az: new Set(`mən sən biz onlar və amma bəli xeyr niyə necə görə tələbə müəllim təşəkkür yaxşı pis başa düşmədim dərsdir fikrimcə`.split(/\s+/)),
   id: new Set(`ada adalah aku anda atau dengan di dan dari ini itu karena ke kelas mahasiswa tidak untuk yang guru saya kami mereka terima kasih`.split(/\s+/)),
   ms: new Set(`ada adalah aku anda atau dengan di dan dari ini itu kerana ke kelas pelajar tidak untuk yang guru saya kami mereka terima kasih`.split(/\s+/)),
   vi: new Set(`và là của không một cho với trong tôi bạn chúng lớp sinh viên giáo viên cảm ơn`.split(/\s+/))
@@ -54,7 +57,6 @@ export function detectCommentLanguage(value) {
   }
 
   if (CYRILLIC.test(text)) return detectCyrillic(text);
-  if (TURKISH_DISTINCTIVE.test(text)) return decision('tr', 950, false, 'turkish_distinctive');
 
   if (HAN.test(text)) {
     const compact = text.replace(/[\p{P}\p{S}\p{Z}\p{N}]/gu, '');
@@ -84,6 +86,11 @@ function detectLatin(text) {
   if (/[ãõ]/u.test(lower)) return decision('pt', 950, false, 'portuguese_distinctive');
   const tokens = lower.match(/\p{Script=Latin}+(?:['’]\p{Script=Latin}+)?/gu) || [];
   if (!tokens.length) return decision('other', 500, false, 'latin_unresolved');
+
+  const casualHits = tokens.filter((token) => ENGLISH_CASUAL.has(token)).length;
+  if (casualHits >= 2) return decision('en', 950, true, 'en_casual_words');
+  if (casualHits === 1 && tokens.length <= 4) return decision('en', 860, true, 'en_casual_hint');
+
   const ranked = Object.entries(LATIN_HINTS)
     .map(([code, words]) => ({ code, hits: tokens.filter((token) => words.has(token)).length }))
     .sort((a, b) => b.hits - a.hits || a.code.localeCompare(b.code));
@@ -95,6 +102,8 @@ function detectLatin(text) {
   if (best.hits === 1 && second.hits === 0 && (tokens.length <= 3 || best.code === 'en')) {
     return decision(best.code, best.code === 'en' ? 760 : 720, best.code === 'en', `${best.code}_hint`);
   }
+  if (AZERBAIJANI_DISTINCTIVE.test(lower)) return decision('az', 920, false, 'azerbaijani_distinctive');
+  if (TURKIC_SHARED_DISTINCTIVE.test(lower)) return decision('other', 650, false, 'turkic_latin_ambiguous');
   return decision('other', 600, false, 'latin_ambiguous');
 }
 

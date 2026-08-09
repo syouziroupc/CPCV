@@ -82,6 +82,7 @@ export async function createAiJobsForComment(db, input) {
     `SELECT c.id, c.organization_id, c.live_session_id, c.message, c.moderation_state,
             COALESCE(c.filter_ai_required, 0) AS filter_ai_required,
             COALESCE(c.detected_language, 'und') AS detected_language,
+            COALESCE(c.language_confidence_milli, 0) AS language_confidence_milli,
             COALESCE(c.unsupported_language, 0) AS unsupported_language,
             COALESCE(o.enabled, 0) AS organization_enabled,
             COALESCE(s.moderation_enabled, 0) AS moderation_enabled,
@@ -206,6 +207,7 @@ export async function loadAiJobContext(db, jobId, now = Date.now()) {
             c.created_at AS comment_created_at, c.updated_at AS comment_updated_at,
             c.filter_action, c.filter_ai_required,
             COALESCE(c.detected_language, 'und') AS detected_language,
+            COALESCE(c.language_confidence_milli, 0) AS language_confidence_milli,
             COALESCE(c.unsupported_language, 0) AS unsupported_language,
             COALESCE((SELECT json_group_array(json_object(
               'category', fm.category, 'severity', fm.severity,

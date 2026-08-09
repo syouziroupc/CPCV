@@ -31,7 +31,7 @@ const env = {
   AI: { run: async (model, request) => { calls.push({ model, request }); return { response: '翻訳結果' }; } }
 };
 await runTranslationModel(env, { message: 'Una frase italiana', sourceLanguage: 'other', targetLanguage: 'ja', quality: 'fast' });
-assert.equal(calls.at(-1).model, '@cf/zai-org/glm-4.7-flash');
+assert.equal(calls.at(-1).model, '@cf/qwen/qwen3-30b-a3b-fp8');
 await runTranslationModel(env, { message: 'Hello', sourceLanguage: 'en', targetLanguage: 'ja', quality: 'fast' });
 assert.equal(calls.at(-1).model, '@cf/meta/m2m100-1.2b');
 await runTranslationModel(env, { message: 'Hello', sourceLanguage: 'en', targetLanguage: 'ja', quality: 'accurate' });
