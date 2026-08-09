@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - agent/ai-response-hardening-20260808
+  pull_request:
 
 permissions:
   contents: write
