@@ -61,3 +61,54 @@ jobs:
         run: |
           npm audit
           npm audit --omit=dev
+
+  pr55-staging-release:
+    name: PR55 exact-commit staging release
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/deploy-pr55-staging-20260809'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: production
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Checkout release orchestrator
+        uses: actions/checkout@v7
+        with:
+          ref: agent/deploy-pr55-staging-20260809
+          path: orchestrator
+
+      - name: Checkout immutable source commit
+        uses: actions/checkout@v7
+        with:
+          ref: 4a295ae5505a680019b9896b97e1d6f1ec2f20cd
+          path: source
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: source/package-lock.json
+
+      - name: Install exact-source dependencies
+        working-directory: source
+        run: npm ci
+
+      - name: Run staging gate and dispatch protected production workflow
+        working-directory: source
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || secrets.CF_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash ../orchestrator/scripts/pr55-staging-release.sh
+
+      - name: Upload staging evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-pr55-staging-evidence-4a295ae5505a680019b9896b97e1d6f1ec2f20cd
+          path: source/staging-evidence/
+          if-no-files-found: warn
+          retention-days: 90
