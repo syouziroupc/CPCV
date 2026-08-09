@@ -34,7 +34,19 @@ jobs:
         run: npm ci
 
       - name: Apply translation hardening
-        run: python3 scripts/apply-translation-language-hotfix.py
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/apply-translation-language-hotfix.py')
+          text = p.read_text()
+          old = 're.subn(pattern, replacement, text, count=1, flags=re.S)'
+          new = 're.subn(pattern, lambda _: replacement, text, count=1, flags=re.S)'
+          if old not in text:
+              raise SystemExit('regex replacement helper shape changed')
+          p.write_text(text.replace(old, new, 1))
+          PY
+          python3 scripts/apply-translation-language-hotfix.py
 
       - name: Remove temporary patch machinery and restore canonical CI
         shell: bash
