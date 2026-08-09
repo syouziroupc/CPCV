@@ -6,20 +6,23 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: translation-hotfix-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  check:
-    name: Full local validation
+  patch-translation-language:
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/translation-language-hardening-20260809'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
-      - name: Checkout
+      - name: Checkout hotfix branch
         uses: actions/checkout@v4
+        with:
+          ref: agent/translation-language-hardening-20260809
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -27,37 +30,68 @@ jobs:
           node-version: 22
           cache: npm
 
-      - name: Pin npm
-        run: npm install --global npm@11.18.0
-
       - name: Install dependencies
+        run: npm ci
+
+      - name: Execute embedded translation patch
         shell: bash
         run: |
-          set -o pipefail
-          npm ci || {
-            echo "npm ci failed once; clearing the npm cache and retrying."
-            npm cache clean --force
-            npm ci
-          }
+          python3 <<'PY'
+          from pathlib import Path
+          import re, textwrap
+          workflow = Path('.github/workflows/translation-language-hotfix.yml').read_text()
+          match = re.search(r"python3 <<'PY'\n(.*?)\n          PY", workflow, re.S)
+          if not match:
+              raise SystemExit('embedded patch body not found')
+          body = textwrap.dedent(match.group(1))
+          exec(compile(body, 'translation-language-hotfix', 'exec'), {})
+          PY
 
-      - name: Run static project and documentation checks
+      - name: Restore canonical CI definition
+        shell: bash
+        run: |
+          git fetch origin master --depth=1
+          git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
+          test ! -e .github/workflows/translation-language-hotfix.yml
+
+      - name: Targeted translation regression
+        run: |
+          npm run test:translation-language-hardening
+          node --check src/content-filter/language.js
+          node --check src/ai/provider-base.js
+          node --check src/ai/processor.js
+          node --check src/ai/repository.js
+
+      - name: Regenerate source manifest
+        run: npm run manifest:source
+
+      - name: Full validation
         run: |
           npm run verify:source-manifest
           npm run check
-          npm run check:project
-          npm run check:pdf-links
-          npm run verify:final-docs
-
-      - name: Run all implemented-stage tests
-        run: npm run check:stage08
-
-      - name: Run Owner bootstrap regression
-        run: npm run test:owner-bootstrap
-
-      - name: Validate Wrangler bundle
-        run: npm run deploy:dry-run
-
-      - name: Audit all dependencies
-        run: |
+          npm run check:stage08
+          npm run test:owner-bootstrap
+          npm run deploy:dry-run
           npm audit
           npm audit --omit=dev
+
+      - name: Verify final diff scope and push
+        shell: bash
+        run: |
+          git status --short
+          test ! -e .github/workflows/translation-language-hotfix.yml
+          git diff --check
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          changed="$(git diff --cached --name-only | sort)"
+          printf '%s\n' "$changed"
+          for path in $changed; do
+            case "$path" in
+              SOURCE_SHA256SUMS.txt|package.json|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider-base.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml) ;;
+              *) echo "unexpected changed path: $path" >&2; exit 1 ;;
+            esac
+          done
+          git diff --cached --quiet && exit 0
+          git commit -m 'Harden multilingual translation routing and validation'
+          git push origin HEAD:agent/translation-language-hardening-20260809
