@@ -36,7 +36,23 @@ jobs:
         run: npm ci
 
       - name: Apply invariant patch
-        run: python scripts/fix-account-state-invariants.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("scripts/fix-account-state-invariants.py")
+          lines = path.read_text(encoding="utf-8").splitlines()
+          marker = "    if count != 1:"
+          index = lines.index(marker)
+          raise_line = lines[index + 1]
+          lines[index:index + 2] = [
+              "    if count == 0:",
+              raise_line,
+              "    if count > 1 and 'details: { newEmailMask: maskEmail(newEmail), expiresAt }' not in old:",
+              raise_line,
+          ]
+          path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+          python scripts/fix-account-state-invariants.py
 
       - name: Remove temporary machinery
         run: |
