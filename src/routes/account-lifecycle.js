@@ -286,10 +286,21 @@ async function handleInvitationCreate(request, env, ctx) {
   ).bind(auth.organizationId).first();
   if (!organization) throw new AuthError(404, "ORGANIZATION_NOT_FOUND");
 
-  const rawToken = createToken();
-  const tokenHash = await hashToken(rawToken);
   const now = new Date();
   const nowIso = now.toISOString();
+  const recentInvitation = await env.DB_V2.prepare(
+    `SELECT id, expires_at FROM organization_invitations
+     WHERE organization_id = ?1 AND email = ?2 COLLATE NOCASE AND role = ?3
+       AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?4
+       AND last_sent_at > ?5 LIMIT 1`
+  ).bind(auth.organizationId, email, role, nowIso,
+    new Date(now.getTime() - 60_000).toISOString()).first();
+  if (recentInvitation) {
+    return authJson({ ok: true, accepted: true, invitationId: recentInvitation.id,
+      expiresAt: recentInvitation.expires_at }, 202);
+  }
+  const rawToken = createToken();
+  const tokenHash = await hashToken(rawToken);
   const expiresAt = new Date(now.getTime() + INVITATION_TTL_MS).toISOString();
   const invitationId = makeId("inv");
   const eventId = makeId("eme");
@@ -796,13 +807,33 @@ async function handleEmailChangeRequest(request, env, ctx) {
   await consumePublicEmailRateLimit(request, env, newEmail, "email-change");
   const now = new Date();
   const nowIso = now.toISOString();
+  const hasVerifiedEmail = Boolean(user.email && user.email_verified_at);
+  if (!hasVerifiedEmail && normalizeEmail(user.email) === newEmail) {
+    await env.DB_V2.prepare(
+      `UPDATE pending_registrations SET revoked_at = ?1
+       WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
+    ).bind(nowIso, newEmail).run();
+  }
   await releaseExpiredEmailReservations(env.DB_V2, newEmail, nowIso);
   if (await emailUnavailable(env.DB_V2, newEmail, auth.userId, nowIso)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
+  const recentRequest = hasVerifiedEmail
+    ? await env.DB_V2.prepare(
+      `SELECT id FROM email_change_requests
+       WHERE user_id = ?1 AND new_email = ?2 COLLATE NOCASE
+         AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?3
+         AND created_at > ?4 LIMIT 1`
+    ).bind(auth.userId, newEmail, nowIso, new Date(now.getTime() - 60_000).toISOString()).first()
+    : await env.DB_V2.prepare(
+      `SELECT id FROM email_enrollment_requests
+       WHERE user_id = ?1 AND new_email = ?2 COLLATE NOCASE
+         AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?3
+         AND created_at > ?4 LIMIT 1`
+    ).bind(auth.userId, newEmail, nowIso, new Date(now.getTime() - 60_000).toISOString()).first();
+  if (recentRequest) return authJson(ACCEPTED, 202);
 
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
   const expiresAt = new Date(now.getTime() + EMAIL_CHANGE_TTL_MS).toISOString();
-  const hasVerifiedEmail = Boolean(user.email && user.email_verified_at);
   const requestId = makeId(hasVerifiedEmail ? "emc" : "eme");
   try {
     if (hasVerifiedEmail) {
@@ -1035,6 +1066,13 @@ async function handleEmailChangeConfirm(request, env, ctx) {
          WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
            AND EXISTS (SELECT 1 FROM ${table} WHERE id = ?3 AND confirmed_at = ?4)`
       ).bind(nowIso, record.user_id, record.id, claimMarker),
+      env.DB_V2.prepare(
+        `UPDATE pending_registrations SET revoked_at = ?1
+         WHERE email IN (?2, ?3) COLLATE NOCASE
+           AND verified_at IS NULL AND revoked_at IS NULL
+           AND EXISTS (SELECT 1 FROM ${table} WHERE id = ?4 AND confirmed_at = ?5)`
+      ).bind(nowIso, record.old_email || record.current_email || "", record.new_email,
+        record.id, claimMarker),
       emailConfirmationAuditStatement(env.DB_V2, {
         table,
         requestId: record.id,

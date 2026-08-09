@@ -10,7 +10,8 @@ import {
   createToken,
   hashPassword,
   hashToken,
-  requireValidPassword
+  requireValidPassword,
+  verifyPassword
 } from "../auth/passwords.js";
 import { createSessionMaterial } from "../auth/sessions.js";
 import { internalLoginId, normalizeEmail, normalizeOrganizationName, requireEmail } from "../auth/email.js";
@@ -56,6 +57,25 @@ async function handleRegistrationRequest(request, env, ctx) {
   await requireTurnstile(request, env, input.turnstileToken);
   await consumePublicEmailRateLimit(request, env, email, "registration");
 
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const recentPending = await env.DB_V2.prepare(
+    `SELECT display_name, organization_name, password_scheme, password_hash, password_salt,
+            last_sent_at, expires_at
+     FROM pending_registrations
+     WHERE email = ?1 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL
+       AND expires_at > ?2
+     LIMIT 1`
+  ).bind(email, nowIso).first();
+  if (recentPending
+      && recentPending.display_name === displayName
+      && recentPending.organization_name === organizationName
+      && Date.parse(recentPending.last_sent_at) > now.getTime() - 60_000
+      && await verifyPassword(password, recentPending.password_salt,
+        recentPending.password_hash, recentPending.password_scheme)) {
+    return authJson(ACCEPTED, 202);
+  }
+
   const salt = createSalt();
   let passwordHash;
   try {
@@ -78,8 +98,6 @@ async function handleRegistrationRequest(request, env, ctx) {
 
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
-  const now = new Date();
-  const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + REGISTRATION_TTL_MS).toISOString();
   const id = makeId("reg");
   try {
@@ -361,10 +379,18 @@ async function handleResetRequest(request, env, ctx) {
   ).bind(email).first();
   if (!user) return authJson(ACCEPTED, 202);
 
-  const rawToken = createToken();
-  const tokenHash = await hashToken(rawToken);
   const now = new Date();
   const nowIso = now.toISOString();
+  const recentReset = await env.DB_V2.prepare(
+    `SELECT id FROM password_reset_tokens
+     WHERE user_id = ?1 AND email_snapshot = ?2 COLLATE NOCASE
+       AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?3
+       AND delivery_requested_at > ?4
+     LIMIT 1`
+  ).bind(user.id, email, nowIso, new Date(now.getTime() - 60_000).toISOString()).first();
+  if (recentReset) return authJson(ACCEPTED, 202);
+  const rawToken = createToken();
+  const tokenHash = await hashToken(rawToken);
   const expiresAt = new Date(now.getTime() + RESET_TTL_MS).toISOString();
   const resetId = makeId("prt");
   await env.DB_V2.batch([

@@ -27,7 +27,29 @@ async function testEmailIdentityInvariants() {
   try {
     const owner = await register(h, "identity-owner@example.com", "Identity Owner");
 
+    const duplicateEmail = "duplicate-registration@example.com";
     let response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: { email: duplicateEmail, displayName: "Duplicate Registration", password: PASSWORD,
+        turnstileToken: "test-turnstile" }
+    });
+    check("duplicate-registration fixture is accepted", response.status === 202);
+    await h.drain();
+    const duplicateRegistrationToken = tokenFromMessage(h.emails.at(-1), "verify-email");
+    const duplicateRegistrationHash = await hashToken(duplicateRegistrationToken);
+    const duplicateEmailsBefore = h.emails.length;
+    response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: { email: duplicateEmail, displayName: "Duplicate Registration", password: PASSWORD,
+        turnstileToken: "test-turnstile" }
+    });
+    check("rapid exact registration duplicate is idempotent", response.status === 202);
+    await h.drain();
+    check("rapid exact registration duplicate preserves token and sends no second email",
+      h.emails.length === duplicateEmailsBefore
+        && h.row("SELECT token_hash FROM pending_registrations WHERE email = ?1 AND revoked_at IS NULL", duplicateEmail)?.token_hash === duplicateRegistrationHash);
+
+    response = await h.api("/api/auth/registration/request", {
       method: "POST",
       body: {
         email: "pending-claim@example.com",
@@ -67,6 +89,18 @@ async function testEmailIdentityInvariants() {
     });
     check("email change reserves its target address", response.status === 202);
     await h.drain();
+    const originalChangeToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
+    const originalChangeHash = await hashToken(originalChangeToken);
+    const emailsBeforeDuplicateChange = h.emails.length;
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "reserved-change@example.com", currentPassword: PASSWORD }
+    });
+    check("rapid exact email-change duplicate is idempotent", response.status === 202);
+    await h.drain();
+    check("rapid exact email-change duplicate preserves token and sends no second email",
+      h.emails.length === emailsBeforeDuplicateChange
+        && h.row("SELECT token_hash FROM email_change_requests WHERE user_id = ?1 AND revoked_at IS NULL", owner.data.user.id)?.token_hash === originalChangeHash);
     const emailsBeforeBlockedRegistration = h.emails.length;
     response = await h.api("/api/auth/registration/request", {
       method: "POST",
@@ -98,6 +132,19 @@ async function testEmailIdentityInvariants() {
     check("invitation race fixture is created", response.status === 202, raceInvite);
     await h.drain();
     const raceInviteToken = tokenFromMessage(h.emails.at(-1), "accept-invitation");
+    const raceInviteHash = await hashToken(raceInviteToken);
+    const inviteEmailsBeforeDuplicate = h.emails.length;
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner,
+      body: { email: "invite-race@example.com", role: "teacher" }
+    });
+    const duplicateInvite = await response.json();
+    check("rapid exact invitation duplicate is idempotent",
+      response.status === 202 && duplicateInvite.invitationId === raceInvite.invitationId, duplicateInvite);
+    await h.drain();
+    check("rapid exact invitation duplicate preserves token and sends no second email",
+      h.emails.length === inviteEmailsBeforeDuplicate
+        && h.row("SELECT token_hash FROM organization_invitations WHERE id = ?1", raceInvite.invitationId)?.token_hash === raceInviteHash);
     response = await h.api("/api/auth/email-change/request", {
       method: "POST", auth: second,
       body: { newEmail: "invite-race@example.com", currentPassword: PASSWORD }
@@ -180,6 +227,23 @@ async function testEmailIdentityInvariants() {
     check("previous email-change token remains usable after a failed replacement",
       response.status === 200 && (await response.json()).email === "preserve-valid@example.com");
 
+    const duplicateReset = await register(h, "duplicate-reset@example.com", "Duplicate Reset");
+    let resetResponse = await h.api("/api/auth/password/reset/request", {
+      method: "POST", body: { email: "duplicate-reset@example.com", turnstileToken: "test-turnstile" }
+    });
+    check("password-reset duplicate fixture is accepted", resetResponse.status === 202);
+    await h.drain();
+    const resetTokenHashBefore = h.row("SELECT token_hash FROM password_reset_tokens WHERE user_id = ?1 AND revoked_at IS NULL", duplicateReset.data.user.id)?.token_hash;
+    const resetDuplicateEmailsBefore = h.emails.length;
+    resetResponse = await h.api("/api/auth/password/reset/request", {
+      method: "POST", body: { email: "duplicate-reset@example.com", turnstileToken: "test-turnstile" }
+    });
+    check("rapid exact password-reset duplicate is idempotent", resetResponse.status === 202);
+    await h.drain();
+    check("rapid exact password-reset duplicate preserves token and sends no second email",
+      h.emails.length === resetDuplicateEmailsBefore
+        && h.row("SELECT token_hash FROM password_reset_tokens WHERE user_id = ?1 AND revoked_at IS NULL", duplicateReset.data.user.id)?.token_hash === resetTokenHashBefore);
+
     const resetRace = await register(h, "reset-write-race@example.com", "Reset Write Race");
     const resetEmailsBefore = h.emails.length;
     h.db.beforeBatch = (statements) => {
@@ -221,6 +285,15 @@ async function testEmailIdentityInvariants() {
     const legacyNow = new Date().toISOString();
     h.sqlite.prepare("UPDATE users SET email = ?, email_verified_at = NULL, email_updated_at = ?, updated_at = ? WHERE id = ?")
       .run(legacyEmail, legacyNow, legacyNow, legacy.userId);
+    const legacyCredentials = h.row("SELECT password_scheme,password_hash,password_salt FROM users WHERE id = ?1", legacy.userId);
+    const legacyExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    h.sqlite.prepare(`INSERT INTO pending_registrations
+      (id,email,display_name,organization_name,password_scheme,password_hash,password_salt,token_hash,
+       created_at,expires_at,verified_at,revoked_at,last_sent_at,resend_count)
+      VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,0)`)
+      .run("reg_legacy_stale", legacyEmail, "Legacy Stale", "Legacy Stale Workspace",
+        legacyCredentials.password_scheme, legacyCredentials.password_hash, legacyCredentials.password_salt,
+        "legacy_stale_token_hash", legacyNow, legacyExpiry, legacyNow);
     const externalOwner = await register(h, "identity-external-owner@example.com", "External Owner");
     response = await h.api("/api/org/invitations", {
       method: "POST", auth: externalOwner,
@@ -233,6 +306,8 @@ async function testEmailIdentityInvariants() {
       body: { newEmail: legacyEmail, currentPassword: PASSWORD }
     });
     check("unverified existing email can be enrolled instead of being trapped as unchanged", response.status === 202, await response.clone().json());
+    check("enrollment revokes stale pending-registration claim owned by the existing account",
+      Boolean(h.row("SELECT revoked_at FROM pending_registrations WHERE id = 'reg_legacy_stale'")?.revoked_at));
     await h.drain();
     const enrollmentToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
     response = await h.api("/api/auth/email-change/confirm", { method: "POST", body: { token: enrollmentToken } });
@@ -415,11 +490,23 @@ async function testInvitationAndAccountLifecycle() {
     const changeToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
     check("email change confirmation uses a path token", Boolean(changeToken));
     check("email change raw token is absent from D1", h.row("SELECT token_hash FROM email_change_requests WHERE user_id = ?1", teacher.user.id)?.token_hash === await hashToken(changeToken));
+    const teacherCredentials = h.row("SELECT password_scheme,password_hash,password_salt FROM users WHERE id = ?1", teacher.user.id);
+    const staleNow = new Date().toISOString();
+    const staleExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    h.sqlite.prepare(`INSERT INTO pending_registrations
+      (id,email,display_name,organization_name,password_scheme,password_hash,password_salt,token_hash,
+       created_at,expires_at,verified_at,revoked_at,last_sent_at,resend_count)
+      VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,0)`)
+      .run("reg_old_email_stale", "teacher@example.com", "Old Email Stale", "Old Email Stale Workspace",
+        teacherCredentials.password_scheme, teacherCredentials.password_hash, teacherCredentials.password_salt,
+        "old_email_stale_token_hash", staleNow, staleExpiry, staleNow);
 
     response = await h.api("/api/auth/email-change/confirm", { method: "POST", body: { token: changeToken } });
     const changed = await response.json();
     check("email change confirmation succeeds", response.status === 200 && changed.email === "teacher.new@example.com", changed);
     check("email change revokes all sessions", h.row("SELECT COUNT(*) AS count FROM auth_sessions WHERE user_id = ?1 AND revoked_at IS NULL", teacher.user.id)?.count === 0);
+    check("email change revokes stale registration link for the freed old address",
+      Boolean(h.row("SELECT revoked_at FROM pending_registrations WHERE id = 'reg_old_email_stale'")?.revoked_at));
     await h.drain();
     check("old address receives a change notice", h.emails.some((message) => message.to === "teacher@example.com" && /変更されました/.test(message.subject)));
     response = await h.api("/api/auth/email-change/confirm", { method: "POST", body: { token: changeToken } });
@@ -519,6 +606,7 @@ function createHarness() {
     sqlite.exec(readFileSync(resolve(ROOT, "migrations-v2", name), "utf8"));
   }
   const db = new D1DatabaseAdapter(sqlite); const emails = []; const pending = [];
+  let clientIpSequence = 1;
   const env = {
     DB_V2: db, APP_ENV: "local", AUTH_ORIGIN: ORIGIN, EMAIL_AUTH_REQUIRED: "1",
     TURNSTILE_TEST_BYPASS: "1", TURNSTILE_SITE_KEY: "test-site-key",
@@ -533,7 +621,8 @@ function createHarness() {
     sqlite, db, env, emails,
     async api(path, options = {}) {
       const headers = new Headers(options.headers || {});
-      headers.set("origin", ORIGIN); headers.set("cf-connecting-ip", "127.0.0.1");
+      headers.set("origin", ORIGIN);
+      headers.set("cf-connecting-ip", `127.0.0.${1 + (clientIpSequence++ % 200)}`);
       if (options.auth?.cookie) headers.set("cookie", options.auth.cookie);
       if (options.auth?.csrf) headers.set("x-csrf-token", options.auth.csrf);
       let body;
