@@ -127,7 +127,14 @@ text = text.replace(
     '''                result = await inspect(page, relative, width)
                 result["viewport"] = viewport_name
 ''',
-    '''                if relative in {"_viewer_spa.html", "viewer/index.html"}:
+    '''                if relative in {"_admin_spa.html", "admin/index.html"}:
+                    await page.evaluate("""() => {
+                      document.getElementById('adminBootSection')?.classList.add('hidden');
+                      document.getElementById('loginSection')?.classList.add('hidden');
+                      document.getElementById('adminHome')?.classList.add('hidden');
+                      document.getElementById('sessionSection')?.classList.remove('hidden');
+                    }""")
+                if relative in {"_viewer_spa.html", "viewer/index.html"}:
                     await page.evaluate("""() => {
                       document.getElementById('topBar')?.classList.remove('hidden');
                       document.getElementById('pdfPageControls')?.classList.remove('hidden');
@@ -155,3 +162,22 @@ text = text.replace(
     1,
 )
 audit.write_text(text)
+
+# Stage compatibility is a historical-boundary check. Inspect declared package
+# dependencies only; later test-script names containing "translation" are not dependencies.
+compat = Path("scripts/stage-compatibility-checks.mjs")
+text = compat.read_text()
+old = '''    check("Stage 5 does not add AI or translation dependencies", !/openai|anthropic|translate|translation/i.test(read("package.json")));
+'''
+new = '''    const packageJson = JSON.parse(read("package.json"));
+    const declaredDependencies = JSON.stringify({
+      dependencies: packageJson.dependencies || {},
+      devDependencies: packageJson.devDependencies || {},
+      optionalDependencies: packageJson.optionalDependencies || {},
+      peerDependencies: packageJson.peerDependencies || {}
+    });
+    check("Stage 5 does not add AI or translation dependencies", !/openai|anthropic|translate|translation/i.test(declaredDependencies));
+'''
+if old not in text:
+    raise SystemExit("Stage 5 dependency compatibility assertion shape changed")
+compat.write_text(text.replace(old, new, 1))
