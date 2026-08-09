@@ -79,17 +79,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          npm run verify:source-manifest
+          npm run check
+          npm run check:stage08
+          npm run test:owner-bootstrap
+          npm run deploy:dry-run
+          npm run test:translation-language-hardening
+          node scripts/test-ai-translation-resilience.mjs
+          npm audit
+          npm audit --omit=dev
+          python scripts/audit-responsive-layout.py
+          rm -rf artifacts/responsive-layout-audit
+          test -z "$(git status --porcelain)"
           mkdir -p release-evidence/local
-          npm run verify:source-manifest | tee release-evidence/local/source-manifest.txt
-          npm run check | tee release-evidence/local/check.txt
-          npm run check:stage08 | tee release-evidence/local/stage08.txt
-          npm run test:owner-bootstrap | tee release-evidence/local/owner-bootstrap.txt
-          npm run deploy:dry-run | tee release-evidence/local/dry-run.txt
-          npm run test:translation-language-hardening | tee release-evidence/local/translation-language.txt
-          node scripts/test-ai-translation-resilience.mjs | tee release-evidence/local/translation-resilience.txt
-          python scripts/audit-responsive-layout.py | tee release-evidence/local/responsive.txt
-          npm audit | tee release-evidence/local/npm-audit.txt
-          npm audit --omit=dev | tee release-evidence/local/npm-audit-prod.txt
+          printf '%s\n' 'source_manifest=PASSED' 'stage08=PASSED' 'owner_bootstrap=PASSED' 'translation_language=PASSED' 'translation_resilience=PASSED' 'responsive_280_to_1440=PASSED' 'dependency_audit=PASSED' > release-evidence/local/validation.txt
 
       - name: Create and verify isolated staging config
         id: staging_config
