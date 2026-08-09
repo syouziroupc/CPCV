@@ -30,11 +30,14 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply complete invariant hardening
-        run: python scripts/finalize-account-state-invariants-v2.py
+        run: |
+          python scripts/finalize-account-state-invariants-v2.py
+          python scripts/finalize-account-state-invariants-v3.py
       - name: Remove temporary finalizers
         run: |
           git rm -f scripts/fix-account-state-invariants.py
           git rm -f scripts/finalize-account-state-invariants-v2.py
+          git rm -f scripts/finalize-account-state-invariants-v3.py
           git rm -f .github/workflows/fix-account-state-invariants.yml
           git rm -f .github/workflows/finalize-account-invariants-v2.yml
       - name: Rebuild source manifest
