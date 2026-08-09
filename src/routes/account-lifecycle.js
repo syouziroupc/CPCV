@@ -264,14 +264,18 @@ async function handleInvitationCreate(request, env, ctx) {
   requireRoleAssignment(auth.role, role);
 
   const existingUser = await env.DB_V2.prepare(
-    `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
+    `SELECT id, email_verified_at, status FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
   ).bind(email).first();
   if (existingUser) {
+    if (existingUser.status !== "active" || !existingUser.email_verified_at) {
+      throw new AuthError(409, "EMAIL_UNAVAILABLE");
+    }
     const membership = await env.DB_V2.prepare(
       `SELECT status FROM organization_members WHERE organization_id = ?1 AND user_id = ?2 LIMIT 1`
     ).bind(auth.organizationId, existingUser.id).first();
     if (membership && membership.status !== "removed") throw new AuthError(409, "MEMBERSHIP_ALREADY_EXISTS");
   }
+  if (await emailReservedForAccountChange(env.DB_V2, email)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
 
   const organization = await env.DB_V2.prepare(
     `SELECT name FROM organizations WHERE id = ?1 AND status = 'active' LIMIT 1`
@@ -347,6 +351,23 @@ async function handleInvitationResend(request, env, ctx, invitationId) {
   ).bind(invitationId, auth.organizationId, nowIso).first();
   if (!invitation) throw new AuthError(404, "INVITATION_NOT_FOUND");
   requireRoleAssignment(auth.role, invitation.role);
+  const currentUser = await env.DB_V2.prepare(
+    `SELECT id, email_verified_at, status FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
+  ).bind(invitation.email).first();
+  if (currentUser) {
+    if (currentUser.status !== "active" || !currentUser.email_verified_at) {
+      throw new AuthError(409, "EMAIL_UNAVAILABLE");
+    }
+    const currentMembership = await env.DB_V2.prepare(
+      `SELECT status FROM organization_members WHERE organization_id = ?1 AND user_id = ?2 LIMIT 1`
+    ).bind(auth.organizationId, currentUser.id).first();
+    if (currentMembership && currentMembership.status !== "removed") {
+      throw new AuthError(409, "MEMBERSHIP_ALREADY_EXISTS");
+    }
+  }
+  if (await emailReservedForAccountChange(env.DB_V2, invitation.email, nowIso)) {
+    throw new AuthError(409, "EMAIL_UNAVAILABLE");
+  }
   if (Date.parse(invitation.last_sent_at) > now.getTime() - 60_000) {
     throw new AuthError(429, "RATE_LIMITED", { headers: { "retry-after": "60" } });
   }
@@ -454,7 +475,8 @@ async function handleInvitationInspect(request, env) {
       role: invitation.role,
       emailMask: maskEmail(invitation.email),
       expiresAt: invitation.expires_at,
-      accountExists: Boolean(user && user.email_verified_at && user.status === "active")
+      accountExists: Boolean(user),
+      accountAvailable: !user || Boolean(user.email_verified_at && user.status === "active")
     }
   });
 }
@@ -567,6 +589,9 @@ async function acceptInvitationForNewUser(request, env, input, invitation) {
   if (await env.DB_V2.prepare(`SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`).bind(invitation.email).first()) {
     throw new AuthError(409, "INVITATION_LOGIN_REQUIRED");
   }
+  if (await emailReservedForAccountChange(env.DB_V2, invitation.email)) {
+    throw new AuthError(409, "EMAIL_UNAVAILABLE");
+  }
   const salt = createSalt();
   const passwordHash = await hashPassword(password, salt);
   const now = new Date();
@@ -589,7 +614,17 @@ async function acceptInvitationForNewUser(request, env, input, invitation) {
                   0, NULL, 0, i.email, ?7, ?7
            FROM organization_invitations i
            WHERE i.id = ?8 AND i.token_hash = ?9 AND i.accepted_at IS NULL
-             AND i.revoked_at IS NULL AND i.expires_at > ?7`
+             AND i.revoked_at IS NULL AND i.expires_at > ?7
+             AND NOT EXISTS (
+               SELECT 1 FROM email_change_requests c
+               WHERE c.new_email = i.email COLLATE NOCASE
+                 AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?7
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_enrollment_requests e
+               WHERE e.new_email = i.email COLLATE NOCASE
+                 AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?7
+             )`
       ).bind(userId, loginId, displayName, PASSWORD_SCHEME, passwordHash, salt, nowIso, invitation.id, invitation.token_hash),
       env.DB_V2.prepare(
         `UPDATE organization_invitations SET accepted_at = ?1, accepted_user_id = ?2
@@ -618,7 +653,12 @@ async function acceptInvitationForNewUser(request, env, input, invitation) {
         role: invitation.role,
         action: "organization.invitation.accepted",
         createdAt: nowIso
-      })
+      }),
+      env.DB_V2.prepare(
+        `UPDATE pending_registrations SET revoked_at = ?1
+         WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL
+           AND EXISTS (SELECT 1 FROM users WHERE id = ?3)`
+      ).bind(nowIso, invitation.email, userId)
     ]);
   } catch (error) {
     if (isEmailConflict(error)) throw new AuthError(409, "INVITATION_LOGIN_REQUIRED");
@@ -628,6 +668,12 @@ async function acceptInvitationForNewUser(request, env, input, invitation) {
       || Number(results?.[1]?.meta?.changes || 0) !== 1
       || Number(results?.[2]?.meta?.changes || 0) !== 1
       || Number(results?.[3]?.meta?.changes || 0) !== 1) {
+    if (await env.DB_V2.prepare(`SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`).bind(invitation.email).first()) {
+      throw new AuthError(409, "INVITATION_LOGIN_REQUIRED");
+    }
+    if (await emailReservedForAccountChange(env.DB_V2, invitation.email)) {
+      throw new AuthError(409, "EMAIL_UNAVAILABLE");
+    }
     throw new AuthError(409, "INVITATION_UPDATE_CONFLICT");
   }
   return invitationAcceptedResponse(request, env, {
@@ -660,27 +706,51 @@ async function handleEmailChangeRequest(request, env, ctx) {
       || !await verifyPassword(currentPassword, user.password_salt, user.password_hash, user.password_scheme)) {
     throw new AuthError(401, "CURRENT_PASSWORD_INVALID");
   }
-  if (normalizeEmail(user.email) === newEmail) throw new AuthError(409, "EMAIL_UNCHANGED");
+  if (user.email_verified_at && normalizeEmail(user.email) === newEmail) throw new AuthError(409, "EMAIL_UNCHANGED");
   await consumePublicEmailRateLimit(request, env, newEmail, "email-change");
-  if (await emailUnavailable(env.DB_V2, newEmail, auth.userId)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
+  const now = new Date();
+  const nowIso = now.toISOString();
+  await releaseExpiredEmailReservations(env.DB_V2, newEmail, nowIso);
+  if (await emailUnavailable(env.DB_V2, newEmail, auth.userId, nowIso)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
 
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
-  const now = new Date();
-  const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + EMAIL_CHANGE_TTL_MS).toISOString();
-  const requestId = makeId(user.email ? "emc" : "eme");
+  const hasVerifiedEmail = Boolean(user.email && user.email_verified_at);
+  const requestId = makeId(hasVerifiedEmail ? "emc" : "eme");
   try {
-    if (user.email && user.email_verified_at) {
+    if (hasVerifiedEmail) {
       await env.DB_V2.batch([
         env.DB_V2.prepare(
           `UPDATE email_change_requests SET revoked_at = ?1
            WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`
         ).bind(nowIso, auth.userId),
         env.DB_V2.prepare(
+          `UPDATE email_enrollment_requests SET revoked_at = ?1
+           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`
+        ).bind(nowIso, auth.userId),
+        env.DB_V2.prepare(
           `INSERT INTO email_change_requests (
              id, user_id, old_email, new_email, token_hash, created_at, expires_at, confirmed_at, revoked_at
-           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL)`
+           )
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, NULL
+           WHERE NOT EXISTS (
+             SELECT 1 FROM users u WHERE u.email = ?4 COLLATE NOCASE AND u.id <> ?2
+           )
+             AND NOT EXISTS (
+               SELECT 1 FROM pending_registrations p
+               WHERE p.email = ?4 COLLATE NOCASE AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?6
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_change_requests c
+               WHERE c.new_email = ?4 COLLATE NOCASE AND c.user_id <> ?2
+                 AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?6
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_enrollment_requests e
+               WHERE e.new_email = ?4 COLLATE NOCASE AND e.user_id <> ?2
+                 AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?6
+             )`
         ).bind(requestId, auth.userId, user.email, newEmail, tokenHash, nowIso, expiresAt),
         auditStatement(env.DB_V2, {
           organizationId: auth.organizationId,
@@ -690,7 +760,11 @@ async function handleEmailChangeRequest(request, env, ctx) {
           action: "auth.email_change.requested",
           targetType: "user",
           targetId: auth.userId,
-          details: { newEmailMask: maskEmail(newEmail), expiresAt }
+          details: { newEmailMask: maskEmail(newEmail), expiresAt },
+          condition: {
+            sql: "EXISTS (SELECT 1 FROM email_change_requests WHERE id = ?11)",
+            bindings: [requestId]
+          }
         })
       ]);
     } else {
@@ -700,9 +774,31 @@ async function handleEmailChangeRequest(request, env, ctx) {
            WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`
         ).bind(nowIso, auth.userId),
         env.DB_V2.prepare(
+          `UPDATE email_change_requests SET revoked_at = ?1
+           WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL`
+        ).bind(nowIso, auth.userId),
+        env.DB_V2.prepare(
           `INSERT INTO email_enrollment_requests (
              id, user_id, new_email, token_hash, created_at, expires_at, confirmed_at, revoked_at
-           ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL)`
+           )
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, NULL, NULL
+           WHERE NOT EXISTS (
+             SELECT 1 FROM users u WHERE u.email = ?3 COLLATE NOCASE AND u.id <> ?2
+           )
+             AND NOT EXISTS (
+               SELECT 1 FROM pending_registrations p
+               WHERE p.email = ?3 COLLATE NOCASE AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?5
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_change_requests c
+               WHERE c.new_email = ?3 COLLATE NOCASE AND c.user_id <> ?2
+                 AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?5
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM email_enrollment_requests e
+               WHERE e.new_email = ?3 COLLATE NOCASE AND e.user_id <> ?2
+                 AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?5
+             )`
         ).bind(requestId, auth.userId, newEmail, tokenHash, nowIso, expiresAt),
         auditStatement(env.DB_V2, {
           organizationId: auth.organizationId,
@@ -712,7 +808,11 @@ async function handleEmailChangeRequest(request, env, ctx) {
           action: "auth.email_enrollment.requested",
           targetType: "user",
           targetId: auth.userId,
-          details: { newEmailMask: maskEmail(newEmail), expiresAt }
+          details: { newEmailMask: maskEmail(newEmail), expiresAt },
+          condition: {
+            sql: "EXISTS (SELECT 1 FROM email_enrollment_requests WHERE id = ?11)",
+            bindings: [requestId]
+          }
         })
       ]);
     }
@@ -720,11 +820,18 @@ async function handleEmailChangeRequest(request, env, ctx) {
     if (isEmailConflict(error)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
     throw error;
   }
+  const reserved = await env.DB_V2.prepare(
+    `SELECT 1 AS found FROM email_change_requests WHERE id = ?1
+     UNION ALL
+     SELECT 1 AS found FROM email_enrollment_requests WHERE id = ?1
+     LIMIT 1`
+  ).bind(requestId).first();
+  if (!reserved) throw new AuthError(409, "EMAIL_UNAVAILABLE");
   schedule(ctx, sendEmailChangeConfirmation(env, {
     organizationId: auth.organizationId,
     email: newEmail,
     rawToken,
-    enrollment: !(user.email && user.email_verified_at),
+    enrollment: !hasVerifiedEmail,
     requestId: makeId("req")
   }));
   return authJson(ACCEPTED, 202);
@@ -741,13 +848,13 @@ async function handleEmailChangeConfirm(request, env, ctx) {
   const nowIso = now.toISOString();
   const change = await env.DB_V2.prepare(
     `SELECT r.id, r.user_id, r.old_email, r.new_email, r.expires_at, r.confirmed_at, r.revoked_at,
-            u.email AS current_email, u.status AS user_status
+            u.email AS current_email, u.email_verified_at AS current_email_verified_at, u.status AS user_status
      FROM email_change_requests r JOIN users u ON u.id = r.user_id
      WHERE r.token_hash = ?1 LIMIT 1`
   ).bind(tokenHash).first();
   const enrollment = change ? null : await env.DB_V2.prepare(
     `SELECT r.id, r.user_id, NULL AS old_email, r.new_email, r.expires_at, r.confirmed_at, r.revoked_at,
-            u.email AS current_email, u.status AS user_status
+            u.email AS current_email, u.email_verified_at AS current_email_verified_at, u.status AS user_status
      FROM email_enrollment_requests r JOIN users u ON u.id = r.user_id
      WHERE r.token_hash = ?1 LIMIT 1`
   ).bind(tokenHash).first();
@@ -759,11 +866,12 @@ async function handleEmailChangeConfirm(request, env, ctx) {
   if (change && normalizeEmail(record.current_email) !== normalizeEmail(record.old_email)) {
     throw new AuthError(400, "EMAIL_CHANGE_TOKEN_INVALID");
   }
-  if (enrollment && record.current_email) throw new AuthError(400, "EMAIL_CHANGE_TOKEN_INVALID");
-  if (await emailUnavailable(env.DB_V2, record.new_email, record.user_id)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
+  if (enrollment && record.current_email_verified_at) throw new AuthError(400, "EMAIL_CHANGE_TOKEN_INVALID");
+  if (await emailUnavailable(env.DB_V2, record.new_email, record.user_id, nowIso)) throw new AuthError(409, "EMAIL_UNAVAILABLE");
 
   const claimMarker = makeClaimMarker(now);
   const table = change ? "email_change_requests" : "email_enrollment_requests";
+  const alternateTable = change ? "email_enrollment_requests" : "email_change_requests";
   let results;
   try {
     results = await env.DB_V2.batch([
@@ -784,6 +892,11 @@ async function handleEmailChangeConfirm(request, env, ctx) {
       env.DB_V2.prepare(
         `UPDATE password_reset_tokens SET revoked_at = ?1
          WHERE user_id = ?2 AND used_at IS NULL AND revoked_at IS NULL
+           AND EXISTS (SELECT 1 FROM ${table} WHERE id = ?3 AND confirmed_at = ?4)`
+      ).bind(nowIso, record.user_id, record.id, claimMarker),
+      env.DB_V2.prepare(
+        `UPDATE ${alternateTable} SET revoked_at = ?1
+         WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
            AND EXISTS (SELECT 1 FROM ${table} WHERE id = ?3 AND confirmed_at = ?4)`
       ).bind(nowIso, record.user_id, record.id, claimMarker),
       emailConfirmationAuditStatement(env.DB_V2, {
@@ -919,13 +1032,30 @@ async function optionalAuth(request, env) {
   }
 }
 
-async function emailUnavailable(db, email, userId) {
-  const user = await db.prepare(
-    `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE AND id <> ?2 LIMIT 1`
-  ).bind(email, userId).first();
-  if (user) return true;
-  const pending = await db.prepare(
+async function emailReservedForAccountChange(db, email, nowIso = new Date().toISOString()) {
+  const row = await db.prepare(
     `SELECT 1 AS found FROM email_change_requests
+     WHERE new_email = ?1 COLLATE NOCASE
+       AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+     UNION ALL
+     SELECT 1 AS found FROM email_enrollment_requests
+     WHERE new_email = ?1 COLLATE NOCASE
+       AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+     LIMIT 1`
+  ).bind(email, nowIso).first();
+  return Boolean(row);
+}
+
+async function emailUnavailable(db, email, userId, nowIso = new Date().toISOString()) {
+  const pending = await db.prepare(
+    `SELECT 1 AS found FROM users
+     WHERE email = ?1 COLLATE NOCASE AND id <> ?2
+     UNION ALL
+     SELECT 1 AS found FROM pending_registrations
+     WHERE email = ?1 COLLATE NOCASE
+       AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?3
+     UNION ALL
+     SELECT 1 AS found FROM email_change_requests
      WHERE new_email = ?1 COLLATE NOCASE AND user_id <> ?2
        AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?3
      UNION ALL
@@ -933,8 +1063,23 @@ async function emailUnavailable(db, email, userId) {
      WHERE new_email = ?1 COLLATE NOCASE AND user_id <> ?2
        AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?3
      LIMIT 1`
-  ).bind(email, userId, new Date().toISOString()).first();
+  ).bind(email, userId, nowIso).first();
   return Boolean(pending);
+}
+
+async function releaseExpiredEmailReservations(db, email, nowIso) {
+  await db.batch([
+    db.prepare(
+      `UPDATE email_change_requests SET revoked_at = ?1
+       WHERE new_email = ?2 COLLATE NOCASE
+         AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at <= ?1`
+    ).bind(nowIso, email),
+    db.prepare(
+      `UPDATE email_enrollment_requests SET revoked_at = ?1
+       WHERE new_email = ?2 COLLATE NOCASE
+         AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at <= ?1`
+    ).bind(nowIso, email)
+  ]);
 }
 
 function sessionInsertConditional(db, entry) {

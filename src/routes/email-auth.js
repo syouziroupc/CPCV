@@ -67,7 +67,14 @@ async function handleRegistrationRequest(request, env, ctx) {
   const existing = await env.DB_V2.prepare(
     `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
   ).bind(email).first();
-  if (existing) return authJson(ACCEPTED, 202);
+  if (existing) {
+    const nowIso = new Date().toISOString();
+    await env.DB_V2.prepare(
+      `UPDATE pending_registrations SET revoked_at = ?1
+       WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
+    ).bind(nowIso, email).run();
+    return authJson(ACCEPTED, 202);
+  }
 
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
@@ -78,6 +85,16 @@ async function handleRegistrationRequest(request, env, ctx) {
   try {
     await env.DB_V2.batch([
       env.DB_V2.prepare(
+        `UPDATE email_change_requests SET revoked_at = ?1
+         WHERE new_email = ?2 COLLATE NOCASE
+           AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at <= ?1`
+      ).bind(nowIso, email),
+      env.DB_V2.prepare(
+        `UPDATE email_enrollment_requests SET revoked_at = ?1
+         WHERE new_email = ?2 COLLATE NOCASE
+           AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at <= ?1`
+      ).bind(nowIso, email),
+      env.DB_V2.prepare(
         `UPDATE pending_registrations SET revoked_at = ?1
          WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
       ).bind(nowIso, email),
@@ -86,7 +103,19 @@ async function handleRegistrationRequest(request, env, ctx) {
            id, email, display_name, organization_name,
            password_scheme, password_hash, password_salt, token_hash,
            created_at, expires_at, verified_at, revoked_at, last_sent_at, resend_count
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, NULL, ?9, 0)`
+         )
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, NULL, ?9, 0
+         WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?2 COLLATE NOCASE)
+           AND NOT EXISTS (
+             SELECT 1 FROM email_change_requests c
+             WHERE c.new_email = ?2 COLLATE NOCASE
+               AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?9
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM email_enrollment_requests e
+             WHERE e.new_email = ?2 COLLATE NOCASE
+               AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?9
+           )`
       ).bind(id, email, displayName, organizationName, PASSWORD_SCHEME, passwordHash, salt, tokenHash, nowIso, expiresAt)
     ]);
   } catch (error) {
@@ -94,6 +123,11 @@ async function handleRegistrationRequest(request, env, ctx) {
     console.error("Registration persistence failed", safeErrorCode(error));
     throw new AuthError(503, "REGISTRATION_PERSISTENCE_UNAVAILABLE", { expose: true });
   }
+  const created = await env.DB_V2.prepare(
+    `SELECT 1 AS found FROM pending_registrations
+     WHERE id = ?1 AND verified_at IS NULL AND revoked_at IS NULL LIMIT 1`
+  ).bind(id).first();
+  if (!created) return authJson(ACCEPTED, 202);
   const requestId = makeId("req");
   schedule(ctx, sendRegistrationVerification(env, { email, rawToken, requestId }));
   return authJson(ACCEPTED, 202);
@@ -115,6 +149,13 @@ async function handleRegistrationResend(request, env, ctx) {
      LIMIT 1`
   ).bind(email).first();
   if (!pending || Date.parse(pending.expires_at) <= now.getTime()) return authJson(ACCEPTED, 202);
+  if (await registrationEmailUnavailable(env.DB_V2, email, nowIso)) {
+    await env.DB_V2.prepare(
+      `UPDATE pending_registrations SET revoked_at = ?1
+       WHERE id = ?2 AND verified_at IS NULL AND revoked_at IS NULL`
+    ).bind(nowIso, pending.id).run();
+    return authJson(ACCEPTED, 202);
+  }
   if (Date.parse(pending.last_sent_at) > now.getTime() - 60_000) {
     throw new AuthError(429, "RATE_LIMITED", { headers: { "retry-after": "60" } });
   }
@@ -123,8 +164,19 @@ async function handleRegistrationResend(request, env, ctx) {
   const result = await env.DB_V2.prepare(
     `UPDATE pending_registrations
      SET token_hash = ?1, last_sent_at = ?2, resend_count = resend_count + 1
-     WHERE id = ?3 AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?2`
-  ).bind(tokenHash, nowIso, pending.id).run();
+     WHERE id = ?3 AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+       AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?4 COLLATE NOCASE)
+       AND NOT EXISTS (
+         SELECT 1 FROM email_change_requests c
+         WHERE c.new_email = ?4 COLLATE NOCASE
+           AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?2
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM email_enrollment_requests e
+         WHERE e.new_email = ?4 COLLATE NOCASE
+           AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?2
+       )`
+  ).bind(tokenHash, nowIso, pending.id, email).run();
   if (Number(result?.meta?.changes || 0) === 1) {
     schedule(ctx, sendRegistrationVerification(env, { email, rawToken, requestId: makeId("req") }));
   }
@@ -160,7 +212,18 @@ async function handleRegistrationVerify(request, env) {
     await env.DB_V2.batch([
       env.DB_V2.prepare(
         `UPDATE pending_registrations SET verified_at = ?1
-         WHERE id = ?2 AND token_hash = ?3 AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?4`
+         WHERE id = ?2 AND token_hash = ?3 AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?4
+           AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = pending_registrations.email COLLATE NOCASE)
+           AND NOT EXISTS (
+             SELECT 1 FROM email_change_requests c
+             WHERE c.new_email = pending_registrations.email COLLATE NOCASE
+               AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?4
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM email_enrollment_requests e
+             WHERE e.new_email = pending_registrations.email COLLATE NOCASE
+               AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?4
+           )`
       ).bind(claimMarker, pending.id, tokenHash, nowIso),
       env.DB_V2.prepare(
         `INSERT INTO users (
@@ -248,6 +311,13 @@ async function handleRegistrationVerify(request, env) {
      LIMIT 1`
   ).bind(pending.id, claimMarker, sessionId, userId, organizationId).first();
   if (!completed) {
+    const completedUser = await env.DB_V2.prepare(
+      `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
+    ).bind(pending.email).first();
+    if (completedUser) throw new AuthError(400, "REGISTRATION_ALREADY_COMPLETED");
+    if (await registrationEmailUnavailable(env.DB_V2, pending.email, nowIso)) {
+      throw new AuthError(409, "EMAIL_UNAVAILABLE");
+    }
     console.error("Registration verification completion invariant failed");
     throw new AuthError(400, "REGISTRATION_TOKEN_INVALID");
   }
@@ -310,6 +380,22 @@ async function handleResetRequest(request, env, ctx) {
   ]);
   schedule(ctx, sendPasswordReset(env, { email, rawToken, requestId: makeId("req") }));
   return authJson(ACCEPTED, 202);
+}
+
+async function registrationEmailUnavailable(db, email, nowIso = new Date().toISOString()) {
+  const row = await db.prepare(
+    `SELECT 1 AS found FROM users WHERE email = ?1 COLLATE NOCASE
+     UNION ALL
+     SELECT 1 AS found FROM email_change_requests
+     WHERE new_email = ?1 COLLATE NOCASE
+       AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+     UNION ALL
+     SELECT 1 AS found FROM email_enrollment_requests
+     WHERE new_email = ?1 COLLATE NOCASE
+       AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+     LIMIT 1`
+  ).bind(email, nowIso).first();
+  return Boolean(row);
 }
 
 function conditionalRegistrationAuditStatement(db, entry) {

@@ -13,11 +13,204 @@ const results = [];
 async function main() {
   await testInvitationAndAccountLifecycle();
   await testInvitationAuthorizationAndQuotas();
+  await testEmailIdentityInvariants();
+  await testCredentialChangeInvalidation();
   await testAccountDeletion();
   const passed = results.filter((x) => x.ok).length;
   const failed = results.length - passed;
   console.log(`\nStage 6.5 account lifecycle summary: ${passed} passed, ${failed} failed, ${results.length} total.`);
   if (failed) process.exitCode = 1;
+}
+
+async function testEmailIdentityInvariants() {
+  const h = createHarness();
+  try {
+    const owner = await register(h, "identity-owner@example.com", "Identity Owner");
+
+    let response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: {
+        email: "pending-claim@example.com",
+        displayName: "Pending Claim",
+        password: PASSWORD,
+        turnstileToken: "test-turnstile"
+      }
+    });
+    check("pending registration can be created for identity conflict test", response.status === 202);
+    await h.drain();
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "pending-claim@example.com", currentPassword: PASSWORD }
+    });
+    check("email change rejects an address reserved by pending registration",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner,
+      body: { email: "pending-claim@example.com", role: "teacher" }
+    });
+    const pendingInvite = await response.json();
+    check("pending self-registration can receive an organization invitation", response.status === 202, pendingInvite);
+    await h.drain();
+    const pendingInviteToken = tokenFromMessage(h.emails.at(-1), "accept-invitation");
+    response = await h.api("/api/auth/invitations/accept", {
+      method: "POST",
+      body: { token: pendingInviteToken, displayName: "Pending Claim", password: PASSWORD }
+    });
+    check("invitation may complete the identity before self-registration", response.status === 201, await response.clone().json());
+    check("invitation-created identity revokes the stale self-registration",
+      Boolean(h.row("SELECT revoked_at FROM pending_registrations WHERE email = 'pending-claim@example.com'")?.revoked_at));
+
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "reserved-change@example.com", currentPassword: PASSWORD }
+    });
+    check("email change reserves its target address", response.status === 202);
+    await h.drain();
+    const emailsBeforeBlockedRegistration = h.emails.length;
+    response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: {
+        email: "reserved-change@example.com",
+        displayName: "Should Not Register",
+        password: PASSWORD,
+        turnstileToken: "test-turnstile"
+      }
+    });
+    check("self-registration against an email-change reservation stays enumeration-safe", response.status === 202);
+    await h.drain();
+    check("reserved email does not create a competing pending registration or send verification",
+      h.emails.length === emailsBeforeBlockedRegistration
+        && h.row("SELECT COUNT(*) AS count FROM pending_registrations WHERE email = 'reserved-change@example.com' AND verified_at IS NULL AND revoked_at IS NULL")?.count === 0);
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner,
+      body: { email: "reserved-change@example.com", role: "teacher" }
+    });
+    check("organization invitation cannot override an active email-change reservation",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+
+    const second = await register(h, "identity-second@example.com", "Identity Second");
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner,
+      body: { email: "invite-race@example.com", role: "teacher" }
+    });
+    const raceInvite = await response.json();
+    check("invitation race fixture is created", response.status === 202, raceInvite);
+    await h.drain();
+    const raceInviteToken = tokenFromMessage(h.emails.at(-1), "accept-invitation");
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: second,
+      body: { newEmail: "invite-race@example.com", currentPassword: PASSWORD }
+    });
+    check("existing account can reserve an address after an invitation was issued", response.status === 202);
+    response = await h.api("/api/auth/invitations/accept", {
+      method: "POST",
+      body: { token: raceInviteToken, displayName: "Race Invite", password: PASSWORD }
+    });
+    check("invitation acceptance cannot steal a later account-change reservation",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+    const emailsBeforeBlockedResend = h.emails.length;
+    response = await h.api(`/api/org/invitations/${raceInvite.invitationId}/resend`, {
+      method: "POST", auth: owner, body: {}
+    });
+    check("invitation resend refuses a target now reserved by an account change",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+    await h.drain();
+    check("blocked invitation resend sends no useless email", h.emails.length === emailsBeforeBlockedResend);
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "expired-reservation@example.com", currentPassword: PASSWORD }
+    });
+    check("expiring reservation fixture is created", response.status === 202);
+    await h.drain();
+    const expired = h.row("SELECT id, created_at FROM email_change_requests WHERE user_id = ?1 AND new_email = 'expired-reservation@example.com'", owner.data.user.id);
+    const expiredAt = new Date(Date.parse(expired.created_at) + 1).toISOString();
+    h.sqlite.prepare("UPDATE email_change_requests SET expires_at = ? WHERE id = ?").run(expiredAt, expired.id);
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: second,
+      body: { newEmail: "expired-reservation@example.com", currentPassword: PASSWORD }
+    });
+    check("expired reservation cannot lock an email until scheduled cleanup", response.status === 202, await response.clone().json());
+    check("expired reservation is explicitly released before reuse",
+      Boolean(h.row("SELECT revoked_at FROM email_change_requests WHERE id = ?1", expired.id)?.revoked_at));
+
+    const legacy = await createLegacyMember(h, owner.data.organization.id);
+    const legacyEmail = "legacy-unverified@example.com";
+    const legacyNow = new Date().toISOString();
+    h.sqlite.prepare("UPDATE users SET email = ?, email_verified_at = NULL, email_updated_at = ?, updated_at = ? WHERE id = ?")
+      .run(legacyEmail, legacyNow, legacyNow, legacy.userId);
+    const externalOwner = await register(h, "identity-external-owner@example.com", "External Owner");
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: externalOwner,
+      body: { email: legacyEmail, role: "teacher" }
+    });
+    check("invitation rejects an existing account whose email is not verified",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: legacy,
+      body: { newEmail: legacyEmail, currentPassword: PASSWORD }
+    });
+    check("unverified existing email can be enrolled instead of being trapped as unchanged", response.status === 202, await response.clone().json());
+    await h.drain();
+    const enrollmentToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
+    response = await h.api("/api/auth/email-change/confirm", { method: "POST", body: { token: enrollmentToken } });
+    check("unverified existing email becomes verified",
+      response.status === 200 && Boolean(h.row("SELECT email_verified_at FROM users WHERE id = ?1", legacy.userId)?.email_verified_at));
+  } finally { h.close(); }
+}
+
+async function testCredentialChangeInvalidation() {
+  const h = createHarness();
+  try {
+    const owner = await register(h, "credential-owner@example.com", "Credential Owner");
+    let response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "credential-pending@example.com", currentPassword: PASSWORD }
+    });
+    check("credential invalidation fixture email change requested", response.status === 202);
+    await h.drain();
+    const pendingChangeToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
+
+    const changedPassword = "Changed-Correct-Horse-456";
+    response = await h.api("/api/auth/password/change", {
+      method: "POST", auth: owner,
+      body: { currentPassword: PASSWORD, newPassword: changedPassword }
+    });
+    const changedSession = await response.clone().json();
+    check("password change succeeds before invalidation check", response.status === 200, changedSession);
+    owner.cookie = cookieFrom(response);
+    owner.csrf = changedSession.csrfToken;
+    response = await h.api("/api/auth/email-change/confirm", {
+      method: "POST", body: { token: pendingChangeToken }
+    });
+    check("password change revokes previously issued email-change token",
+      response.status === 400 && (await response.json()).error === "EMAIL_CHANGE_TOKEN_INVALID");
+
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "credential-reset-pending@example.com", currentPassword: changedPassword }
+    });
+    check("second email change can be requested for reset invalidation test", response.status === 202);
+    await h.drain();
+    const resetPendingEmailToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
+
+    response = await h.api("/api/auth/password/reset/request", {
+      method: "POST",
+      body: { email: "credential-owner@example.com", turnstileToken: "test-turnstile" }
+    });
+    check("password reset request succeeds", response.status === 202);
+    await h.drain();
+    const resetToken = tokenFromMessage(h.emails.at(-1), "reset-password");
+    response = await h.api("/api/auth/password/reset", {
+      method: "POST", body: { token: resetToken, newPassword: "Reset-Correct-Horse-789" }
+    });
+    check("password reset succeeds", response.status === 200, await response.clone().json());
+    response = await h.api("/api/auth/email-change/confirm", {
+      method: "POST", body: { token: resetPendingEmailToken }
+    });
+    check("password reset revokes previously issued email-change token",
+      response.status === 400 && (await response.json()).error === "EMAIL_CHANGE_TOKEN_INVALID");
+  } finally { h.close(); }
 }
 
 async function testAccountDeletion() {

@@ -43,6 +43,10 @@ async function inspect() {
     setStatus(errorMessage(session.data.error || "NETWORK_ERROR"), true);
     return;
   }
+  if (invitation.accountExists && invitation.accountAvailable === false) {
+    setStatus("このメールアドレスの既存アカウントは現在この招待を承認できません。組織の管理者に確認してください。", true);
+    return;
+  }
   show(invitation.accountExists ? "existingSection" : "newSection", true);
   setStatus(invitation.accountExists ? "ログイン後に招待を承認します。" : "アカウントを作成して招待を承認します。");
 }
