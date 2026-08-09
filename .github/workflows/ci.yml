@@ -33,12 +33,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Apply hardening patch
-        run: python scripts/fix-email-identity-invariants.py
+      - name: Apply hardening patches
+        run: |
+          python scripts/fix-email-identity-invariants.py
+          python scripts/fix-email-identity-ownership.py
 
       - name: Remove temporary machinery and restore permanent CI
         run: |
           git rm -f scripts/fix-email-identity-invariants.py
+          git rm -f scripts/fix-email-identity-ownership.py
           git rm -f .github/workflows/finalize-email-identity-hardening.yml
           git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
 
