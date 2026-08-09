@@ -39,6 +39,12 @@ jobs:
           git rm -f .github/workflows/finalize-account-invariants-v2.yml
       - name: Rebuild source manifest
         run: npm run manifest:source
+      - name: Create local validation commit
+        run: |
+          git config user.name "CPCV Reliability Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Complete account identity invariants"
       - name: Focused regressions
         run: |
           node --no-warnings scripts/test-email-auth-v2.mjs
@@ -56,10 +62,5 @@ jobs:
           npm run deploy:dry-run
           npm audit
           npm audit --omit=dev
-      - name: Commit validated result
-        run: |
-          git config user.name "CPCV Reliability Bot"
-          git config user.email "actions@users.noreply.github.com"
-          git add -A
-          git commit -m "Complete account identity invariants"
-          git push origin HEAD:agent/ai-response-hardening-20260808
+      - name: Push validated result
+        run: git push origin HEAD:agent/ai-response-hardening-20260808
