@@ -171,6 +171,48 @@ async function testEmailIdentityInvariants() {
         && duplicateAfter?.password_salt === duplicateBefore?.password_salt,
       { duplicateBefore, duplicateAfter, emailsBefore: duplicateEmailsBefore, emailsAfter: h.emails.length });
 
+    const registrationRaceEmail = "registration-write-race@example.com";
+    const registrationRaceEmailsBefore = h.emails.length;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("INSERT INTO pending_registrations"))) return false;
+      const source = h.row(
+        `SELECT password_scheme,password_hash,password_salt FROM pending_registrations
+         WHERE email = ?1 AND revoked_at IS NULL`, duplicateEmail
+      );
+      const raceNow = new Date().toISOString();
+      const raceExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      h.sqlite.prepare(`INSERT INTO pending_registrations
+        (id,email,display_name,organization_name,password_scheme,password_hash,password_salt,token_hash,
+         created_at,expires_at,verified_at,revoked_at,last_sent_at,resend_count)
+        VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,0)`)
+        .run("reg_write_race_winner", registrationRaceEmail, "First Registration Writer",
+          "First Registration Workspace", source.password_scheme, source.password_hash, source.password_salt,
+          "registration_write_race_hash", raceNow, raceExpiry, raceNow);
+      return true;
+    };
+    response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: {
+        email: registrationRaceEmail,
+        displayName: "Second Registration Writer",
+        password: "Second-Registration-Password-789",
+        turnstileToken: "test-turnstile"
+      }
+    });
+    check("concurrent registration remains enumeration-safe when another claimant commits first", response.status === 202);
+    await h.drain();
+    const registrationRaceWinner = h.row(
+      `SELECT id,display_name,organization_name,token_hash FROM pending_registrations
+       WHERE email = ?1 AND revoked_at IS NULL`, registrationRaceEmail
+    );
+    check("second registration cannot revoke or replace a concurrently committed pending identity",
+      h.emails.length === registrationRaceEmailsBefore
+        && registrationRaceWinner?.id === "reg_write_race_winner"
+        && registrationRaceWinner?.display_name === "First Registration Writer"
+        && registrationRaceWinner?.organization_name === "First Registration Workspace"
+        && registrationRaceWinner?.token_hash === "registration_write_race_hash",
+      registrationRaceWinner);
+
     response = await h.api("/api/auth/registration/request", {
       method: "POST",
       body: {

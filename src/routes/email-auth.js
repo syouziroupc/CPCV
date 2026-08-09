@@ -103,7 +103,8 @@ async function handleRegistrationRequest(request, env, ctx) {
       ).bind(nowIso, email),
       env.DB_V2.prepare(
         `UPDATE pending_registrations SET revoked_at = ?1
-         WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
+         WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL
+           AND expires_at <= ?1`
       ).bind(nowIso, email),
       env.DB_V2.prepare(
         `INSERT INTO pending_registrations (
@@ -113,6 +114,11 @@ async function handleRegistrationRequest(request, env, ctx) {
          )
          SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, NULL, ?9, 0
          WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?2 COLLATE NOCASE)
+           AND NOT EXISTS (
+             SELECT 1 FROM pending_registrations p
+             WHERE p.email = ?2 COLLATE NOCASE
+               AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?9
+           )
            AND NOT EXISTS (
              SELECT 1 FROM email_change_requests c
              WHERE c.new_email = ?2 COLLATE NOCASE
