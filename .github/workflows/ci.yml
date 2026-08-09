@@ -61,15 +61,17 @@ jobs:
           p.write_text(text.replace(old, new, 1))
           PY
           python3 scripts/apply-narrow-viewer-controls-hotfix.py
+          python3 scripts/apply-ai-quality-expectation-hotfix.py
       - name: Remove temporary machinery and restore canonical CI
         shell: bash
         run: |
-          rm -f scripts/apply-translation-language-hotfix.py scripts/apply-translation-provider-current.py scripts/apply-narrow-viewer-controls-hotfix.py .github/workflows/translation-language-hotfix.yml
+          rm -f scripts/apply-translation-language-hotfix.py scripts/apply-translation-provider-current.py scripts/apply-narrow-viewer-controls-hotfix.py scripts/apply-ai-quality-expectation-hotfix.py .github/workflows/translation-language-hotfix.yml
           git fetch origin master --depth=1
           git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
       - name: Targeted regressions
         run: |
           npm run test:translation-language-hardening
+          npm run test:ai-quality-ui
           node --check src/content-filter/language.js
           node --check src/ai/provider.js
           node --check src/ai/processor.js
@@ -89,7 +91,7 @@ jobs:
           printf '%s\n' "$changed"
           for path in $changed; do
             case "$path" in
-              SOURCE_SHA256SUMS.txt|SOURCE_SHA256SUMS.override.txt|package.json|public/assets/app.css|scripts/audit-responsive-layout.py|scripts/stage-compatibility-checks.mjs|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml|scripts/apply-translation-language-hotfix.py|scripts/apply-translation-provider-current.py|scripts/apply-narrow-viewer-controls-hotfix.py) ;;
+              SOURCE_SHA256SUMS.txt|SOURCE_SHA256SUMS.override.txt|package.json|public/assets/app.css|scripts/audit-responsive-layout.py|scripts/stage-compatibility-checks.mjs|scripts/test-ai-quality-ui-refinement.mjs|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml|scripts/apply-translation-language-hotfix.py|scripts/apply-translation-provider-current.py|scripts/apply-narrow-viewer-controls-hotfix.py|scripts/apply-ai-quality-expectation-hotfix.py) ;;
               *) echo "unexpected changed path: $path" >&2; exit 1 ;;
             esac
           done
