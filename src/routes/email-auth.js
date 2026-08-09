@@ -366,18 +366,34 @@ async function handleResetRequest(request, env, ctx) {
   const now = new Date();
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + RESET_TTL_MS).toISOString();
+  const resetId = makeId("prt");
   await env.DB_V2.batch([
     env.DB_V2.prepare(
       `UPDATE password_reset_tokens SET revoked_at = ?1
-       WHERE user_id = ?2 AND used_at IS NULL AND revoked_at IS NULL`
-    ).bind(nowIso, user.id),
+       WHERE user_id = ?2 AND used_at IS NULL AND revoked_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM users u
+           WHERE u.id = ?2 AND u.email = ?3 COLLATE NOCASE
+             AND u.email_verified_at IS NOT NULL AND u.status = 'active'
+         )`
+    ).bind(nowIso, user.id, email),
     env.DB_V2.prepare(
       `INSERT INTO password_reset_tokens (
          id, user_id, token_hash, created_by_user_id, created_at, expires_at,
          used_at, revoked_at, email_snapshot, delivery_requested_at
-       ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, NULL, NULL, ?6, ?4)`
-    ).bind(makeId("prt"), user.id, tokenHash, nowIso, expiresAt, email)
+       )
+       SELECT ?1, ?2, ?3, NULL, ?4, ?5, NULL, NULL, ?6, ?4
+       FROM users u
+       WHERE u.id = ?2 AND u.email = ?6 COLLATE NOCASE
+         AND u.email_verified_at IS NOT NULL AND u.status = 'active'`
+    ).bind(resetId, user.id, tokenHash, nowIso, expiresAt, email)
   ]);
+  const created = await env.DB_V2.prepare(
+    `SELECT 1 AS found FROM password_reset_tokens
+     WHERE id = ?1 AND user_id = ?2 AND token_hash = ?3
+       AND used_at IS NULL AND revoked_at IS NULL LIMIT 1`
+  ).bind(resetId, user.id, tokenHash).first();
+  if (!created) return authJson(ACCEPTED, 202);
   schedule(ctx, sendPasswordReset(env, { email, rawToken, requestId: makeId("req") }));
   return authJson(ACCEPTED, 202);
 }

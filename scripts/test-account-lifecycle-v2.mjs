@@ -180,6 +180,25 @@ async function testEmailIdentityInvariants() {
     check("previous email-change token remains usable after a failed replacement",
       response.status === 200 && (await response.json()).email === "preserve-valid@example.com");
 
+    const resetRace = await register(h, "reset-write-race@example.com", "Reset Write Race");
+    const resetEmailsBefore = h.emails.length;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("INSERT INTO password_reset_tokens"))) return false;
+      const changedAt = new Date().toISOString();
+      h.sqlite.prepare("UPDATE users SET email = ?, email_updated_at = ?, updated_at = ? WHERE id = ?")
+        .run("reset-write-race-changed@example.com", changedAt, changedAt, resetRace.data.user.id);
+      return true;
+    };
+    response = await h.api("/api/auth/password/reset/request", {
+      method: "POST",
+      body: { email: "reset-write-race@example.com", turnstileToken: "test-turnstile" }
+    });
+    check("password reset remains enumeration-safe when identity changes after precheck", response.status === 202);
+    await h.drain();
+    check("write-time password reset conflict sends no dead email or token",
+      h.emails.length === resetEmailsBefore
+        && h.row("SELECT COUNT(*) AS count FROM password_reset_tokens WHERE user_id = ?1", resetRace.data.user.id)?.count === 0);
+
     response = await h.api("/api/auth/email-change/request", {
       method: "POST", auth: owner,
       body: { newEmail: "expired-reservation@example.com", currentPassword: PASSWORD }
