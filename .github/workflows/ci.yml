@@ -33,27 +33,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Execute embedded translation patch
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          import re
-          workflow = Path('.github/workflows/translation-language-hotfix.yml').read_text()
-          match = re.search(r"python3 <<'PY'\n(.*?)\n          PY", workflow, re.S)
-          if not match:
-              raise SystemExit('embedded patch body not found')
-          lines = match.group(1).splitlines()
-          body = "\n".join(re.sub(r"^          ", "", line) for line in lines)
-          exec(compile(body, 'translation-language-hotfix', 'exec'), {})
-          PY
+      - name: Apply translation hardening
+        run: python3 scripts/apply-translation-language-hotfix.py
 
-      - name: Restore canonical CI definition
+      - name: Remove temporary patch machinery and restore canonical CI
         shell: bash
         run: |
+          rm -f scripts/apply-translation-language-hotfix.py
+          rm -f .github/workflows/translation-language-hotfix.yml
           git fetch origin master --depth=1
           git show origin/master:.github/workflows/ci.yml > .github/workflows/ci.yml
-          test ! -e .github/workflows/translation-language-hotfix.yml
 
       - name: Targeted translation regression
         run: |
@@ -81,6 +70,7 @@ jobs:
         run: |
           git status --short
           test ! -e .github/workflows/translation-language-hotfix.yml
+          test ! -e scripts/apply-translation-language-hotfix.py
           git diff --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -89,7 +79,7 @@ jobs:
           printf '%s\n' "$changed"
           for path in $changed; do
             case "$path" in
-              SOURCE_SHA256SUMS.txt|package.json|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider-base.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml) ;;
+              SOURCE_SHA256SUMS.txt|package.json|scripts/test-translation-language-hardening.mjs|src/ai/processor.js|src/ai/provider-base.js|src/ai/repository.js|src/content-filter/language.js|.github/workflows/ci.yml|.github/workflows/translation-language-hotfix.yml|scripts/apply-translation-language-hotfix.py) ;;
               *) echo "unexpected changed path: $path" >&2; exit 1 ;;
             esac
           done
