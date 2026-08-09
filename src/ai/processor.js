@@ -1,5 +1,6 @@
 import { AuthError } from "../auth/errors.js";
 import { appendRealtimeEvent } from "../realtime/repository.js";
+import { dispatchRealtimeEvent } from "../realtime/dispatch.js";
 import { translationCommentPayload } from "./repository.js";
 import { evaluateTranslationFilter } from "../content-filter/repository.js";
 import { inspectCommentPrivacy } from "./privacy.js";
@@ -319,7 +320,7 @@ export async function processAiJob(env, jobId, options = {}) {
     const code = String(error?.aiCode || error?.code || "AI_PROVIDER_FAILED").slice(0, 80);
     const retryable = shouldRetryAiJob(job, error, code);
     const failed = await failOrRetryAiJob(env.DB_V2, job, code, retryable, now);
-    if (failed.retry && job.job_type === "translation" && Number(job.attempt_count) === 1 && isTranslationBackpressure(code)) {
+    if (failed.retry && job.job_type === "translation" && Number(job.attempt_count) === 1 && isTranslationDelay(code)) {
       await dispatchTranslationUnavailable(env, job, "TRANSLATION_DELAYED", now);
     } else if (!failed.retry && job.job_type === "translation") {
       await dispatchTranslationUnavailable(env, job, code, now);
@@ -359,23 +360,7 @@ async function dispatchTranslationUnavailable(env, job, reason, now = Date.now()
 }
 
 async function dispatchTranslationRealtime(env, sessionId, event) {
-  if (!event || !env?.COMMENT_ROOM) return false;
-  try {
-    const stub = env.COMMENT_ROOM.get(env.COMMENT_ROOM.idFromName(sessionId));
-    const response = await stub.fetch("https://comment-room/event", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-realtime-internal": "true" },
-      body: JSON.stringify({
-        organizationId: event.organizationId,
-        liveSessionId: event.liveSessionId,
-        sequence: event.sequence
-      })
-    });
-    return response.ok;
-  } catch (error) {
-    console.error("AI realtime dispatch failed", safeCode(error));
-    return false;
-  }
+  return dispatchRealtimeEvent(env, sessionId, event, false);
 }
 
 function normalizeJobId(value) {
@@ -396,12 +381,22 @@ function parseFilterContext(value) {
 function shouldRetryAiJob(job, error, code) {
   if (!error?.retryable) return false;
   if (job?.job_type !== "translation") return true;
-  return code === "AI_PERSISTENCE_FAILED"
-    || code === "AI_PROVIDER_RATE_LIMITED";
+  return new Set([
+    "AI_PERSISTENCE_FAILED",
+    "AI_PROVIDER_RATE_LIMITED",
+    "AI_PROVIDER_TIMEOUT",
+    "AI_PROVIDER_UNAVAILABLE",
+    "AI_PROVIDER_FAILED"
+  ]).has(code);
 }
 
-function isTranslationBackpressure(code) {
-  return code === "AI_PROVIDER_RATE_LIMITED";
+function isTranslationDelay(code) {
+  return new Set([
+    "AI_PROVIDER_RATE_LIMITED",
+    "AI_PROVIDER_TIMEOUT",
+    "AI_PROVIDER_UNAVAILABLE",
+    "AI_PROVIDER_FAILED"
+  ]).has(code);
 }
 
 function safeCode(error) {

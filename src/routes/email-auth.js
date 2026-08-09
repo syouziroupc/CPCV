@@ -15,7 +15,7 @@ import {
 import { createSessionMaterial } from "../auth/sessions.js";
 import { internalLoginId, normalizeEmail, normalizeOrganizationName, requireEmail } from "../auth/email.js";
 import { requireTurnstile } from "../auth/turnstile.js";
-import { consumePublicEmailRateLimit } from "../auth/public-auth-rate.js";
+import { consumePublicEmailRequestRateLimit, consumeRecipientEmailRateLimit } from "../auth/public-auth-rate.js";
 import { sendPasswordReset, sendRegistrationVerification } from "../auth/email-service.js";
 
 const REGISTRATION_TTL_MS = 24 * 60 * 60 * 1000;
@@ -54,7 +54,16 @@ async function handleRegistrationRequest(request, env, ctx) {
   const organizationName = personalWorkspaceName(displayName);
   requireValidPassword(password, email);
   await requireTurnstile(request, env, input.turnstileToken);
-  await consumePublicEmailRateLimit(request, env, email, "registration");
+  await consumePublicEmailRequestRateLimit(request, env, "registration");
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const activePending = await env.DB_V2.prepare(
+    `SELECT id FROM pending_registrations
+     WHERE email = ?1 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL
+       AND expires_at > ?2
+     LIMIT 1`
+  ).bind(email, nowIso).first();
 
   const salt = createSalt();
   let passwordHash;
@@ -67,26 +76,61 @@ async function handleRegistrationRequest(request, env, ctx) {
   const existing = await env.DB_V2.prepare(
     `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
   ).bind(email).first();
-  if (existing) return authJson(ACCEPTED, 202);
+  if (existing) {
+    await env.DB_V2.prepare(
+      `UPDATE pending_registrations SET revoked_at = ?1
+       WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
+    ).bind(nowIso, email).run();
+    return authJson(ACCEPTED, 202);
+  }
+  if (activePending) return authJson(ACCEPTED, 202);
+  if (await registrationEmailUnavailable(env.DB_V2, email, nowIso)) return authJson(ACCEPTED, 202);
+  await consumeRecipientEmailRateLimit(env, email);
 
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
-  const now = new Date();
-  const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + REGISTRATION_TTL_MS).toISOString();
   const id = makeId("reg");
   try {
     await env.DB_V2.batch([
       env.DB_V2.prepare(
+        `UPDATE email_change_requests SET revoked_at = ?1
+         WHERE new_email = ?2 COLLATE NOCASE
+           AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at <= ?1`
+      ).bind(nowIso, email),
+      env.DB_V2.prepare(
+        `UPDATE email_enrollment_requests SET revoked_at = ?1
+         WHERE new_email = ?2 COLLATE NOCASE
+           AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at <= ?1`
+      ).bind(nowIso, email),
+      env.DB_V2.prepare(
         `UPDATE pending_registrations SET revoked_at = ?1
-         WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
+         WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL
+           AND expires_at <= ?1`
       ).bind(nowIso, email),
       env.DB_V2.prepare(
         `INSERT INTO pending_registrations (
            id, email, display_name, organization_name,
            password_scheme, password_hash, password_salt, token_hash,
            created_at, expires_at, verified_at, revoked_at, last_sent_at, resend_count
-         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, NULL, ?9, 0)`
+         )
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL, NULL, ?9, 0
+         WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?2 COLLATE NOCASE)
+           AND NOT EXISTS (
+             SELECT 1 FROM pending_registrations p
+             WHERE p.email = ?2 COLLATE NOCASE
+               AND p.verified_at IS NULL AND p.revoked_at IS NULL AND p.expires_at > ?9
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM email_change_requests c
+             WHERE c.new_email = ?2 COLLATE NOCASE
+               AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?9
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM email_enrollment_requests e
+             WHERE e.new_email = ?2 COLLATE NOCASE
+               AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?9
+           )`
       ).bind(id, email, displayName, organizationName, PASSWORD_SCHEME, passwordHash, salt, tokenHash, nowIso, expiresAt)
     ]);
   } catch (error) {
@@ -94,6 +138,11 @@ async function handleRegistrationRequest(request, env, ctx) {
     console.error("Registration persistence failed", safeErrorCode(error));
     throw new AuthError(503, "REGISTRATION_PERSISTENCE_UNAVAILABLE", { expose: true });
   }
+  const created = await env.DB_V2.prepare(
+    `SELECT 1 AS found FROM pending_registrations
+     WHERE id = ?1 AND verified_at IS NULL AND revoked_at IS NULL LIMIT 1`
+  ).bind(id).first();
+  if (!created) return authJson(ACCEPTED, 202);
   const requestId = makeId("req");
   schedule(ctx, sendRegistrationVerification(env, { email, rawToken, requestId }));
   return authJson(ACCEPTED, 202);
@@ -105,7 +154,7 @@ async function handleRegistrationResend(request, env, ctx) {
   assertOnlyFields(input, ["email", "turnstileToken"]);
   const email = requireEmail(input.email);
   await requireTurnstile(request, env, input.turnstileToken);
-  await consumePublicEmailRateLimit(request, env, email, "registration-resend");
+  await consumePublicEmailRequestRateLimit(request, env, "registration-resend");
   const now = new Date();
   const nowIso = now.toISOString();
   const pending = await env.DB_V2.prepare(
@@ -115,16 +164,35 @@ async function handleRegistrationResend(request, env, ctx) {
      LIMIT 1`
   ).bind(email).first();
   if (!pending || Date.parse(pending.expires_at) <= now.getTime()) return authJson(ACCEPTED, 202);
+  if (await registrationEmailUnavailable(env.DB_V2, email, nowIso)) {
+    await env.DB_V2.prepare(
+      `UPDATE pending_registrations SET revoked_at = ?1
+       WHERE id = ?2 AND verified_at IS NULL AND revoked_at IS NULL`
+    ).bind(nowIso, pending.id).run();
+    return authJson(ACCEPTED, 202);
+  }
   if (Date.parse(pending.last_sent_at) > now.getTime() - 60_000) {
     throw new AuthError(429, "RATE_LIMITED", { headers: { "retry-after": "60" } });
   }
+  await consumeRecipientEmailRateLimit(env, email);
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
   const result = await env.DB_V2.prepare(
     `UPDATE pending_registrations
      SET token_hash = ?1, last_sent_at = ?2, resend_count = resend_count + 1
-     WHERE id = ?3 AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?2`
-  ).bind(tokenHash, nowIso, pending.id).run();
+     WHERE id = ?3 AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+       AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = ?4 COLLATE NOCASE)
+       AND NOT EXISTS (
+         SELECT 1 FROM email_change_requests c
+         WHERE c.new_email = ?4 COLLATE NOCASE
+           AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?2
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM email_enrollment_requests e
+         WHERE e.new_email = ?4 COLLATE NOCASE
+           AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?2
+       )`
+  ).bind(tokenHash, nowIso, pending.id, email).run();
   if (Number(result?.meta?.changes || 0) === 1) {
     schedule(ctx, sendRegistrationVerification(env, { email, rawToken, requestId: makeId("req") }));
   }
@@ -160,7 +228,18 @@ async function handleRegistrationVerify(request, env) {
     await env.DB_V2.batch([
       env.DB_V2.prepare(
         `UPDATE pending_registrations SET verified_at = ?1
-         WHERE id = ?2 AND token_hash = ?3 AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?4`
+         WHERE id = ?2 AND token_hash = ?3 AND verified_at IS NULL AND revoked_at IS NULL AND expires_at > ?4
+           AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = pending_registrations.email COLLATE NOCASE)
+           AND NOT EXISTS (
+             SELECT 1 FROM email_change_requests c
+             WHERE c.new_email = pending_registrations.email COLLATE NOCASE
+               AND c.confirmed_at IS NULL AND c.revoked_at IS NULL AND c.expires_at > ?4
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM email_enrollment_requests e
+             WHERE e.new_email = pending_registrations.email COLLATE NOCASE
+               AND e.confirmed_at IS NULL AND e.revoked_at IS NULL AND e.expires_at > ?4
+           )`
       ).bind(claimMarker, pending.id, tokenHash, nowIso),
       env.DB_V2.prepare(
         `INSERT INTO users (
@@ -248,6 +327,13 @@ async function handleRegistrationVerify(request, env) {
      LIMIT 1`
   ).bind(pending.id, claimMarker, sessionId, userId, organizationId).first();
   if (!completed) {
+    const completedUser = await env.DB_V2.prepare(
+      `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
+    ).bind(pending.email).first();
+    if (completedUser) throw new AuthError(400, "REGISTRATION_ALREADY_COMPLETED");
+    if (await registrationEmailUnavailable(env.DB_V2, pending.email, nowIso)) {
+      throw new AuthError(409, "EMAIL_UNAVAILABLE");
+    }
     console.error("Registration verification completion invariant failed");
     throw new AuthError(400, "REGISTRATION_TOKEN_INVALID");
   }
@@ -283,7 +369,7 @@ async function handleResetRequest(request, env, ctx) {
   assertOnlyFields(input, ["email", "turnstileToken"]);
   const email = requireEmail(input.email);
   await requireTurnstile(request, env, input.turnstileToken);
-  await consumePublicEmailRateLimit(request, env, email, "password-reset");
+  await consumePublicEmailRequestRateLimit(request, env, "password-reset");
   const user = await env.DB_V2.prepare(
     `SELECT id, email FROM users
      WHERE email = ?1 COLLATE NOCASE AND email_verified_at IS NOT NULL AND status = 'active'
@@ -291,25 +377,66 @@ async function handleResetRequest(request, env, ctx) {
   ).bind(email).first();
   if (!user) return authJson(ACCEPTED, 202);
 
-  const rawToken = createToken();
-  const tokenHash = await hashToken(rawToken);
   const now = new Date();
   const nowIso = now.toISOString();
+  const recentReset = await env.DB_V2.prepare(
+    `SELECT id FROM password_reset_tokens
+     WHERE user_id = ?1 AND email_snapshot = ?2 COLLATE NOCASE
+       AND used_at IS NULL AND revoked_at IS NULL AND expires_at > ?3
+       AND delivery_requested_at > ?4
+     LIMIT 1`
+  ).bind(user.id, email, nowIso, new Date(now.getTime() - 60_000).toISOString()).first();
+  if (recentReset) return authJson(ACCEPTED, 202);
+  await consumeRecipientEmailRateLimit(env, email);
+  const rawToken = createToken();
+  const tokenHash = await hashToken(rawToken);
   const expiresAt = new Date(now.getTime() + RESET_TTL_MS).toISOString();
+  const resetId = makeId("prt");
   await env.DB_V2.batch([
     env.DB_V2.prepare(
       `UPDATE password_reset_tokens SET revoked_at = ?1
-       WHERE user_id = ?2 AND used_at IS NULL AND revoked_at IS NULL`
-    ).bind(nowIso, user.id),
+       WHERE user_id = ?2 AND used_at IS NULL AND revoked_at IS NULL
+         AND EXISTS (
+           SELECT 1 FROM users u
+           WHERE u.id = ?2 AND u.email = ?3 COLLATE NOCASE
+             AND u.email_verified_at IS NOT NULL AND u.status = 'active'
+         )`
+    ).bind(nowIso, user.id, email),
     env.DB_V2.prepare(
       `INSERT INTO password_reset_tokens (
          id, user_id, token_hash, created_by_user_id, created_at, expires_at,
          used_at, revoked_at, email_snapshot, delivery_requested_at
-       ) VALUES (?1, ?2, ?3, NULL, ?4, ?5, NULL, NULL, ?6, ?4)`
-    ).bind(makeId("prt"), user.id, tokenHash, nowIso, expiresAt, email)
+       )
+       SELECT ?1, ?2, ?3, NULL, ?4, ?5, NULL, NULL, ?6, ?4
+       FROM users u
+       WHERE u.id = ?2 AND u.email = ?6 COLLATE NOCASE
+         AND u.email_verified_at IS NOT NULL AND u.status = 'active'`
+    ).bind(resetId, user.id, tokenHash, nowIso, expiresAt, email)
   ]);
+  const created = await env.DB_V2.prepare(
+    `SELECT 1 AS found FROM password_reset_tokens
+     WHERE id = ?1 AND user_id = ?2 AND token_hash = ?3
+       AND used_at IS NULL AND revoked_at IS NULL LIMIT 1`
+  ).bind(resetId, user.id, tokenHash).first();
+  if (!created) return authJson(ACCEPTED, 202);
   schedule(ctx, sendPasswordReset(env, { email, rawToken, requestId: makeId("req") }));
   return authJson(ACCEPTED, 202);
+}
+
+async function registrationEmailUnavailable(db, email, nowIso = new Date().toISOString()) {
+  const row = await db.prepare(
+    `SELECT 1 AS found FROM users WHERE email = ?1 COLLATE NOCASE
+     UNION ALL
+     SELECT 1 AS found FROM email_change_requests
+     WHERE new_email = ?1 COLLATE NOCASE
+       AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+     UNION ALL
+     SELECT 1 AS found FROM email_enrollment_requests
+     WHERE new_email = ?1 COLLATE NOCASE
+       AND confirmed_at IS NULL AND revoked_at IS NULL AND expires_at > ?2
+     LIMIT 1`
+  ).bind(email, nowIso).first();
+  return Boolean(row);
 }
 
 function conditionalRegistrationAuditStatement(db, entry) {
@@ -344,7 +471,9 @@ function personalWorkspaceName(displayName) {
 }
 
 function schedule(ctx, promise) {
-  const guarded = Promise.resolve(promise).catch(() => undefined);
+  const guarded = Promise.resolve(promise).catch((error) => {
+    console.error("Background email task failed", safeErrorCode(error));
+  });
   if (typeof ctx?.waitUntil === "function") ctx.waitUntil(guarded);
   else return guarded;
 }

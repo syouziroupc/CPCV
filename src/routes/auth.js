@@ -376,7 +376,22 @@ async function handlePasswordChange(request, env) {
       targetType: "user",
       targetId: auth.userId,
       createdAt: nowIso
-    })
+    }),
+    env.DB_V2.prepare(
+      `UPDATE email_change_requests SET revoked_at = ?1
+       WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
+         AND EXISTS (SELECT 1 FROM users WHERE id = ?2 AND updated_at = ?3)`
+    ).bind(nowIso, auth.userId, changeMarker),
+    env.DB_V2.prepare(
+      `UPDATE email_enrollment_requests SET revoked_at = ?1
+       WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
+         AND EXISTS (SELECT 1 FROM users WHERE id = ?2 AND updated_at = ?3)`
+    ).bind(nowIso, auth.userId, changeMarker),
+    env.DB_V2.prepare(
+      `UPDATE pending_registrations SET revoked_at = ?1
+       WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL
+         AND EXISTS (SELECT 1 FROM users WHERE id = ?3 AND updated_at = ?4)`
+    ).bind(nowIso, user.email || "", auth.userId, changeMarker)
   ]);
   if (Number(changeResults?.[0]?.meta?.changes || 0) !== 1
       || Number(changeResults?.[3]?.meta?.changes || 0) !== 1) {
@@ -483,7 +498,22 @@ async function handlePasswordReset(request, env) {
       targetType: "user",
       targetId: record.user_id,
       createdAt: nowIso
-    })
+    }),
+    env.DB_V2.prepare(
+      `UPDATE email_change_requests SET revoked_at = ?1
+       WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
+         AND EXISTS (SELECT 1 FROM password_reset_tokens WHERE id = ?3 AND used_at = ?4)`
+    ).bind(nowIso, record.user_id, record.id, claimMarker),
+    env.DB_V2.prepare(
+      `UPDATE email_enrollment_requests SET revoked_at = ?1
+       WHERE user_id = ?2 AND confirmed_at IS NULL AND revoked_at IS NULL
+         AND EXISTS (SELECT 1 FROM password_reset_tokens WHERE id = ?3 AND used_at = ?4)`
+    ).bind(nowIso, record.user_id, record.id, claimMarker),
+    env.DB_V2.prepare(
+      `UPDATE pending_registrations SET revoked_at = ?1
+       WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL
+         AND EXISTS (SELECT 1 FROM password_reset_tokens WHERE id = ?3 AND used_at = ?4)`
+    ).bind(nowIso, record.email || "", record.id, claimMarker)
   ]);
   if (Number(results?.[0]?.meta?.changes || 0) !== 1
       || Number(results?.[1]?.meta?.changes || 0) !== 1) {

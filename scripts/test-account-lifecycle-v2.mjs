@@ -13,11 +13,568 @@ const results = [];
 async function main() {
   await testInvitationAndAccountLifecycle();
   await testInvitationAuthorizationAndQuotas();
+  await testMembershipAuthorizationRaces();
+  await testEmailIdentityInvariants();
+  await testCredentialChangeInvalidation();
   await testAccountDeletion();
   const passed = results.filter((x) => x.ok).length;
   const failed = results.length - passed;
   console.log(`\nStage 6.5 account lifecycle summary: ${passed} passed, ${failed} failed, ${results.length} total.`);
   if (failed) process.exitCode = 1;
+}
+
+async function testMembershipAuthorizationRaces() {
+  const h = createHarness();
+  try {
+    const owner = await register(h, "race-owner@example.com", "Race Owner");
+
+    let response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner, body: { email: "race-admin@example.com", role: "admin" }
+    });
+    check("authorization-race Admin invitation is created", response.status === 202);
+    await h.drain();
+    let token = tokenFromMessage(h.emails.at(-1), "accept-invitation");
+    response = await h.api("/api/auth/invitations/accept", {
+      method: "POST", body: { token, displayName: "Race Admin", password: PASSWORD }
+    });
+    const adminData = await response.json();
+    const admin = { data: adminData, cookie: cookieFrom(response), csrf: adminData.csrfToken };
+    check("authorization-race Admin account is active", response.status === 201 && adminData.organization.role === "admin");
+
+    async function inviteTeacher(email, displayName) {
+      let r = await h.api("/api/org/invitations", {
+        method: "POST", auth: owner, body: { email, role: "teacher" }
+      });
+      if (r.status !== 202) throw new Error(`teacher invitation failed ${r.status}`);
+      await h.drain();
+      const inviteToken = tokenFromMessage(h.emails.at(-1), "accept-invitation");
+      r = await h.api("/api/auth/invitations/accept", {
+        method: "POST", body: { token: inviteToken, displayName, password: PASSWORD }
+      });
+      const data = await r.json();
+      if (r.status !== 201) throw new Error(`teacher acceptance failed ${r.status}: ${JSON.stringify(data)}`);
+      return data;
+    }
+
+    const updateTarget = await inviteTeacher("race-update@example.com", "Race Update Teacher");
+    const updateTargetId = updateTarget.user.id;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("UPDATE organization_members")
+          && statement.sql.includes("SET role = ?1, status = ?2"))) return false;
+      const changedAt = new Date(Date.now() + 5000).toISOString();
+      h.sqlite.prepare(
+        "UPDATE organization_members SET role = 'admin', updated_at = ? WHERE organization_id = ? AND user_id = ?"
+      ).run(changedAt, owner.data.organization.id, updateTargetId);
+      return true;
+    };
+    response = await h.api(`/api/org/members/${encodeURIComponent(updateTargetId)}`, {
+      method: "PATCH", auth: admin, body: { status: "suspended" }
+    });
+    check("stale Admin member update is rejected after concurrent Teacher-to-Admin promotion", response.status === 409,
+      await response.clone().json());
+    const afterUpdateRace = h.row(
+      "SELECT role,status FROM organization_members WHERE organization_id = ?1 AND user_id = ?2",
+      owner.data.organization.id, updateTargetId
+    );
+    check("stale member update cannot overwrite the concurrent promotion",
+      afterUpdateRace?.role === "admin" && afterUpdateRace?.status === "active", afterUpdateRace);
+
+    const deleteTarget = await inviteTeacher("race-delete@example.com", "Race Delete Teacher");
+    const deleteTargetId = deleteTarget.user.id;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("UPDATE organization_members")
+          && statement.sql.includes("SET role = ?1, status = ?2"))) return false;
+      const changedAt = new Date(Date.now() + 6000).toISOString();
+      h.sqlite.prepare(
+        "UPDATE organization_members SET role = 'admin', updated_at = ? WHERE organization_id = ? AND user_id = ?"
+      ).run(changedAt, owner.data.organization.id, deleteTargetId);
+      return true;
+    };
+    response = await h.api(`/api/org/members/${encodeURIComponent(deleteTargetId)}`, {
+      method: "DELETE", auth: admin, body: {}
+    });
+    check("stale Admin member removal is rejected after concurrent Teacher-to-Admin promotion", response.status === 409,
+      await response.clone().json());
+    const afterDeleteRace = h.row(
+      "SELECT role,status FROM organization_members WHERE organization_id = ?1 AND user_id = ?2",
+      owner.data.organization.id, deleteTargetId
+    );
+    check("stale member removal cannot remove the concurrently promoted Admin",
+      afterDeleteRace?.role === "admin" && afterDeleteRace?.status === "active", afterDeleteRace);
+
+    const resetTarget = await inviteTeacher("race-reset@example.com", "Race Reset Teacher");
+    const resetTargetId = resetTarget.user.id;
+    const emailsBeforeResetRace = h.emails.length;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("INSERT INTO password_reset_tokens"))) return false;
+      const changedAt = new Date(Date.now() + 7000).toISOString();
+      h.sqlite.prepare(
+        "UPDATE organization_members SET role = 'admin', updated_at = ? WHERE organization_id = ? AND user_id = ?"
+      ).run(changedAt, owner.data.organization.id, resetTargetId);
+      return true;
+    };
+    response = await h.api(`/api/org/members/${encodeURIComponent(resetTargetId)}/password-reset`, {
+      method: "POST", auth: admin, body: {}
+    });
+    const resetRaceBody = await response.clone().json();
+    check("manager reset revalidates target role at token-write time",
+      response.status === 403 && resetRaceBody.error === "ROLE_FORBIDDEN", resetRaceBody);
+    await h.drain();
+    check("lost manager-reset authorization creates no reset token or email",
+      h.emails.length === emailsBeforeResetRace
+        && h.row("SELECT COUNT(*) AS count FROM password_reset_tokens WHERE user_id = ?1", resetTargetId)?.count === 0);
+  } finally { h.close(); }
+}
+
+async function testEmailIdentityInvariants() {
+  const h = createHarness();
+  try {
+    const owner = await register(h, "identity-owner@example.com", "Identity Owner");
+
+    const duplicateEmail = "duplicate-registration@example.com";
+    let response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: { email: duplicateEmail, displayName: "Duplicate Registration", password: PASSWORD,
+        turnstileToken: "test-turnstile" }
+    });
+    check("duplicate-registration fixture is accepted", response.status === 202);
+    await h.drain();
+    const duplicateRegistrationToken = tokenFromMessage(h.emails.at(-1), "verify-email");
+    const duplicateRegistrationHash = await hashToken(duplicateRegistrationToken);
+    const duplicateBefore = h.row(
+      `SELECT display_name, organization_name, password_hash, password_salt, token_hash
+       FROM pending_registrations WHERE email = ?1 AND revoked_at IS NULL`, duplicateEmail
+    );
+    const duplicateEmailsBefore = h.emails.length;
+    response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: {
+        email: duplicateEmail,
+        displayName: "Different Registration Attempt",
+        password: "Different-Registration-Password-456",
+        turnstileToken: "test-turnstile"
+      }
+    });
+    check("active pending registration remains enumeration-safe on a conflicting repeat", response.status === 202);
+    await h.drain();
+    const duplicateAfter = h.row(
+      `SELECT display_name, organization_name, password_hash, password_salt, token_hash
+       FROM pending_registrations WHERE email = ?1 AND revoked_at IS NULL`, duplicateEmail
+    );
+    check("conflicting repeat cannot replace pending registration identity, password, or token",
+      h.emails.length === duplicateEmailsBefore
+        && duplicateAfter?.token_hash === duplicateRegistrationHash
+        && duplicateAfter?.token_hash === duplicateBefore?.token_hash
+        && duplicateAfter?.display_name === duplicateBefore?.display_name
+        && duplicateAfter?.organization_name === duplicateBefore?.organization_name
+        && duplicateAfter?.password_hash === duplicateBefore?.password_hash
+        && duplicateAfter?.password_salt === duplicateBefore?.password_salt,
+      { duplicateBefore, duplicateAfter, emailsBefore: duplicateEmailsBefore, emailsAfter: h.emails.length });
+
+    const registrationRaceEmail = "registration-write-race@example.com";
+    const registrationRaceEmailsBefore = h.emails.length;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("INSERT INTO pending_registrations"))) return false;
+      const source = h.row(
+        `SELECT password_scheme,password_hash,password_salt FROM pending_registrations
+         WHERE email = ?1 AND revoked_at IS NULL`, duplicateEmail
+      );
+      const raceNow = new Date().toISOString();
+      const raceExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      h.sqlite.prepare(`INSERT INTO pending_registrations
+        (id,email,display_name,organization_name,password_scheme,password_hash,password_salt,token_hash,
+         created_at,expires_at,verified_at,revoked_at,last_sent_at,resend_count)
+        VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,0)`)
+        .run("reg_write_race_winner", registrationRaceEmail, "First Registration Writer",
+          "First Registration Workspace", source.password_scheme, source.password_hash, source.password_salt,
+          "registration_write_race_hash", raceNow, raceExpiry, raceNow);
+      return true;
+    };
+    response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: {
+        email: registrationRaceEmail,
+        displayName: "Second Registration Writer",
+        password: "Second-Registration-Password-789",
+        turnstileToken: "test-turnstile"
+      }
+    });
+    check("concurrent registration remains enumeration-safe when another claimant commits first", response.status === 202);
+    await h.drain();
+    const registrationRaceWinner = h.row(
+      `SELECT id,display_name,organization_name,token_hash FROM pending_registrations
+       WHERE email = ?1 AND revoked_at IS NULL`, registrationRaceEmail
+    );
+    check("second registration cannot revoke or replace a concurrently committed pending identity",
+      h.emails.length === registrationRaceEmailsBefore
+        && registrationRaceWinner?.id === "reg_write_race_winner"
+        && registrationRaceWinner?.display_name === "First Registration Writer"
+        && registrationRaceWinner?.organization_name === "First Registration Workspace"
+        && registrationRaceWinner?.token_hash === "registration_write_race_hash",
+      registrationRaceWinner);
+
+    response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: {
+        email: "pending-claim@example.com",
+        displayName: "Pending Claim",
+        password: PASSWORD,
+        turnstileToken: "test-turnstile"
+      }
+    });
+    check("pending registration can be created for identity conflict test", response.status === 202);
+    await h.drain();
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "pending-claim@example.com", currentPassword: PASSWORD }
+    });
+    check("email change rejects an address reserved by pending registration",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+
+    const legacyConflictEmail = "legacy-pending-owner@example.com";
+    response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: { email: legacyConflictEmail, displayName: "Foreign Pending", password: "Foreign-Pending-Password-999",
+        turnstileToken: "test-turnstile" }
+    });
+    check("foreign pending registration fixture is created", response.status === 202);
+    await h.drain();
+    const foreignPendingBefore = h.row(
+      "SELECT id,revoked_at FROM pending_registrations WHERE email = ?1 AND verified_at IS NULL", legacyConflictEmail
+    );
+    const ownerEmailBeforeLegacyConflict = h.row(
+      "SELECT email,email_verified_at FROM users WHERE id = ?1", owner.data.user.id
+    );
+    const legacyMutationAt = new Date(Date.now() + 1000).toISOString();
+    h.sqlite.prepare(
+      "UPDATE users SET email = ?1, email_verified_at = NULL, email_updated_at = ?2, updated_at = ?2 WHERE id = ?3"
+    ).run(legacyConflictEmail, legacyMutationAt, owner.data.user.id);
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: legacyConflictEmail, currentPassword: PASSWORD }
+    });
+    const legacyConflictBody = await response.clone().json();
+    const foreignPendingAfter = h.row(
+      "SELECT id,revoked_at FROM pending_registrations WHERE email = ?1 AND verified_at IS NULL", legacyConflictEmail
+    );
+    check("unverified existing account cannot steal a foreign pending registration",
+      response.status === 409 && legacyConflictBody.error === "EMAIL_UNAVAILABLE"
+        && foreignPendingAfter?.id === foreignPendingBefore?.id && foreignPendingAfter?.revoked_at === null,
+      { legacyConflictBody, foreignPendingBefore, foreignPendingAfter });
+    const restoreAt = new Date(Date.now() + 2000).toISOString();
+    h.sqlite.prepare(
+      "UPDATE users SET email = ?1, email_verified_at = ?2, email_updated_at = ?3, updated_at = ?3 WHERE id = ?4"
+    ).run(ownerEmailBeforeLegacyConflict.email, ownerEmailBeforeLegacyConflict.email_verified_at,
+      restoreAt, owner.data.user.id);
+
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner,
+      body: { email: "pending-claim@example.com", role: "teacher" }
+    });
+    const pendingInvite = await response.json();
+    check("pending self-registration can receive an organization invitation", response.status === 202, pendingInvite);
+    await h.drain();
+    const pendingInviteToken = tokenFromMessage(h.emails.at(-1), "accept-invitation");
+    response = await h.api("/api/auth/invitations/accept", {
+      method: "POST",
+      body: { token: pendingInviteToken, displayName: "Pending Claim", password: PASSWORD }
+    });
+    check("invitation may complete the identity before self-registration", response.status === 201, await response.clone().json());
+    check("invitation-created identity revokes the stale self-registration",
+      Boolean(h.row("SELECT revoked_at FROM pending_registrations WHERE email = 'pending-claim@example.com'")?.revoked_at));
+
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "reserved-change@example.com", currentPassword: PASSWORD }
+    });
+    check("email change reserves its target address", response.status === 202);
+    await h.drain();
+    const originalChangeToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
+    const originalChangeHash = await hashToken(originalChangeToken);
+    const emailsBeforeDuplicateChange = h.emails.length;
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "reserved-change@example.com", currentPassword: PASSWORD }
+    });
+    check("rapid exact email-change duplicate is idempotent", response.status === 202);
+    await h.drain();
+    check("rapid exact email-change duplicate preserves token and sends no second email",
+      h.emails.length === emailsBeforeDuplicateChange
+        && h.row("SELECT token_hash FROM email_change_requests WHERE user_id = ?1 AND revoked_at IS NULL", owner.data.user.id)?.token_hash === originalChangeHash);
+    const emailsBeforeBlockedRegistration = h.emails.length;
+    response = await h.api("/api/auth/registration/request", {
+      method: "POST",
+      body: {
+        email: "reserved-change@example.com",
+        displayName: "Should Not Register",
+        password: PASSWORD,
+        turnstileToken: "test-turnstile"
+      }
+    });
+    check("self-registration against an email-change reservation stays enumeration-safe", response.status === 202);
+    await h.drain();
+    check("reserved email does not create a competing pending registration or send verification",
+      h.emails.length === emailsBeforeBlockedRegistration
+        && h.row("SELECT COUNT(*) AS count FROM pending_registrations WHERE email = 'reserved-change@example.com' AND verified_at IS NULL AND revoked_at IS NULL")?.count === 0);
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner,
+      body: { email: "reserved-change@example.com", role: "teacher" }
+    });
+    check("organization invitation cannot override an active email-change reservation",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+
+    const second = await register(h, "identity-second@example.com", "Identity Second");
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "identity-second@example.com", currentPassword: PASSWORD }
+    });
+    const registeredTargetBody = await response.clone().json();
+    check("email change rejects an address already owned by another account",
+      response.status === 409 && registeredTargetBody.error === "EMAIL_UNAVAILABLE", registeredTargetBody);
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner,
+      body: { email: "invite-race@example.com", role: "teacher" }
+    });
+    const raceInvite = await response.json();
+    check("invitation race fixture is created", response.status === 202, raceInvite);
+    await h.drain();
+    const raceInviteToken = tokenFromMessage(h.emails.at(-1), "accept-invitation");
+    const raceInviteHash = await hashToken(raceInviteToken);
+    const inviteEmailsBeforeDuplicate = h.emails.length;
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner,
+      body: { email: "invite-race@example.com", role: "teacher" }
+    });
+    const duplicateInvite = await response.json();
+    check("rapid exact invitation duplicate is idempotent",
+      response.status === 202 && duplicateInvite.invitationId === raceInvite.invitationId, duplicateInvite);
+    await h.drain();
+    check("rapid exact invitation duplicate preserves token and sends no second email",
+      h.emails.length === inviteEmailsBeforeDuplicate
+        && h.row("SELECT token_hash FROM organization_invitations WHERE id = ?1", raceInvite.invitationId)?.token_hash === raceInviteHash);
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: second,
+      body: { newEmail: "invite-race@example.com", currentPassword: PASSWORD }
+    });
+    check("existing account can reserve an address after an invitation was issued", response.status === 202);
+    response = await h.api("/api/auth/invitations/accept", {
+      method: "POST",
+      body: { token: raceInviteToken, displayName: "Race Invite", password: PASSWORD }
+    });
+    check("invitation acceptance cannot steal a later account-change reservation",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+    const emailsBeforeBlockedResend = h.emails.length;
+    response = await h.api(`/api/org/invitations/${raceInvite.invitationId}/resend`, {
+      method: "POST", auth: owner, body: {}
+    });
+    check("invitation resend refuses a target now reserved by an account change",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+    await h.drain();
+    check("blocked invitation resend sends no useless email", h.emails.length === emailsBeforeBlockedResend);
+
+    const writeRaceAccount = await register(h, "write-race-owner@example.com", "Write Race Owner");
+    const inviteWriteRaceEmail = "invite-write-race@example.com";
+    const inviteEmailsBeforeRace = h.emails.length;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("INSERT INTO organization_invitations"))) return false;
+      const row = h.row("SELECT email FROM users WHERE id = ?1", writeRaceAccount.data.user.id);
+      const raceNow = new Date().toISOString();
+      const raceExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      h.sqlite.prepare(`INSERT INTO email_change_requests
+        (id,user_id,old_email,new_email,token_hash,created_at,expires_at,confirmed_at,revoked_at)
+        VALUES (?,?,?,?,?,?,?,NULL,NULL)`)
+        .run("emc_write_race", writeRaceAccount.data.user.id, row.email, inviteWriteRaceEmail,
+          "write_race_token_hash", raceNow, raceExpiry);
+      return true;
+    };
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: owner,
+      body: { email: inviteWriteRaceEmail, role: "teacher" }
+    });
+    check("invitation creation rechecks target availability at write time",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+    await h.drain();
+    check("write-time invitation conflict creates no dead invite or email",
+      h.emails.length === inviteEmailsBeforeRace
+        && h.row("SELECT COUNT(*) AS count FROM organization_invitations WHERE email = ?1", inviteWriteRaceEmail)?.count === 0);
+
+    const preserveOwner = await register(h, "preserve-change-owner@example.com", "Preserve Change Owner");
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: preserveOwner,
+      body: { newEmail: "preserve-valid@example.com", currentPassword: PASSWORD }
+    });
+    check("preservation fixture email change requested", response.status === 202);
+    await h.drain();
+    const preserveToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
+    const preserveRow = h.row("SELECT id FROM email_change_requests WHERE user_id = ?1 AND revoked_at IS NULL", preserveOwner.data.user.id);
+    const conflictEmail = "change-write-race@example.com";
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("INSERT INTO email_change_requests"))) return false;
+      const source = h.row("SELECT password_scheme,password_hash,password_salt FROM users WHERE id = ?1", preserveOwner.data.user.id);
+      const raceNow = new Date().toISOString();
+      const raceExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+      h.sqlite.prepare(`INSERT INTO pending_registrations
+        (id,email,display_name,organization_name,password_scheme,password_hash,password_salt,token_hash,
+         created_at,expires_at,verified_at,revoked_at,last_sent_at,resend_count)
+        VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,0)`)
+        .run("reg_change_write_race", conflictEmail, "Race Pending", "Race Pending Workspace",
+          source.password_scheme, source.password_hash, source.password_salt, "change_write_race_token_hash",
+          raceNow, raceExpiry, raceNow);
+      return true;
+    };
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: preserveOwner,
+      body: { newEmail: conflictEmail, currentPassword: PASSWORD }
+    });
+    check("email change detects a target claimed after its precheck",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+    check("failed replacement does not revoke the previous valid email-change request",
+      h.row("SELECT revoked_at FROM email_change_requests WHERE id = ?1", preserveRow.id)?.revoked_at === null);
+    response = await h.api("/api/auth/email-change/confirm", { method: "POST", body: { token: preserveToken } });
+    check("previous email-change token remains usable after a failed replacement",
+      response.status === 200 && (await response.json()).email === "preserve-valid@example.com");
+
+    const duplicateReset = await register(h, "duplicate-reset@example.com", "Duplicate Reset");
+    let resetResponse = await h.api("/api/auth/password/reset/request", {
+      method: "POST", body: { email: "duplicate-reset@example.com", turnstileToken: "test-turnstile" }
+    });
+    check("password-reset duplicate fixture is accepted", resetResponse.status === 202);
+    await h.drain();
+    const resetTokenHashBefore = h.row("SELECT token_hash FROM password_reset_tokens WHERE user_id = ?1 AND revoked_at IS NULL", duplicateReset.data.user.id)?.token_hash;
+    const resetDuplicateEmailsBefore = h.emails.length;
+    resetResponse = await h.api("/api/auth/password/reset/request", {
+      method: "POST", body: { email: "duplicate-reset@example.com", turnstileToken: "test-turnstile" }
+    });
+    check("rapid exact password-reset duplicate is idempotent", resetResponse.status === 202);
+    await h.drain();
+    check("rapid exact password-reset duplicate preserves token and sends no second email",
+      h.emails.length === resetDuplicateEmailsBefore
+        && h.row("SELECT token_hash FROM password_reset_tokens WHERE user_id = ?1 AND revoked_at IS NULL", duplicateReset.data.user.id)?.token_hash === resetTokenHashBefore);
+
+    const resetRace = await register(h, "reset-write-race@example.com", "Reset Write Race");
+    const resetEmailsBefore = h.emails.length;
+    h.db.beforeBatch = (statements) => {
+      if (!statements.some((statement) => statement.sql.includes("INSERT INTO password_reset_tokens"))) return false;
+      const changedAt = new Date().toISOString();
+      h.sqlite.prepare("UPDATE users SET email = ?, email_updated_at = ?, updated_at = ? WHERE id = ?")
+        .run("reset-write-race-changed@example.com", changedAt, changedAt, resetRace.data.user.id);
+      return true;
+    };
+    response = await h.api("/api/auth/password/reset/request", {
+      method: "POST",
+      body: { email: "reset-write-race@example.com", turnstileToken: "test-turnstile" }
+    });
+    check("password reset remains enumeration-safe when identity changes after precheck", response.status === 202);
+    await h.drain();
+    check("write-time password reset conflict sends no dead email or token",
+      h.emails.length === resetEmailsBefore
+        && h.row("SELECT COUNT(*) AS count FROM password_reset_tokens WHERE user_id = ?1", resetRace.data.user.id)?.count === 0);
+
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "expired-reservation@example.com", currentPassword: PASSWORD }
+    });
+    check("expiring reservation fixture is created", response.status === 202);
+    await h.drain();
+    const expired = h.row("SELECT id, created_at FROM email_change_requests WHERE user_id = ?1 AND new_email = 'expired-reservation@example.com'", owner.data.user.id);
+    const expiredAt = new Date(Date.parse(expired.created_at) + 1).toISOString();
+    h.sqlite.prepare("UPDATE email_change_requests SET expires_at = ? WHERE id = ?").run(expiredAt, expired.id);
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: second,
+      body: { newEmail: "expired-reservation@example.com", currentPassword: PASSWORD }
+    });
+    check("expired reservation cannot lock an email until scheduled cleanup", response.status === 202, await response.clone().json());
+    check("expired reservation is explicitly released before reuse",
+      Boolean(h.row("SELECT revoked_at FROM email_change_requests WHERE id = ?1", expired.id)?.revoked_at));
+
+    const legacy = await createLegacyMember(h, owner.data.organization.id);
+    const legacyEmail = "legacy-unverified@example.com";
+    const legacyNow = new Date().toISOString();
+    h.sqlite.prepare("UPDATE users SET email = ?, email_verified_at = NULL, email_updated_at = ?, updated_at = ? WHERE id = ?")
+      .run(legacyEmail, legacyNow, legacyNow, legacy.userId);
+    const legacyCredentials = h.row("SELECT password_scheme,password_hash,password_salt FROM users WHERE id = ?1", legacy.userId);
+    const legacyExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    h.sqlite.prepare(`INSERT INTO pending_registrations
+      (id,email,display_name,organization_name,password_scheme,password_hash,password_salt,token_hash,
+       created_at,expires_at,verified_at,revoked_at,last_sent_at,resend_count)
+      VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,0)`)
+      .run("reg_legacy_stale", legacyEmail, "Legacy Stale", "Legacy Stale Workspace",
+        legacyCredentials.password_scheme, legacyCredentials.password_hash, legacyCredentials.password_salt,
+        "legacy_stale_token_hash", legacyNow, legacyExpiry, legacyNow);
+    const externalOwner = await register(h, "identity-external-owner@example.com", "External Owner");
+    response = await h.api("/api/org/invitations", {
+      method: "POST", auth: externalOwner,
+      body: { email: legacyEmail, role: "teacher" }
+    });
+    check("invitation rejects an existing account whose email is not verified",
+      response.status === 409 && (await response.json()).error === "EMAIL_UNAVAILABLE");
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: legacy,
+      body: { newEmail: legacyEmail, currentPassword: PASSWORD }
+    });
+    check("unverified existing email can be enrolled instead of being trapped as unchanged", response.status === 202, await response.clone().json());
+    check("enrollment revokes stale pending-registration claim owned by the existing account",
+      Boolean(h.row("SELECT revoked_at FROM pending_registrations WHERE id = 'reg_legacy_stale'")?.revoked_at));
+    await h.drain();
+    const enrollmentToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
+    response = await h.api("/api/auth/email-change/confirm", { method: "POST", body: { token: enrollmentToken } });
+    check("unverified existing email becomes verified",
+      response.status === 200 && Boolean(h.row("SELECT email_verified_at FROM users WHERE id = ?1", legacy.userId)?.email_verified_at));
+  } finally { h.close(); }
+}
+
+async function testCredentialChangeInvalidation() {
+  const h = createHarness();
+  try {
+    const owner = await register(h, "credential-owner@example.com", "Credential Owner");
+    let response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "credential-pending@example.com", currentPassword: PASSWORD }
+    });
+    check("credential invalidation fixture email change requested", response.status === 202);
+    await h.drain();
+    const pendingChangeToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
+
+    const changedPassword = "Changed-Correct-Horse-456";
+    response = await h.api("/api/auth/password/change", {
+      method: "POST", auth: owner,
+      body: { currentPassword: PASSWORD, newPassword: changedPassword }
+    });
+    const changedSession = await response.clone().json();
+    check("password change succeeds before invalidation check", response.status === 200, changedSession);
+    owner.cookie = cookieFrom(response);
+    owner.csrf = changedSession.csrfToken;
+    response = await h.api("/api/auth/email-change/confirm", {
+      method: "POST", body: { token: pendingChangeToken }
+    });
+    check("password change revokes previously issued email-change token",
+      response.status === 400 && (await response.json()).error === "EMAIL_CHANGE_TOKEN_INVALID");
+
+    response = await h.api("/api/auth/email-change/request", {
+      method: "POST", auth: owner,
+      body: { newEmail: "credential-reset-pending@example.com", currentPassword: changedPassword }
+    });
+    check("second email change can be requested for reset invalidation test", response.status === 202);
+    await h.drain();
+    const resetPendingEmailToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
+
+    response = await h.api("/api/auth/password/reset/request", {
+      method: "POST",
+      body: { email: "credential-owner@example.com", turnstileToken: "test-turnstile" }
+    });
+    check("password reset request succeeds", response.status === 202);
+    await h.drain();
+    const resetToken = tokenFromMessage(h.emails.at(-1), "reset-password");
+    response = await h.api("/api/auth/password/reset", {
+      method: "POST", body: { token: resetToken, newPassword: "Reset-Correct-Horse-789" }
+    });
+    check("password reset succeeds", response.status === 200, await response.clone().json());
+    response = await h.api("/api/auth/email-change/confirm", {
+      method: "POST", body: { token: resetPendingEmailToken }
+    });
+    check("password reset revokes previously issued email-change token",
+      response.status === 400 && (await response.json()).error === "EMAIL_CHANGE_TOKEN_INVALID");
+  } finally { h.close(); }
 }
 
 async function testAccountDeletion() {
@@ -29,6 +586,17 @@ async function testAccountDeletion() {
       body: { currentPassword: "wrong-password", confirmation: "DELETE" }
     });
     check("account deletion requires the current password", response.status === 401 && (await response.json()).error === "CURRENT_PASSWORD_INVALID");
+
+    const deleteUserCredentials = h.row("SELECT password_scheme,password_hash,password_salt FROM users WHERE id = ?1", owner.data.user.id);
+    const pendingNow = new Date().toISOString();
+    const pendingExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    h.sqlite.prepare(`INSERT INTO pending_registrations
+      (id,email,display_name,organization_name,password_scheme,password_hash,password_salt,token_hash,
+       created_at,expires_at,verified_at,revoked_at,last_sent_at,resend_count)
+      VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,0)`)
+      .run("reg_delete_stale", "delete-owner@example.com", "Delete Stale", "Delete Stale Workspace",
+        deleteUserCredentials.password_scheme, deleteUserCredentials.password_hash, deleteUserCredentials.password_salt,
+        "delete_stale_token_hash", pendingNow, pendingExpiry, pendingNow);
 
     response = await h.api("/api/auth/account", {
       method: "DELETE", auth: owner,
@@ -43,6 +611,8 @@ async function testAccountDeletion() {
     check("account deletion removes all memberships", h.row("SELECT COUNT(*) AS count FROM organization_members WHERE user_id = ?1 AND status <> 'removed'", owner.data.user.id)?.count === 0);
     check("account deletion deletes the personal workspace", h.row("SELECT status FROM organizations WHERE id = ?1", owner.data.organization.id)?.status === "deleted");
     check("account deletion revokes every session", h.row("SELECT COUNT(*) AS count FROM auth_sessions WHERE user_id = ?1 AND revoked_at IS NULL", owner.data.user.id)?.count === 0);
+    check("account deletion revokes stale pending registration for the old email",
+      Boolean(h.row("SELECT revoked_at FROM pending_registrations WHERE id = 'reg_delete_stale'")?.revoked_at));
 
     response = await h.api("/api/auth/login", { method: "POST", body: { email: "delete-owner@example.com", password: PASSWORD } });
     check("deleted account cannot log in", response.status === 401);
@@ -127,11 +697,23 @@ async function testInvitationAndAccountLifecycle() {
     const changeToken = tokenFromMessage(h.emails.at(-1), "confirm-email-change");
     check("email change confirmation uses a path token", Boolean(changeToken));
     check("email change raw token is absent from D1", h.row("SELECT token_hash FROM email_change_requests WHERE user_id = ?1", teacher.user.id)?.token_hash === await hashToken(changeToken));
+    const teacherCredentials = h.row("SELECT password_scheme,password_hash,password_salt FROM users WHERE id = ?1", teacher.user.id);
+    const staleNow = new Date().toISOString();
+    const staleExpiry = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    h.sqlite.prepare(`INSERT INTO pending_registrations
+      (id,email,display_name,organization_name,password_scheme,password_hash,password_salt,token_hash,
+       created_at,expires_at,verified_at,revoked_at,last_sent_at,resend_count)
+      VALUES (?,?,?,?,?,?,?,?,?,?,NULL,NULL,?,0)`)
+      .run("reg_old_email_stale", "teacher@example.com", "Old Email Stale", "Old Email Stale Workspace",
+        teacherCredentials.password_scheme, teacherCredentials.password_hash, teacherCredentials.password_salt,
+        "old_email_stale_token_hash", staleNow, staleExpiry, staleNow);
 
     response = await h.api("/api/auth/email-change/confirm", { method: "POST", body: { token: changeToken } });
     const changed = await response.json();
     check("email change confirmation succeeds", response.status === 200 && changed.email === "teacher.new@example.com", changed);
     check("email change revokes all sessions", h.row("SELECT COUNT(*) AS count FROM auth_sessions WHERE user_id = ?1 AND revoked_at IS NULL", teacher.user.id)?.count === 0);
+    check("email change revokes stale registration link for the freed old address",
+      Boolean(h.row("SELECT revoked_at FROM pending_registrations WHERE id = 'reg_old_email_stale'")?.revoked_at));
     await h.drain();
     check("old address receives a change notice", h.emails.some((message) => message.to === "teacher@example.com" && /変更されました/.test(message.subject)));
     response = await h.api("/api/auth/email-change/confirm", { method: "POST", body: { token: changeToken } });
@@ -231,6 +813,7 @@ function createHarness() {
     sqlite.exec(readFileSync(resolve(ROOT, "migrations-v2", name), "utf8"));
   }
   const db = new D1DatabaseAdapter(sqlite); const emails = []; const pending = [];
+  let clientIpSequence = 1;
   const env = {
     DB_V2: db, APP_ENV: "local", AUTH_ORIGIN: ORIGIN, EMAIL_AUTH_REQUIRED: "1",
     TURNSTILE_TEST_BYPASS: "1", TURNSTILE_SITE_KEY: "test-site-key",
@@ -245,7 +828,8 @@ function createHarness() {
     sqlite, db, env, emails,
     async api(path, options = {}) {
       const headers = new Headers(options.headers || {});
-      headers.set("origin", ORIGIN); headers.set("cf-connecting-ip", "127.0.0.1");
+      headers.set("origin", ORIGIN);
+      headers.set("cf-connecting-ip", `127.0.0.${1 + (clientIpSequence++ % 200)}`);
       if (options.auth?.cookie) headers.set("cookie", options.auth.cookie);
       if (options.auth?.csrf) headers.set("x-csrf-token", options.auth.csrf);
       let body;
@@ -263,9 +847,18 @@ function cookieFrom(response) { return String(response.headers.get("set-cookie")
 function tokenFromMessage(message, segment) { const match = String(message?.text || "").match(new RegExp(`/${segment}/([^\\s]+)`)); return match ? decodeURIComponent(match[1]) : ""; }
 
 class D1DatabaseAdapter {
-  constructor(sqlite) { this.sqlite = sqlite; }
+  constructor(sqlite) { this.sqlite = sqlite; this.beforeBatch = null; }
   prepare(sql) { return new D1PreparedAdapter(this.sqlite, sql); }
-  async batch(statements) { this.sqlite.exec("BEGIN IMMEDIATE;"); try { const output = statements.map((s) => s.executeRun()); this.sqlite.exec("COMMIT;"); return output; } catch (e) { this.sqlite.exec("ROLLBACK;"); throw e; } }
+  async batch(statements) {
+    if (typeof this.beforeBatch === "function") {
+      const hook = this.beforeBatch;
+      const handled = hook(statements);
+      if (handled !== false) this.beforeBatch = null;
+    }
+    this.sqlite.exec("BEGIN IMMEDIATE;");
+    try { const output = statements.map((s) => s.executeRun()); this.sqlite.exec("COMMIT;"); return output; }
+    catch (e) { this.sqlite.exec("ROLLBACK;"); throw e; }
+  }
   async exec(sql) { this.sqlite.exec(sql); return { count: 0, duration: 0 }; }
 }
 class D1PreparedAdapter {

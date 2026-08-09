@@ -1,4 +1,5 @@
 import { errorMessage, tokenFromPath } from "./auth-public.js";
+import { fetchWithTimeout } from "./http-client.js";
 const $ = (id) => document.getElementById(id);
 const token = tokenFromPath("/accept-invitation/");
 let csrfToken = "";
@@ -9,10 +10,17 @@ async function request(path, options = {}) {
   const method = String(options.method || "POST").toUpperCase();
   const headers = new Headers(options.headers || {});
   if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(method)) headers.set("x-csrf-token", csrfToken);
-  const response = await fetch(path, { credentials: "same-origin", cache: "no-store", ...options, method, headers });
-  const text = await response.text(); let data = {};
-  try { data = text ? JSON.parse(text) : {}; } catch { data = {}; }
-  return { response, data };
+  try {
+    const response = await fetchWithTimeout(path, { credentials: "same-origin", cache: "no-store", ...options, method, headers });
+    const text = await response.text(); let data = {};
+    try { data = text ? JSON.parse(text) : {}; } catch { data = { ok: false, error: "INVALID_RESPONSE" }; }
+    return { response, data };
+  } catch (error) {
+    return {
+      response: { ok: false, status: 0 },
+      data: { ok: false, error: error?.code === "REQUEST_TIMEOUT" ? "REQUEST_TIMEOUT" : "NETWORK_ERROR" }
+    };
+  }
 }
 async function post(path, body) { return request(path, { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }); }
 function roleLabel(role) { return ({ owner: "Owner", admin: "Admin", teacher: "Teacher" })[role] || role; }
@@ -29,6 +37,14 @@ async function inspect() {
     $("loggedInIdentity").textContent = `${session.data.user?.email || session.data.user?.displayName || "ログイン中の利用者"} でログインしています。`;
     show("loggedInSection", true);
     setStatus("招待内容を確認して承認してください。");
+    return;
+  }
+  if (session.response.status !== 401) {
+    setStatus(errorMessage(session.data.error || "NETWORK_ERROR"), true);
+    return;
+  }
+  if (invitation.accountExists && invitation.accountAvailable === false) {
+    setStatus("このメールアドレスの既存アカウントは現在この招待を承認できません。組織の管理者に確認してください。", true);
     return;
   }
   show(invitation.accountExists ? "existingSection" : "newSection", true);

@@ -108,18 +108,12 @@ export class CommentRoom {
         throw new AuthError(422, "CONTENT_REJECTED");
       }
       const result = await persistComment(this.env.DB_V2, { ...input, filterDecision });
-      let ai = { jobs: [], dispatched: 0 };
-      if (!result.duplicate) {
-        try {
-          ai = await scheduleAiForComment(this.env, {
-            organizationId: input.organizationId,
-            liveSessionId: input.liveSessionId,
-            commentId: result.comment.id
-          }, { dispatch: false });
-        } catch (error) {
-          console.error("AI scheduling failed", String(error?.code || error?.name || "ERROR"));
-        }
-      }
+      const aiInput = {
+        organizationId: input.organizationId,
+        liveSessionId: input.liveSessionId,
+        commentId: result.comment.id
+      };
+      const ai = await this.scheduleAiForAcceptedComment(aiInput);
 
       const translationJob = ai.jobs.find((job) => job.jobType === "translation");
       let event = null;
@@ -148,9 +142,15 @@ export class CommentRoom {
         if (!event) throw new AuthError(500, "REALTIME_EVENT_MISSING");
       }
       if (event) await this.broadcastEvent(event);
-      if (!result.duplicate && ai.jobs.length) {
+      if (ai.jobs.length) {
         const task = dispatchAiJobs(this.env, ai.jobs)
-          .catch((error) => console.error("AI queue dispatch failed", String(error?.code || error?.name || "ERROR")));
+          .catch((error) => console.error(JSON.stringify({
+            event: "ai_queue_dispatch_failed",
+            organizationId: input.organizationId,
+            liveSessionId: input.liveSessionId,
+            commentId: result.comment.id,
+            code: String(error?.code || error?.name || "ERROR").slice(0, 80)
+          })));
         if (typeof this.state?.waitUntil === "function") this.state.waitUntil(task);
         else void task;
       }
@@ -162,6 +162,7 @@ export class CommentRoom {
         duplicate: result.duplicate,
         sequence: event?.sequence || null,
         translationPending: Boolean(event?.payload?.translationPending),
+        aiSchedulingPending: Boolean(ai.recoveryPending),
         filter: {
           action: result.comment.filter?.action || filterDecision.action || "allow",
           categories: [...new Set((result.duplicate
@@ -175,6 +176,54 @@ export class CommentRoom {
       console.error(requestId, error);
       return authJson({ ok: false, error: "INTERNAL_ERROR", requestId }, 500);
     }
+  }
+
+  async scheduleAiForAcceptedComment(input) {
+    const immediateDelays = [0, 120];
+    let lastError = null;
+    for (const delay of immediateDelays) {
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+      try {
+        return await scheduleAiForComment(this.env, input, { dispatch: false });
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    console.warn(JSON.stringify({
+      event: "ai_scheduling_deferred",
+      ...input,
+      code: String(lastError?.code || lastError?.name || "ERROR").slice(0, 80)
+    }));
+    const recovery = this.retryAiScheduling(input)
+      .catch((error) => console.error(JSON.stringify({
+        event: "ai_scheduling_recovery_failed",
+        ...input,
+        code: String(error?.code || error?.name || "ERROR").slice(0, 80)
+      })));
+    if (typeof this.state?.waitUntil === "function") this.state.waitUntil(recovery);
+    else void recovery;
+    return { jobs: [], dispatched: 0, recoveryPending: true };
+  }
+
+  async retryAiScheduling(input) {
+    let lastError = null;
+    for (const delay of [300, 1200, 3000]) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      try {
+        const result = await scheduleAiForComment(this.env, input);
+        console.log(JSON.stringify({
+          event: "ai_scheduling_recovered",
+          ...input,
+          jobs: result.jobs.length,
+          dispatched: result.dispatched
+        }));
+        return result;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw lastError || new Error("AI_SCHEDULING_FAILED");
   }
 
   async deliverEvent(request, closeAfter) {
@@ -246,8 +295,14 @@ export class CommentRoom {
   }
 
   async scheduleAuthRevalidation() {
-    if (typeof this.state?.storage?.setAlarm !== "function") return;
-    await this.state.storage.setAlarm(Date.now() + AUTH_REVALIDATION_INTERVAL_MS);
+    const storage = this.state?.storage;
+    if (typeof storage?.setAlarm !== "function") return;
+    const target = Date.now() + AUTH_REVALIDATION_INTERVAL_MS;
+    if (typeof storage.getAlarm === "function") {
+      const current = await storage.getAlarm();
+      if (Number.isFinite(Number(current)) && Number(current) <= target) return;
+    }
+    await storage.setAlarm(target);
   }
 
   async authorizedAuthSessions(sockets) {

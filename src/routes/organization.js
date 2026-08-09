@@ -271,7 +271,10 @@ async function handleMemberUpdate(request, env, userIdValue) {
       role,
       status,
       removedAt: null,
-      updatedAt: operationMarker
+      updatedAt: operationMarker,
+      expectedRole: current.role,
+      expectedStatus: current.status,
+      expectedUpdatedAt: current.updated_at
     }),
     conditionalSessionRevocation(env.DB_V2, {
       organizationId: auth.organizationId,
@@ -353,7 +356,10 @@ async function handleMemberDelete(request, env, userIdValue) {
       role: current.role,
       status: "removed",
       removedAt: operationMarker,
-      updatedAt: operationMarker
+      updatedAt: operationMarker,
+      expectedRole: current.role,
+      expectedStatus: current.status,
+      expectedUpdatedAt: current.updated_at
     }),
     conditionalSessionRevocation(env.DB_V2, {
       organizationId: auth.organizationId,
@@ -452,11 +458,15 @@ async function handleAuditLogs(request, env) {
   });
 }
 
-function guardedMembershipUpdate(db, { organizationId, userId, role, status, removedAt, updatedAt }) {
+function guardedMembershipUpdate(db, {
+  organizationId, userId, role, status, removedAt, updatedAt,
+  expectedRole, expectedStatus, expectedUpdatedAt
+}) {
   return db.prepare(
     `UPDATE organization_members
      SET role = ?1, status = ?2, updated_at = ?3, removed_at = ?4
      WHERE organization_id = ?5 AND user_id = ?6
+       AND role = ?7 AND status = ?8 AND updated_at = ?9
        AND NOT (
          role = 'owner' AND status = 'active'
          AND NOT (?1 = 'owner' AND ?2 = 'active')
@@ -467,7 +477,10 @@ function guardedMembershipUpdate(db, { organizationId, userId, role, status, rem
              AND owners.status = 'active'
          ) <= 1
        )`
-  ).bind(role, status, updatedAt, removedAt, organizationId, userId);
+  ).bind(
+    role, status, updatedAt, removedAt, organizationId, userId,
+    expectedRole, expectedStatus, expectedUpdatedAt
+  );
 }
 
 function conditionalSessionRevocation(db, state) {

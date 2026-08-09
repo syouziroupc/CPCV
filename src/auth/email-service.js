@@ -105,13 +105,13 @@ export async function sendTransactionalEmail(env, message) {
     });
   } catch (error) {
     const code = sanitizeErrorCode(error?.code || "EMAIL_SEND_FAILED");
-    await completeAttempt(env.DB_V2, attemptId, "failed", null, code);
-    return { ok: false, error: code };
+    const statusPersisted = await completeAttempt(env.DB_V2, attemptId, "failed", null, code);
+    return { ok: false, error: code, statusPersisted };
   }
 
   const messageId = String(result?.messageId || "");
-  await completeAttempt(env.DB_V2, attemptId, "sent", messageId, null);
-  return { ok: true, messageId };
+  const statusPersisted = await completeAttempt(env.DB_V2, attemptId, "sent", messageId, null);
+  return { ok: true, messageId, statusPersisted };
 }
 
 function authLink(env, path, rawToken) {
@@ -123,19 +123,23 @@ function authLink(env, path, rawToken) {
 }
 
 async function completeAttempt(db, id, status, messageId, errorCode) {
-  let result;
-  try {
-    result = await db.prepare(
-      `UPDATE email_delivery_attempts
-       SET status = ?1, provider_message_id = ?2, provider_error_code = ?3, completed_at = ?4
-       WHERE id = ?5 AND status = 'pending'`
-    ).bind(status, messageId, errorCode, new Date().toISOString(), id).run();
-  } catch (error) {
-    throw new AuthError(503, "EMAIL_DELIVERY_STATUS_PERSISTENCE_FAILED", { expose: true });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const result = await db.prepare(
+        `UPDATE email_delivery_attempts
+         SET status = ?1, provider_message_id = ?2, provider_error_code = ?3, completed_at = ?4
+         WHERE id = ?5 AND status = 'pending'`
+      ).bind(status, messageId, errorCode, new Date().toISOString(), id).run();
+      if (Number(result?.meta?.changes || 0) === 1) return true;
+    } catch (error) {
+      if (attempt === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        continue;
+      }
+    }
   }
-  if (Number(result?.meta?.changes || 0) !== 1) {
-    throw new AuthError(503, "EMAIL_DELIVERY_STATUS_PERSISTENCE_FAILED", { expose: true });
-  }
+  console.error("Email delivery status persistence failed", id, status);
+  return false;
 }
 
 function sanitizeHeader(value) {

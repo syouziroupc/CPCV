@@ -194,12 +194,21 @@ async function testFallbackAndAtomicTranslation(h) {
     organizationId: "org_a", liveSessionId: h.sessionId, commentId: failOpenComment.id, now: h.now + 111_100
   });
   h.ai.fail = true;
-  const failOpenOutcome = await processAiJob(h.env, failOpenJob.id, { now: h.now + 111_200 });
+  const failOpenFirst = await processAiJob(h.env, failOpenJob.id, { now: h.now + 111_200 });
+  const firstRow = h.row("SELECT status,attempt_count,last_error_code FROM ai_jobs WHERE id=?1", failOpenJob.id);
+  const delayedEvent = h.rows("SELECT payload_json FROM realtime_events WHERE source_comment_id=?1 ORDER BY sequence", failOpenComment.id)
+    .map((row) => JSON.parse(row.payload_json)).find((item) => item.type === "translation:unavailable" && item.reason === "TRANSLATION_DELAYED");
+  check("transient translation provider failure enters retry", failOpenFirst.retry === true && firstRow?.status === "retry" && firstRow.attempt_count === 1 && firstRow.last_error_code === "AI_PROVIDER_UNAVAILABLE" && delayedEvent?.comment?.message === failOpenComment.message, { failOpenFirst, firstRow, delayedEvent });
+
+  h.exec(`UPDATE ai_jobs SET run_after='${new Date(h.now + 111_299).toISOString()}' WHERE id='${failOpenJob.id}'`);
+  const failOpenSecond = await processAiJob(h.env, failOpenJob.id, { now: h.now + 111_300 });
+  h.exec(`UPDATE ai_jobs SET run_after='${new Date(h.now + 111_399).toISOString()}' WHERE id='${failOpenJob.id}'`);
+  const failOpenFinal = await processAiJob(h.env, failOpenJob.id, { now: h.now + 111_400 });
   h.ai.fail = false;
   const failOpenRow = h.row("SELECT status,attempt_count,last_error_code FROM ai_jobs WHERE id=?1", failOpenJob.id);
   const failOpenEvent = h.rows("SELECT payload_json FROM realtime_events WHERE source_comment_id=?1 ORDER BY sequence", failOpenComment.id)
-    .map((row) => JSON.parse(row.payload_json)).find((item) => item.type === "translation:unavailable");
-  check("translation provider failure fails open after one attempt", failOpenOutcome.retry === false && failOpenRow?.status === "failed" && failOpenRow.attempt_count === 1 && failOpenEvent?.comment?.message === failOpenComment.message, { failOpenOutcome, failOpenRow, failOpenEvent });
+    .map((row) => JSON.parse(row.payload_json)).find((item) => item.type === "translation:unavailable" && item.reason === "AI_PROVIDER_UNAVAILABLE");
+  check("translation provider failure retries to the bounded attempt limit", failOpenSecond.retry === true && failOpenFinal.retry === false && failOpenRow?.status === "failed" && failOpenRow.attempt_count === 3 && failOpenEvent?.comment?.message === failOpenComment.message, { failOpenSecond, failOpenFinal, failOpenRow, failOpenEvent });
 
   await updateSessionAiSettings(h.db, {
     organizationId: "org_a", liveSessionId: h.sessionId,
@@ -320,19 +329,35 @@ async function testQueueBehavior(h) {
     moderationEnabled: false, translationEnabled: true, targetLanguage: "en",
     actorUserId: "usr_teacher_a", now: retryNow + 100
   });
-  const comment = await createComment(h, "delivery_retry", "授業内容を確認しました", retryNow + 200);
+  const transientComment = await createComment(h, "delivery_i", "授業内容を確認しました", retryNow + 200);
+  const transientJobs = await createAiJobsForComment(h.db, {
+    organizationId: "org_a", liveSessionId: h.sessionId, commentId: transientComment.id, now: retryNow + 300
+  });
+  const transientTranslationJob = transientJobs.find((job) => job.jobType === "translation");
+  h.room.failuresRemaining = 1;
+  const transientRequestsBefore = h.room.requests.length;
+  const transientAiCallsBefore = h.ai.calls.length;
+  const transientOutcome = await processAiJob(h.env, transientTranslationJob.id, { now: retryNow + 400 });
+  check("single transient translation delivery failure is recovered inside realtime dispatch",
+    transientOutcome.retry === false && transientOutcome.completed === true && transientOutcome.realtimeDelivered === true
+      && h.room.requests.length - transientRequestsBefore === 2,
+    { transientOutcome, requests: h.room.requests.slice(transientRequestsBefore) });
+  check("internal realtime delivery retry does not rerun the AI model", h.ai.calls.length === transientAiCallsBefore + 1,
+    { before: transientAiCallsBefore, after: h.ai.calls.length });
+
+  const comment = await createComment(h, "delivery_retry", "再送処理の確認をします", retryNow + 500);
   const jobs = await createAiJobsForComment(h.db, {
-    organizationId: "org_a", liveSessionId: h.sessionId, commentId: comment.id, now: retryNow + 300
+    organizationId: "org_a", liveSessionId: h.sessionId, commentId: comment.id, now: retryNow + 600
   });
   const translationJob = jobs.find((job) => job.jobType === "translation");
-  h.room.failuresRemaining = 1;
+  h.room.failuresRemaining = 3;
   const aiCallsBefore = h.ai.calls.length;
-  const firstOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 400 });
+  const firstOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 700 });
   const callsAfterFirst = h.ai.calls.length;
-  check("translation delivery failure requests a delivery-only retry", firstOutcome.retry === true && firstOutcome.deliveryOnly === true && firstOutcome.realtimeDelivered === false, firstOutcome);
+  check("persistent translation delivery failure requests a delivery-only retry", firstOutcome.retry === true && firstOutcome.deliveryOnly === true && firstOutcome.realtimeDelivered === false, firstOutcome);
   check("translation is persisted before realtime delivery retry", h.row("SELECT status FROM ai_jobs WHERE id=?1", translationJob.id)?.status === "succeeded");
 
-  const secondOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 500 });
+  const secondOutcome = await processAiJob(h.env, translationJob.id, { now: retryNow + 800 });
   check("completed translation event is redelivered", secondOutcome.redelivered === true && secondOutcome.retry === false, secondOutcome);
   check("realtime redelivery does not call the AI model twice", callsAfterFirst === aiCallsBefore + 1 && h.ai.calls.length === callsAfterFirst, { aiCallsBefore, callsAfterFirst, finalCalls: h.ai.calls.length });
 
@@ -348,7 +373,7 @@ function testValidationAndClientBoundaries() {
   const admin = readFileSync(resolve(ROOT, "public/assets/admin.js"), "utf8");
   const viewer = readFileSync(resolve(ROOT, "public/assets/viewer.js"), "utf8");
   const wrangler = readFileSync(resolve(ROOT, "wrangler.toml"), "utf8");
-  check("admin labels AI verdict as reference only", admin.includes("AI参考") && !admin.includes("AI自動削除"));
+  check("admin distinguishes provider AI from local protection advice", admin.includes("local_privacy_guard") && admin.includes("ローカル保護") && admin.includes("sourceLabel") && !admin.includes("AI自動削除"));
   check("viewer labels translated content", viewer.includes("AI翻訳:") && viewer.includes("translation:ready"));
   check("viewer never replaces original message with translation", viewer.includes("text.textContent = payload.message") && viewer.includes("card.appendChild(translation)"));
   check("translation queue uses immediate autoscaling delivery", wrangler.includes("max_batch_timeout = 0") && !wrangler.includes("max_concurrency =") && wrangler.includes('AI_TRANSLATION_MODEL = "@cf/meta/m2m100-1.2b"') && !wrangler.includes("AI_TRANSLATION_FALLBACK_MODEL"), wrangler);
