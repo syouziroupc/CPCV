@@ -75,6 +75,8 @@ jobs:
           node --check src/ai/processor.js
           node --check src/ai/repository.js
           python scripts/audit-responsive-layout.py
+      - name: Remove generated responsive evidence before commit
+        run: rm -rf artifacts/responsive-layout-audit
       - name: Build final clean commit
         shell: bash
         run: |
