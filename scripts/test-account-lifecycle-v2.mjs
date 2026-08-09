@@ -141,17 +141,35 @@ async function testEmailIdentityInvariants() {
     await h.drain();
     const duplicateRegistrationToken = tokenFromMessage(h.emails.at(-1), "verify-email");
     const duplicateRegistrationHash = await hashToken(duplicateRegistrationToken);
+    const duplicateBefore = h.row(
+      `SELECT display_name, organization_name, password_hash, password_salt, token_hash
+       FROM pending_registrations WHERE email = ?1 AND revoked_at IS NULL`, duplicateEmail
+    );
     const duplicateEmailsBefore = h.emails.length;
     response = await h.api("/api/auth/registration/request", {
       method: "POST",
-      body: { email: duplicateEmail, displayName: "Duplicate Registration", password: PASSWORD,
-        turnstileToken: "test-turnstile" }
+      body: {
+        email: duplicateEmail,
+        displayName: "Different Registration Attempt",
+        password: "Different-Registration-Password-456",
+        turnstileToken: "test-turnstile"
+      }
     });
-    check("rapid exact registration duplicate is idempotent", response.status === 202);
+    check("active pending registration remains enumeration-safe on a conflicting repeat", response.status === 202);
     await h.drain();
-    check("rapid exact registration duplicate preserves token and sends no second email",
+    const duplicateAfter = h.row(
+      `SELECT display_name, organization_name, password_hash, password_salt, token_hash
+       FROM pending_registrations WHERE email = ?1 AND revoked_at IS NULL`, duplicateEmail
+    );
+    check("conflicting repeat cannot replace pending registration identity, password, or token",
       h.emails.length === duplicateEmailsBefore
-        && h.row("SELECT token_hash FROM pending_registrations WHERE email = ?1 AND revoked_at IS NULL", duplicateEmail)?.token_hash === duplicateRegistrationHash);
+        && duplicateAfter?.token_hash === duplicateRegistrationHash
+        && duplicateAfter?.token_hash === duplicateBefore?.token_hash
+        && duplicateAfter?.display_name === duplicateBefore?.display_name
+        && duplicateAfter?.organization_name === duplicateBefore?.organization_name
+        && duplicateAfter?.password_hash === duplicateBefore?.password_hash
+        && duplicateAfter?.password_salt === duplicateBefore?.password_salt,
+      { duplicateBefore, duplicateAfter, emailsBefore: duplicateEmailsBefore, emailsAfter: h.emails.length });
 
     response = await h.api("/api/auth/registration/request", {
       method: "POST",

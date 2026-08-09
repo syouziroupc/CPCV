@@ -10,8 +10,7 @@ import {
   createToken,
   hashPassword,
   hashToken,
-  requireValidPassword,
-  verifyPassword
+  requireValidPassword
 } from "../auth/passwords.js";
 import { createSessionMaterial } from "../auth/sessions.js";
 import { internalLoginId, normalizeEmail, normalizeOrganizationName, requireEmail } from "../auth/email.js";
@@ -59,22 +58,12 @@ async function handleRegistrationRequest(request, env, ctx) {
 
   const now = new Date();
   const nowIso = now.toISOString();
-  const recentPending = await env.DB_V2.prepare(
-    `SELECT display_name, organization_name, password_scheme, password_hash, password_salt,
-            last_sent_at, expires_at
-     FROM pending_registrations
+  const activePending = await env.DB_V2.prepare(
+    `SELECT id FROM pending_registrations
      WHERE email = ?1 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL
        AND expires_at > ?2
      LIMIT 1`
   ).bind(email, nowIso).first();
-  if (recentPending
-      && recentPending.display_name === displayName
-      && recentPending.organization_name === organizationName
-      && Date.parse(recentPending.last_sent_at) > now.getTime() - 60_000
-      && await verifyPassword(password, recentPending.password_salt,
-        recentPending.password_hash, recentPending.password_scheme)) {
-    return authJson(ACCEPTED, 202);
-  }
 
   const salt = createSalt();
   let passwordHash;
@@ -88,13 +77,13 @@ async function handleRegistrationRequest(request, env, ctx) {
     `SELECT id FROM users WHERE email = ?1 COLLATE NOCASE LIMIT 1`
   ).bind(email).first();
   if (existing) {
-    const nowIso = new Date().toISOString();
     await env.DB_V2.prepare(
       `UPDATE pending_registrations SET revoked_at = ?1
        WHERE email = ?2 COLLATE NOCASE AND verified_at IS NULL AND revoked_at IS NULL`
     ).bind(nowIso, email).run();
     return authJson(ACCEPTED, 202);
   }
+  if (activePending) return authJson(ACCEPTED, 202);
 
   const rawToken = createToken();
   const tokenHash = await hashToken(rawToken);
