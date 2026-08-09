@@ -77,8 +77,12 @@ jobs:
           node --check src/ai/processor.js
           node --check src/ai/repository.js
 
-      - name: Regenerate source manifest
-        run: npm run manifest:source
+      - name: Stage final tree and regenerate source manifest
+        shell: bash
+        run: |
+          git add -A
+          npm run manifest:source
+          git add SOURCE_SHA256SUMS.txt
 
       - name: Full validation
         run: |
@@ -97,7 +101,7 @@ jobs:
           test ! -e .github/workflows/translation-language-hotfix.yml
           test ! -e scripts/apply-translation-language-hotfix.py
           test ! -e scripts/apply-translation-provider-current.py
-          git diff --check
+          git diff --cached --check
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
