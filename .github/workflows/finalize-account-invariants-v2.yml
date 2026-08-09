@@ -1,0 +1,65 @@
+name: Complete account identity invariants
+
+on:
+  push:
+    branches:
+      - agent/ai-response-hardening-20260808
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: complete-account-identity-invariants
+  cancel-in-progress: true
+
+jobs:
+  finalize:
+    if: ${{ !contains(github.event.head_commit.message || '', 'Complete account identity invariants') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ai-response-hardening-20260808
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Apply complete invariant hardening
+        run: python scripts/finalize-account-state-invariants-v2.py
+      - name: Remove temporary finalizers
+        run: |
+          git rm -f scripts/fix-account-state-invariants.py
+          git rm -f scripts/finalize-account-state-invariants-v2.py
+          git rm -f .github/workflows/fix-account-state-invariants.yml
+          git rm -f .github/workflows/finalize-account-invariants-v2.yml
+      - name: Rebuild source manifest
+        run: npm run manifest:source
+      - name: Focused regressions
+        run: |
+          node --no-warnings scripts/test-email-auth-v2.mjs
+          node --no-warnings scripts/test-account-lifecycle-v2.mjs
+          node --no-warnings scripts/test-auth-api-v2.mjs
+          node scripts/test-system-hardening.mjs
+          npm run check
+          npm run check:project
+          npm run verify:source-manifest
+          git diff --check
+      - name: Full regression
+        run: npm run check:stage08
+      - name: Bundle and dependency validation
+        run: |
+          npm run deploy:dry-run
+          npm audit
+          npm audit --omit=dev
+      - name: Commit validated result
+        run: |
+          git config user.name "CPCV Reliability Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Complete account identity invariants"
+          git push origin HEAD:agent/ai-response-hardening-20260808
