@@ -48,7 +48,19 @@ jobs:
       CPCV_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.CPCV_WINDOWS_CERTIFICATE_PASSWORD }}
 
     steps:
-      - uses: actions/checkout@v7
+      - name: Checkout exact source revision
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact source revision
+        shell: pwsh
+        working-directory: .
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:EXPECTED_SHA) { throw "Unexpected source SHA: $actual" }
 
       - name: Verify source manifest
         working-directory: .
