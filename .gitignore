@@ -8,6 +8,7 @@ node_modules/
 *.log
 tmp/
 output/
+.freeze-output/
 .stage02-d1/
 .stage02-test-*/
 .stage02-bootstrap-*.toml
