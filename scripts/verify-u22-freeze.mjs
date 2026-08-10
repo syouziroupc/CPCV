@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { resolve, extname, basename } from 'node:path';
+import { resolve, extname } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
@@ -40,6 +40,11 @@ const gitignore = read('.gitignore');
 
 check('Web package version is 0.8.10', rootPackage.version === '0.8.10');
 check('Web npm is pinned to 11.18.0', rootPackage.packageManager === 'npm@11.18.0');
+check('Web CI pins Ubuntu 24.04', ciWorkflow.includes('runs-on: ubuntu-24.04'));
+check('Web CI pins Node 22.23.1', ciWorkflow.includes('node-version: 22.23.1') && ciWorkflow.includes('v22.23.1'));
+check('Web CI pins npm 11.18.0', ciWorkflow.includes('npm install --global npm@11.18.0') && ciWorkflow.includes('11.18.0'));
+check('Web CI uses current official checkout/setup actions', ciWorkflow.includes('actions/checkout@v7') && ciWorkflow.includes('actions/setup-node@v7'));
+
 check('Desktop package version is 0.2.2', desktopPackage.version === '0.2.2');
 check('Desktop npm is pinned to 10.9.8', desktopPackage.packageManager === 'npm@10.9.8');
 check('Desktop VERSION is 0.2.2', desktopVersion === '0.2.2');
@@ -50,8 +55,10 @@ check('Desktop Rust toolchain is pinned to 1.97.1', /channel\s*=\s*"1\.97\.1"/.t
 check('Desktop compatibility check uses bundled source', desktopPackage.scripts?.['check:compat'] === 'node scripts/check-current-web-contract.mjs ..');
 check('Desktop workflow does not checkout moving master', !desktopWorkflow.includes('path: current-master') && !desktopWorkflow.includes('ref: master'));
 check('Desktop workflow pins Windows 2025 generation', desktopWorkflow.includes('runs-on: windows-2025'));
+check('Desktop workflow pins Node 22.23.1', desktopWorkflow.includes('node-version: 22.23.1') && desktopWorkflow.includes('v22.23.1'));
 check('Desktop workflow pins npm 10.9.8', desktopWorkflow.includes('npm install --global npm@10.9.8'));
-check('Desktop workflow pins rustc 1.97.1', desktopWorkflow.includes('toolchain: "1.97.1"'));
+check('Desktop workflow installs rustc 1.97.1 explicitly', desktopWorkflow.includes('rustup toolchain install 1.97.1'));
+check('Desktop workflow avoids moving third-party Rust action', !desktopWorkflow.includes('dtolnay/rust-toolchain@'));
 check('Desktop artifact records build environment', desktopWorkflow.includes('CPCV_BUILD_ENVIRONMENT.txt'));
 
 check('Current system identifies both release versions', currentSystem.includes('0.8.10') && currentSystem.includes('0.2.2'));
@@ -59,6 +66,7 @@ check('Known issues are freeze-candidate current', knownIssues.includes('U-22凍
 check('Known issues no longer claim production resources are unset', !knownIssues.includes('Remote環境未設定') && !knownIssues.includes('Rate Limiting namespace未設定'));
 check('Documentation index points to current canonical files', docsIndex.includes('U22_FREEZE_READINESS.md') && docsIndex.includes('SOURCE_GIT_RECORD.txt'));
 check('Stage 8.2 index is explicitly historical', stage82Index.includes('historical snapshot') && stage82Index.includes('現在のproduction状態を意味しません'));
+check('Source record identifies v0.8.10', sourceRecord.includes('Version: 0.8.10') && !sourceRecord.includes('Version: 0.8.2'));
 check('Source record identifies freeze branch and prior verified deployment', sourceRecord.includes('release/cpcv-u22-final-20260810') && sourceRecord.includes('4a295ae5505a680019b9896b97e1d6f1ec2f20cd'));
 check('Freeze readiness records external gates', freezeReadiness.includes('Web production一致') && freezeReadiness.includes('Windows物理acceptance'));
 check('Codex acceptance specifies 5.4 mini', codexAcceptance.includes('指定model: **5.4 mini**'));
