@@ -15,6 +15,6 @@ e39e4b47d0eeacd181d428fbe495969432d35c6cb83d1095229ea19b2ddda825  desktop-overla
 eb78b42aaf3952d85527488470a63ab59adf6e2c2aeec39ea90852eb44b0f51c  desktop-overlay-poc/src-tauri/src/main.rs
 c82efef956fbe99c17571822ce57548110eab9eb674954b78601e03430d991b7  desktop-overlay-poc/src-tauri/tauri.conf.json
 e94739a9e0c5e1d0401fb1e7387da9e7d814f55ab45c3358f78da6d11ca6d09a  desktop-overlay-poc/ui/app.css
-ed26fbcca827f4e1e5f40c76dc5ab1c858fc81ccb278da8ba23a2e2b  desktop-overlay-poc/ui/app.js
+ed26fbcca827f4e1a2c187d6505406b695521b28ae56ecd04f063fc7aa132617  desktop-overlay-poc/ui/app.js
 11104f9600ef2490c1d60f0d4e1e52571ea9d8496173ce62873a18e25d578823  desktop-overlay-poc/ui/index.html
 a9d36d52f32b87bc2df8e99755e2641c253cc06ac36b03de566fe587892a4dfe  docs/desktop-overlay-stage2-plan.md
