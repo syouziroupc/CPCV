@@ -49,6 +49,9 @@ jobs:
       - name: Verify install-script approvals
         run: npm install-scripts ls
 
+      - name: Print final manifest input hashes
+        run: sha256sum package.json .github/workflows/ci.yml
+
       - name: Run static project and freeze checks
         run: |
           npm run verify:source-manifest
