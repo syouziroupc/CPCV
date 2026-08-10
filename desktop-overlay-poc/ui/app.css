@@ -1,0 +1,26 @@
+:root {
+  font-family: "Segoe UI", "Yu Gothic UI", sans-serif;
+  color: #111;
+  background: #fff;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+main {
+  width: min(560px, calc(100vw - 48px));
+  border: 1px solid #111;
+  padding: 28px;
+}
+h1 {
+  margin: 0 0 16px;
+  font-size: 28px;
+}
+p {
+  font-size: 18px;
+}
+.muted {
+  color: #555;
+}

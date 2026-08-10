@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-developer-fallback",
+  "description": "The production and staging CPCV remote pages receive no Tauri capability.",
+  "windows": ["developer"],
+  "permissions": ["core:default"]
+}
