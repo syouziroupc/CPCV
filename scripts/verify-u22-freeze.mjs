@@ -74,7 +74,11 @@ check('Freeze readiness records external gates', freezeReadiness.includes('Web p
 check('Codex acceptance specifies 5.4 mini', codexAcceptance.includes('指定model: **5.4 mini**'));
 check('Contest notes identifies both versions', contestNotes.includes('0.8.10') && contestNotes.includes('0.2.2'));
 check('Data freeze plan separates production data from submission data', dataFreezePlan.includes('Production D1') && dataFreezePlan.includes('提出禁止') && dataFreezePlan.includes('synthetic'));
-check('Freeze bundler rejects dirty trees and uses git archive', freezeBundler.includes('git status') && freezeBundler.includes('git archive') && freezeBundler.includes('verify-source-manifest.mjs') && freezeBundler.includes('verify-u22-freeze.mjs'));
+check('Freeze bundler rejects dirty trees and uses git archive',
+  freezeBundler.includes("['status', '--porcelain']") &&
+  freezeBundler.includes("['archive', '--format=zip'") &&
+  freezeBundler.includes('verify-source-manifest.mjs') &&
+  freezeBundler.includes('verify-u22-freeze.mjs'));
 
 const productionOrigin = 'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev';
 check('Wrangler production origin is fixed', wrangler.includes(`PUBLIC_ORIGIN = "${productionOrigin}"`) && wrangler.includes(`AUTH_ORIGIN = "${productionOrigin}"`));
