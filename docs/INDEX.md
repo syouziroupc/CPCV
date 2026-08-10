@@ -65,6 +65,6 @@ Stage 8.2のmigration・security境界・44項目staging acceptance等の手順�
 
 ## 凍結bundle生成
 
-最終exact commitで `node scripts/build-u22-freeze-bundle.mjs` を実行すると、dirty treeを拒否し、source manifestとfreeze verifierを確認したうえでtracked sourceだけのZIP・SHA-256・外部gate待ちのfreeze recordをrepository外へ生成します。
+最終exact commitで `node scripts/build-u22-freeze-bundle.mjs` を実行すると、dirty treeを拒否し、source manifestとfreeze verifierを確認したうえでtracked sourceだけのZIP・SHA-256・外部gate待ちのfreeze recordをGit管理外の `.freeze-output/` へ生成します。
 
 U-22提出時には履歴資料そのものを変更して現行状態に見せかけず、現行正本とfreeze recordで現在状態を明確にします。
