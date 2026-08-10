@@ -77,6 +77,7 @@ check('Data freeze plan separates production data from submission data', dataFre
 check('Freeze bundler rejects dirty trees and uses git archive',
   freezeBundler.includes("['status', '--porcelain']") &&
   freezeBundler.includes("['archive', '--format=zip'") &&
+  freezeBundler.includes("resolve(ROOT, '.freeze-output')") &&
   freezeBundler.includes('verify-source-manifest.mjs') &&
   freezeBundler.includes('verify-u22-freeze.mjs'));
 
@@ -84,7 +85,7 @@ const productionOrigin = 'https://class-pdf-comment-viewer-v01.syouziroupc.worke
 check('Wrangler production origin is fixed', wrangler.includes(`PUBLIC_ORIGIN = "${productionOrigin}"`) && wrangler.includes(`AUTH_ORIGIN = "${productionOrigin}"`));
 check('Source record uses production origin', sourceRecord.includes(productionOrigin));
 
-for (const ignored of ['.env*', '.dev.vars*', 'node_modules/', '.wrangler/', '.cpcv-staging.wrangler.toml', 'deployment-records/']) {
+for (const ignored of ['.env*', '.dev.vars*', 'node_modules/', '.wrangler/', '.freeze-output/', '.cpcv-staging.wrangler.toml', 'deployment-records/']) {
   check(`gitignore protects ${ignored}`, gitignore.includes(ignored));
 }
 
@@ -92,7 +93,7 @@ const tracked = execFileSync('git', ['ls-files', '-z'], { cwd: ROOT, encoding: '
   .split('\0')
   .filter(Boolean);
 
-const forbiddenDirectories = /(^|\/)(node_modules|target|\.wrangler|\.dev-d1|deployment-records)(\/|$)/;
+const forbiddenDirectories = /(^|\/)(node_modules|target|\.wrangler|\.dev-d1|\.freeze-output|deployment-records)(\/|$)/;
 const forbiddenExtensions = new Set(['.exe', '.pfx', '.p12', '.pem', '.key', '.sqlite', '.sqlite3', '.db']);
 const forbiddenNames = /(^|\/)(\.env(?:\..*)?|\.dev\.vars(?:\..*)?)$/;
 const pathViolations = tracked.filter((path) => forbiddenDirectories.test(path) || forbiddenExtensions.has(extname(path).toLowerCase()) || forbiddenNames.test(path));
