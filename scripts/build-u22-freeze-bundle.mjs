@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
-const OUTPUT_DIR = resolve(ROOT, '..', 'CPCV-freeze-output');
+const OUTPUT_DIR = resolve(ROOT, '.freeze-output');
 
 const run = (command, args, options = {}) => execFileSync(command, args, {
   cwd: ROOT,
