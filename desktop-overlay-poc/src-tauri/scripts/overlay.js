@@ -1,4 +1,5 @@
 (() => {
+  const CPCV_WEB_VERSION = '0.8.10';
   const allowedOrigins = new Set([
     'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev',
     'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
@@ -34,6 +35,54 @@
     }
   };
 
+  const ensureStyle = () => {
+    if (document.getElementById('cpcvDesktopOverlayStyle')) return;
+    const style = document.createElement('style');
+    style.id = 'cpcvDesktopOverlayStyle';
+    style.textContent = `
+      html,
+      body,
+      #viewerStage {
+        background: transparent !important;
+        background-color: transparent !important;
+      }
+      body[data-cpcv-desktop-overlay="true"] {
+        margin: 0 !important;
+        overflow: hidden !important;
+      }
+      body[data-cpcv-desktop-overlay="true"] #pdfStage,
+      body[data-cpcv-desktop-overlay="true"] #emptyDocument,
+      body[data-cpcv-desktop-overlay="true"] #topBar,
+      body[data-cpcv-desktop-overlay="true"] #pdfPageControls,
+      body[data-cpcv-desktop-overlay="true"] #qrCorner,
+      body[data-cpcv-desktop-overlay="true"] #viewerLogin {
+        display: none !important;
+      }
+      body[data-cpcv-desktop-overlay="true"] #commentPanel {
+        position: fixed !important;
+        pointer-events: none !important;
+        background: transparent !important;
+        background-color: transparent !important;
+      }
+      body[data-cpcv-desktop-overlay="true"] #commentPanel.scroll-mode {
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100vh !important;
+        max-height: none !important;
+      }
+      body[data-cpcv-desktop-overlay="true"] #commentList,
+      body[data-cpcv-desktop-overlay="true"] #scrollCommentLayer,
+      body[data-cpcv-desktop-overlay="true"] #qrOverlay {
+        pointer-events: none !important;
+      }
+      body[data-cpcv-desktop-overlay="true"] #qrOverlay {
+        background: transparent !important;
+        background-color: transparent !important;
+      }
+    `;
+    document.documentElement.appendChild(style);
+  };
+
   const ensureDiagnostic = () => {
     if (!document.body) return null;
     let badge = document.getElementById('cpcvDesktopOverlayDiagnostic');
@@ -60,14 +109,15 @@
   };
 
   const apply = () => {
+    ensureStyle();
     transparent(document.documentElement);
     transparent(document.body);
     transparent(document.getElementById('viewerStage'));
 
     if (document.body) {
+      document.body.dataset.cpcvDesktopOverlay = 'true';
       document.body.style.setProperty('margin', '0', 'important');
       document.body.style.setProperty('overflow', 'hidden', 'important');
-      document.body.dataset.cpcvDesktopOverlay = 'true';
     }
 
     hide(document.getElementById('pdfStage'));
@@ -105,10 +155,11 @@
     if (qrOverlay) {
       qrOverlay.classList.toggle('hidden', !state.qrVisible);
       qrOverlay.style.setProperty('pointer-events', 'none', 'important');
+      transparent(qrOverlay);
     }
 
     const login = document.getElementById('viewerLogin');
-    const loginVisible = login && !login.classList.contains('hidden');
+    const loginVisible = Boolean(login && !login.classList.contains('hidden'));
     hide(login);
 
     const diagnostic = ensureDiagnostic();
@@ -116,12 +167,13 @@
       diagnostic.style.display = loginVisible || state.diagnosticsVisible ? 'block' : 'none';
       const connection = document.getElementById('connectionState')?.textContent?.trim() || '初期化中';
       diagnostic.textContent = loginVisible
-        ? 'CPCV Overlay: 未認証\n管理画面でログインしてください。'
-        : `CPCV Overlay: ${connection}`;
+        ? `CPCV ${CPCV_WEB_VERSION} Overlay: 未認証\n管理画面でログインしてください。`
+        : `CPCV ${CPCV_WEB_VERSION} Overlay: ${connection}`;
     }
   };
 
   window.__CPCV_DESKTOP_OVERLAY__ = {
+    webVersion: CPCV_WEB_VERSION,
     setCommentsVisible(value) {
       state.commentsVisible = Boolean(value);
       apply();
@@ -138,6 +190,7 @@
   };
 
   const start = () => {
+    ensureStyle();
     apply();
     window.setInterval(apply, 500);
   };
