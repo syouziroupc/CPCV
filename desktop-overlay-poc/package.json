@@ -3,6 +3,7 @@
   "version": "0.2.2",
   "private": true,
   "type": "module",
+  "packageManager": "npm@10.9.8",
   "scripts": {
     "tauri": "tauri",
     "dev": "tauri dev",
@@ -10,7 +11,7 @@
     "build:debug": "tauri build --debug --no-bundle",
     "build:release": "tauri build --no-bundle",
     "check:ui": "node --check ui/app.js && node --check src-tauri/scripts/admin.js && node --check src-tauri/scripts/overlay.js && node --check scripts/check-current-web-contract.mjs",
-    "check:compat": "node scripts/check-current-web-contract.mjs ../current-master"
+    "check:compat": "node scripts/check-current-web-contract.mjs .."
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.4"
