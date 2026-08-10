@@ -6,6 +6,13 @@ on:
       - "desktop-overlay-poc/**"
       - "docs/desktop-overlay-stage2-plan.md"
       - ".github/workflows/desktop-overlay-poc.yml"
+  push:
+    branches:
+      - "agent/desktop-*"
+    paths:
+      - "desktop-overlay-poc/**"
+      - "docs/desktop-overlay-stage2-plan.md"
+      - ".github/workflows/desktop-overlay-poc.yml"
   workflow_dispatch:
 
 permissions:
@@ -25,6 +32,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Checkout current CPCV master for compatibility validation
+        uses: actions/checkout@v6
+        with:
+          ref: master
+          path: current-master
+
       - uses: actions/setup-node@v6
         with:
           node-version: 22
@@ -40,6 +53,9 @@ jobs:
 
       - name: Check bundled JavaScript
         run: npm run check:ui
+
+      - name: Verify compatibility with current CPCV
+        run: npm run check:compat
 
       - name: Audit npm dependencies
         run: npm audit --audit-level=high
@@ -84,7 +100,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: cpcv-desktop-v0.2.2-windows-release
+          name: cpcv-desktop-v0.2.2-cpcv0.8.10-windows-release
           path: |
             desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe
             desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe.sha256
