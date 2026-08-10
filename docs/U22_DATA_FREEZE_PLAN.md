@@ -26,7 +26,7 @@
 node scripts/build-u22-freeze-bundle.mjs
 ```
 
-このscriptはdirty treeを拒否し、source manifestとU-22 freeze verifierを再確認してから、repositoryの**tracked fileだけ**を `git archive` でZIP化します。出力はrepository外の `CPCV-freeze-output/` に置き、ZIP SHA-256とfreeze recordを作ります。
+このscriptはdirty treeを拒否し、source manifestとU-22 freeze verifierを再確認してから、repositoryの**tracked fileだけ**を `git archive` でZIP化します。出力はGit管理外の `.freeze-output/` に置き、ZIP SHA-256とfreeze recordを作ります。`.freeze-output/` は `.gitignore` で除外されるため、生成物がsource treeや提出source ZIPへ再帰的に混入しません。
 
 ## B. Windows実行ファイル — 提出対象
 
