@@ -40,9 +40,10 @@ jobs:
             npm ci
           }
 
-      - name: Run static project and documentation checks
+      - name: Run static project and freeze checks
         run: |
           npm run verify:source-manifest
+          node scripts/verify-u22-freeze.mjs
           npm run check
           npm run check:project
           npm run check:pdf-links
