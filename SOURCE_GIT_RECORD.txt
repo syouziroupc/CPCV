@@ -1,5 +1,6 @@
 CPCV U-22 freeze candidate source record
 
+Version: 0.8.10
 Web version: 0.8.10
 Desktop version: 0.2.2
 Freeze candidate branch: release/cpcv-u22-final-20260810
