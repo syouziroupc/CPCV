@@ -38,7 +38,6 @@ jobs:
         shell: bash
         env:
           NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
-          NPM_CONFIG_ALLOW_SCRIPTS: "esbuild,workerd"
         run: |
           set -o pipefail
           npm ci || {
@@ -46,6 +45,9 @@ jobs:
             npm cache clean --force
             npm ci
           }
+
+      - name: Verify install-script approvals
+        run: npm install-scripts ls
 
       - name: Run static project and freeze checks
         run: |
