@@ -10,7 +10,9 @@ U-22凍結候補を確認するときは、次の順序を正本として扱い�
 4. `../wrangler.toml` — productionの非secret runtime構成
 5. `../SOURCE_GIT_RECORD.txt` — source / deployment / freeze状態
 6. `U22_FREEZE_READINESS.md` — U-22凍結ゲート
-7. `../desktop-overlay-poc/CONTEST-SOURCE-NOTES.md` — Desktop提出・再生成条件
+7. `U22_DATA_FREEZE_PLAN.md` — source / D1 / secret / sample / evidenceの凍結区分
+8. `U22_CODEX_FINAL_ACCEPTANCE.md` — Codex 5.4 mini最終acceptance
+9. `../desktop-overlay-poc/CONTEST-SOURCE-NOTES.md` — Desktop提出・再生成条件
 
 現在のWeb versionは `0.8.10`、Windows Desktop versionは `0.2.2`、DB_V2 migrationは `0001`〜`0017` です。
 
@@ -60,5 +62,9 @@ Stage 8.2のmigration・security境界・44項目staging acceptance等の手順�
 - `../requirements-visual.txt` — Playwright/Chromium visual audit
 - Web: root `package-lock.json`
 - Desktop: `desktop-overlay-poc/package-lock.json` と `desktop-overlay-poc/src-tauri/Cargo.lock`
+
+## 凍結bundle生成
+
+最終exact commitで `node scripts/build-u22-freeze-bundle.mjs` を実行すると、dirty treeを拒否し、source manifestとfreeze verifierを確認したうえでtracked sourceだけのZIP・SHA-256・外部gate待ちのfreeze recordをrepository外へ生成します。
 
 U-22提出時には履歴資料そのものを変更して現行状態に見せかけず、現行正本とfreeze recordで現在状態を明確にします。
