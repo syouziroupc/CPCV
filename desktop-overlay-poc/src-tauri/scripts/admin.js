@@ -1,4 +1,7 @@
 (() => {
+  const CPCV_WEB_VERSION = '0.8.10';
+  const API_TIMEOUT_MS = 15_000;
+  const AUTH_RETRY_DELAY_MS = 120;
   const allowedOrigins = new Set([
     'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev',
     'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
@@ -94,9 +97,9 @@
     }
     if (button.disabled) return;
     button.click();
-    window.setTimeout(syncCommentsState, 50);
-    window.setTimeout(syncCommentsState, 350);
-    window.setTimeout(syncCommentsState, 900);
+    window.setTimeout(syncCommentsState, 80);
+    window.setTimeout(syncCommentsState, 400);
+    window.setTimeout(syncCommentsState, 1000);
   };
 
   const ensureCommentsObserver = () => {
@@ -113,6 +116,69 @@
     });
   };
 
+  const fetchJsonWithTimeout = async (path) => {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+    let response;
+    let text = '';
+    try {
+      response = await fetch(path, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        signal: controller.signal
+      });
+      text = await response.text();
+    } catch (cause) {
+      if (controller.signal.aborted) {
+        const timeout = new Error('API_TIMEOUT');
+        timeout.code = 'API_TIMEOUT';
+        timeout.status = 0;
+        throw timeout;
+      }
+      throw cause;
+    } finally {
+      window.clearTimeout(timer);
+    }
+
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      const invalid = new Error('API_RESPONSE_INVALID');
+      invalid.code = 'API_RESPONSE_INVALID';
+      invalid.status = response.status;
+      throw invalid;
+    }
+
+    if (!response.ok || data.ok === false) {
+      const error = new Error(data.error || `HTTP_${response.status}`);
+      error.code = data.error || `HTTP_${response.status}`;
+      error.status = response.status;
+      throw error;
+    }
+    return data;
+  };
+
+  const verifyAuthSession = async () => {
+    let lastError = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        return await fetchJsonWithTimeout('/api/auth/session');
+      } catch (error) {
+        lastError = error;
+        if (error?.status === 401 || attempt === 1) throw error;
+        await new Promise((resolve) => window.setTimeout(resolve, AUTH_RETRY_DELAY_MS));
+      }
+    }
+    throw lastError || new Error('AUTH_SESSION_UNAVAILABLE');
+  };
+
+  const probeErrorText = (error) => {
+    if (error?.code === 'API_TIMEOUT') return '一覧APIの応答がタイムアウトしました。';
+    if (error?.code === 'API_RESPONSE_INVALID') return '一覧APIの応答形式が正しくありません。';
+    return String(error?.code || error?.message || error || '取得失敗').slice(0, 180);
+  };
+
   const reportEnvironmentState = async () => {
     if (environmentProbeRunning) return;
     if (!/^\/admin\/?$/.test(window.location.pathname)) return;
@@ -124,28 +190,24 @@
     let error = '';
 
     try {
-      const authResponse = await fetch('/api/auth/session', {
-        cache: 'no-store',
-        credentials: 'same-origin'
-      });
-      authenticated = authResponse.ok;
-      if (authenticated) {
-        const sessionsResponse = await fetch('/api/private/sessions', {
-          cache: 'no-store',
-          credentials: 'same-origin'
-        });
-        if (!sessionsResponse.ok) {
-          throw new Error(`一覧API HTTP ${sessionsResponse.status}`);
-        }
-        const data = await sessionsResponse.json();
-        if (!Array.isArray(data.sessions)) {
-          throw new Error('一覧APIの応答形式が正しくありません。');
-        }
-        sessionsLoaded = true;
-        activeCount = data.sessions.length;
+      await verifyAuthSession();
+      authenticated = true;
+      const data = await fetchJsonWithTimeout('/api/private/sessions');
+      if (!Array.isArray(data.sessions)) {
+        const invalid = new Error('API_RESPONSE_INVALID');
+        invalid.code = 'API_RESPONSE_INVALID';
+        throw invalid;
       }
+      sessionsLoaded = true;
+      activeCount = data.sessions.length;
     } catch (cause) {
-      error = cause instanceof Error ? cause.message : String(cause || '取得失敗');
+      if (cause?.status === 401) {
+        authenticated = false;
+        sessionsLoaded = false;
+        activeCount = 0;
+      } else {
+        error = probeErrorText(cause);
+      }
     } finally {
       environmentProbeRunning = false;
     }
@@ -175,6 +237,9 @@
     const style = document.createElement('style');
     style.id = 'cpcvDesktopStyle';
     style.textContent = `
+      body[data-cpcv-desktop-admin="true"] {
+        padding-bottom: 76px !important;
+      }
       #cpcvDesktopBar {
         position: fixed;
         z-index: 2147483646;
@@ -186,7 +251,7 @@
         max-width: calc(100vw - 36px);
         padding: 10px 12px;
         border: 1px solid rgba(255,255,255,.38);
-        background: rgba(15,18,22,.94);
+        background: rgba(15,18,22,.96);
         box-shadow: 0 12px 32px rgba(0,0,0,.34);
         color: #fff;
         font: 600 14px/1.25 "Segoe UI", "Yu Gothic UI", sans-serif;
@@ -222,6 +287,9 @@
       }
       #cpcvDesktopEnvironment:not(:empty) { display: inline-block; }
       @media (max-width: 840px) {
+        body[data-cpcv-desktop-admin="true"] {
+          padding-bottom: 148px !important;
+        }
         #cpcvDesktopBar {
           left: 10px;
           right: 10px;
@@ -245,6 +313,7 @@
 
   const ensureBar = () => {
     if (!document.body) return null;
+    document.body.dataset.cpcvDesktopAdmin = 'true';
     ensureStyle();
     let bar = document.getElementById('cpcvDesktopBar');
     if (bar) return bar;
@@ -252,7 +321,7 @@
     bar = document.createElement('div');
     bar.id = 'cpcvDesktopBar';
     bar.setAttribute('role', 'toolbar');
-    bar.setAttribute('aria-label', 'CPCVデスクトップ投影操作');
+    bar.setAttribute('aria-label', `CPCV ${CPCV_WEB_VERSION} デスクトップ投影操作`);
 
     const start = makeButton('cpcvDesktopStart', '投影開始', startOverlay);
     const stop = makeButton('cpcvDesktopStop', '投影停止', () => dispatch('overlay/stop'));
@@ -316,6 +385,7 @@
   }, true);
 
   window.__CPCV_DESKTOP_ADMIN__ = {
+    webVersion: CPCV_WEB_VERSION,
     setState(next) {
       if (next && typeof next === 'object') {
         const serverCommentsVisible = readServerCommentsVisible();
