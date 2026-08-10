@@ -36,6 +36,9 @@ jobs:
 
       - name: Install dependencies
         shell: bash
+        env:
+          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
+          NPM_CONFIG_ALLOW_SCRIPTS: "esbuild,workerd"
         run: |
           set -o pipefail
           npm ci || {
