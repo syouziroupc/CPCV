@@ -123,6 +123,7 @@ for (const name of secretAssignments) {
 }
 
 check('CI invokes U-22 freeze verifier', ciWorkflow.includes('node scripts/verify-u22-freeze.mjs'));
+check('CI builds and uploads a source freeze candidate', ciWorkflow.includes('node scripts/build-u22-freeze-bundle.mjs') && ciWorkflow.includes('cpcv-u22-source-candidate-${{ github.sha }}'));
 check('Freeze verifier itself is tracked', tracked.includes('scripts/verify-u22-freeze.mjs'));
 check('Freeze readiness record is tracked', tracked.includes('docs/U22_FREEZE_READINESS.md'));
 check('Codex acceptance record is tracked', tracked.includes('docs/U22_CODEX_FINAL_ACCEPTANCE.md'));
