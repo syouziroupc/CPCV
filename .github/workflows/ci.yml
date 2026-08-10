@@ -50,7 +50,7 @@ jobs:
         run: npm install-scripts ls
 
       - name: Print final manifest input hashes
-        run: sha256sum package.json .gitignore .github/workflows/ci.yml scripts/verify-u22-freeze.mjs scripts/build-u22-freeze-bundle.mjs docs/INDEX.md docs/U22_DATA_FREEZE_PLAN.md
+        run: sha256sum package.json .gitignore .github/workflows/ci.yml .github/workflows/desktop-overlay-poc.yml scripts/verify-u22-freeze.mjs scripts/build-u22-freeze-bundle.mjs docs/INDEX.md docs/U22_DATA_FREEZE_PLAN.md
 
       - name: Run static project and freeze checks
         run: |
@@ -84,4 +84,5 @@ jobs:
           name: cpcv-u22-source-candidate-${{ github.sha }}
           path: .freeze-output/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 30
