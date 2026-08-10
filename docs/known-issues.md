@@ -1,58 +1,56 @@
-# CPCV 現在の既知事項
+# CPCV 現行既知事項
 
-更新基準: Stage 6.5
+更新基準: U-22凍結候補。Web `0.8.10` / Windows Desktop `0.2.2`。
 
-## 未解決
+この文書は凍結判定で残っている事項だけを記録します。Stage 1〜8の旧課題一覧は履歴資料です。現在値は `README.md`、`docs/current-system.md`、`wrangler.toml`、`SOURCE_GIT_RECORD.txt` を優先します。
 
-### KI-CURRENT-001 Remote環境未設定
+## KI-CURRENT-001 凍結候補Web sourceとproduction Workerの一致が未確定
 
-- remote `DB_V2` UUID未設定
-- 4個のRate Limiting namespace未設定
-- Email Service sender domain未設定
-- Turnstile実key未設定
-- remote migration未実施
-- stagingとproduction未検証
+最後にGitHub上で完全なproduction配備成功記録が確認できるsourceは `4a295ae5505a680019b9896b97e1d6f1ec2f20cd` です。U-22凍結候補はそれ以降の `0.8.10` 修正を含みます。
 
-### KI-CURRENT-002 既存Ownerのメール移行
+凍結前に、最終commitと同一commitをisolated stagingで受入試験し、既存のmanual production workflowで配備した後、Worker deployment/version IDとproduction smoke結果を記録します。sourceだけから本番版を推測しません。
 
-既存accountにはメールがない。`EMAIL_AUTH_REQUIRED=0`でログインし`/account`から登録する。全active Ownerが移行するまでメール必須化できない。
+## KI-CURRENT-002 既存accountのemail移行は運用ゲート
 
-### KI-CURRENT-003 Email Service実到達未検証
+`EMAIL_AUTH_REQUIRED=0` の間は既存login ID利用者を維持できます。全既存accountのverified email移行を確認してから必須化します。これはU-22デモの機能欠陥ではなく、運用cutover条件です。
 
-local testではadapterと失敗処理を検証した。実domainのSPF。DKIM。DMARC。迷惑メール判定。provider timeoutはstagingで確認する。
+## KI-CURRENT-003 Windows実行ファイルは未署名
 
-### KI-CURRENT-004 Turnstile実環境未検証
+Desktop CIにはAuthenticode署名工程がありますが、repository secretに署名証明書が設定されていない場合は署名工程をskipします。未署名EXEはWindows SmartScreen等の警告対象になり得ます。機能試験とは分離して記録します。
 
-Siteverify処理とtest bypassを検証した。実widget。hostname。timeout。challenge UXはstagingで確認する。
+## KI-CURRENT-004 Desktopの物理投影試験が残る
 
-### KI-CURRENT-005 WebSocket ticketが短時間URL queryへ含まれる
+CIではWindows Release build、Rust unit test、Clippy、20秒launch smokeまで自動確認します。次は物理Windows環境で以下を確認します。
 
-Browser WebSocket APIの制約による。60秒。一回限り。hash保存。application logではredactする。CDN側log方針をstagingで確認する。
+- PowerPoint slideshowより前面にcommentが表示される
+- click-throughによりPowerPointのmouse/keyboard操作を奪わない
+- comment表示ON/OFFとQR表示が管理画面から反映される
+- 複数monitorと異なるDPIで正しい画面へ配置される
+- monitor切替とHDMI抜き差し後に復旧する
+- sleep/resume後に管理画面とoverlayが再利用できる
 
-### KI-CURRENT-006 Realtime snapshot上限
+## KI-CURRENT-005 WebSocket ticketは60秒・一回限り
 
-差分とsnapshotは各500件上限。全履歴の正本はD1とCSVである。
+接続ticketは短寿命で一回消費です。接続直前に取得し、失効時は新しいticketを取得します。長時間保持して再利用する設計にはしません。
 
-### KI-CURRENT-007 Durable ObjectとD1間に単一transactionはない
+## KI-CURRENT-006 Realtime catch-upはbounded
 
-即時配信失敗時はDBを戻さない。catch-upで回復する。Cloudflare実障害試験は未実施。
+catch-upは最大500 eventです。範囲を超える場合はsnapshot/resetへ切り替えます。授業履歴の正本はD1で、全履歴取得はauthenticated API/CSVを使用します。
 
-### KI-CURRENT-008 新旧D1間に単一transactionはない
+## KI-CURRENT-007 D1とDurable Objectは単一transactionではない
 
-授業投影は補償処理とauditで扱う。実障害試験はstagingで行う。
+comment/realtimeの永続正本はD1です。Durable Object配信失敗はbounded retry、snapshot/catch-up、delivery-only retryで回復します。旧DBとDB_V2の跨DB更新も単一transactionではないため、既存のcompensationとinconsistency記録を維持します。
 
-### KI-CURRENT-009 Python画面検査はnpm管理外
+## 凍結前に解消済みとして扱う旧事項
 
-Python。Chromium。Playwright。BeautifulSoupはnpmとは別に必要。
+以下は現在のproduction設定・実装では「未設定」と扱いません。
 
-## Stage 6.5で解消した事項
+- production DB / DB_V2 binding
+- production Rate Limiting namespaces
+- Queue bindings
+- Email sender binding
+- Turnstile site key
+- production origin
+- Stage 8.2 migration `0001`〜`0017` の実装
 
-- 管理者による仮password配布
-- 管理者へのraw reset token表示
-- 組織招待経路の欠落
-- 既存userの複数組織参加経路の欠落
-- メール変更経路の欠落
-- 組織quotaの未実装
-- 招待再送競合
-- account enumeration
-- Ownerメール切替前検査の欠落
+実際の秘密値はrepositoryへ保存せず、Cloudflare/GitHub secret側で管理します。
