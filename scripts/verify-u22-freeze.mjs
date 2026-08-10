@@ -35,6 +35,8 @@ const sourceRecord = read('SOURCE_GIT_RECORD.txt');
 const contestNotes = read('desktop-overlay-poc/CONTEST-SOURCE-NOTES.md');
 const freezeReadiness = read('docs/U22_FREEZE_READINESS.md');
 const codexAcceptance = read('docs/U22_CODEX_FINAL_ACCEPTANCE.md');
+const dataFreezePlan = read('docs/U22_DATA_FREEZE_PLAN.md');
+const freezeBundler = read('scripts/build-u22-freeze-bundle.mjs');
 const wrangler = read('wrangler.toml');
 const gitignore = read('.gitignore');
 
@@ -71,6 +73,8 @@ check('Source record identifies freeze branch and prior verified deployment', so
 check('Freeze readiness records external gates', freezeReadiness.includes('Web production一致') && freezeReadiness.includes('Windows物理acceptance'));
 check('Codex acceptance specifies 5.4 mini', codexAcceptance.includes('指定model: **5.4 mini**'));
 check('Contest notes identifies both versions', contestNotes.includes('0.8.10') && contestNotes.includes('0.2.2'));
+check('Data freeze plan separates production data from submission data', dataFreezePlan.includes('Production D1') && dataFreezePlan.includes('提出禁止') && dataFreezePlan.includes('synthetic'));
+check('Freeze bundler rejects dirty trees and uses git archive', freezeBundler.includes('git status') && freezeBundler.includes('git archive') && freezeBundler.includes('verify-source-manifest.mjs') && freezeBundler.includes('verify-u22-freeze.mjs'));
 
 const productionOrigin = 'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev';
 check('Wrangler production origin is fixed', wrangler.includes(`PUBLIC_ORIGIN = "${productionOrigin}"`) && wrangler.includes(`AUTH_ORIGIN = "${productionOrigin}"`));
@@ -122,6 +126,8 @@ check('CI invokes U-22 freeze verifier', ciWorkflow.includes('node scripts/verif
 check('Freeze verifier itself is tracked', tracked.includes('scripts/verify-u22-freeze.mjs'));
 check('Freeze readiness record is tracked', tracked.includes('docs/U22_FREEZE_READINESS.md'));
 check('Codex acceptance record is tracked', tracked.includes('docs/U22_CODEX_FINAL_ACCEPTANCE.md'));
+check('Data freeze plan is tracked', tracked.includes('docs/U22_DATA_FREEZE_PLAN.md'));
+check('Freeze bundler is tracked', tracked.includes('scripts/build-u22-freeze-bundle.mjs'));
 check('Desktop Rust toolchain pin is tracked', tracked.includes('desktop-overlay-poc/rust-toolchain.toml'));
 
 console.log(`\nU-22 freeze verification summary: ${passed} passed, ${failures.length} failed, ${passed + failures.length} total.`);
