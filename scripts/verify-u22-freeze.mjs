@@ -46,6 +46,7 @@ check('Web CI pins Ubuntu 24.04', ciWorkflow.includes('runs-on: ubuntu-24.04'));
 check('Web CI pins Node 22.23.1', ciWorkflow.includes('node-version: 22.23.1') && ciWorkflow.includes('v22.23.1'));
 check('Web CI pins npm 11.18.0', ciWorkflow.includes('npm install --global npm@11.18.0') && ciWorkflow.includes('11.18.0'));
 check('Web CI uses current official checkout/setup actions', ciWorkflow.includes('actions/checkout@v7') && ciWorkflow.includes('actions/setup-node@v7'));
+check('Web CI checks out and verifies exact PR head', ciWorkflow.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}') && ciWorkflow.includes('Verify exact source revision'));
 
 check('Desktop package version is 0.2.2', desktopPackage.version === '0.2.2');
 check('Desktop npm is pinned to 10.9.8', desktopPackage.packageManager === 'npm@10.9.8');
@@ -56,6 +57,7 @@ check('Desktop Rust toolchain is pinned to 1.97.1', /channel\s*=\s*"1\.97\.1"/.t
 
 check('Desktop compatibility check uses bundled source', desktopPackage.scripts?.['check:compat'] === 'node scripts/check-current-web-contract.mjs ..');
 check('Desktop workflow does not checkout moving master', !desktopWorkflow.includes('path: current-master') && !desktopWorkflow.includes('ref: master'));
+check('Desktop workflow checks out and verifies exact PR head', desktopWorkflow.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}') && desktopWorkflow.includes('Verify exact source revision'));
 check('Desktop workflow pins Windows 2025 generation', desktopWorkflow.includes('runs-on: windows-2025'));
 check('Desktop workflow pins Node 22.23.1', desktopWorkflow.includes('node-version: 22.23.1') && desktopWorkflow.includes('v22.23.1'));
 check('Desktop workflow pins npm 10.9.8', desktopWorkflow.includes('npm install --global npm@10.9.8'));
@@ -128,7 +130,7 @@ for (const name of secretAssignments) {
 }
 
 check('CI invokes U-22 freeze verifier', ciWorkflow.includes('node scripts/verify-u22-freeze.mjs'));
-check('CI builds and uploads a source freeze candidate', ciWorkflow.includes('node scripts/build-u22-freeze-bundle.mjs') && ciWorkflow.includes('cpcv-u22-source-candidate-${{ github.sha }}'));
+check('CI builds and uploads an exact-head source freeze candidate', ciWorkflow.includes('node scripts/build-u22-freeze-bundle.mjs') && ciWorkflow.includes('cpcv-u22-source-candidate-${{ github.event.pull_request.head.sha || github.sha }}'));
 check('Freeze verifier itself is tracked', tracked.includes('scripts/verify-u22-freeze.mjs'));
 check('Freeze readiness record is tracked', tracked.includes('docs/U22_FREEZE_READINESS.md'));
 check('Codex acceptance record is tracked', tracked.includes('docs/U22_CODEX_FINAL_ACCEPTANCE.md'));
