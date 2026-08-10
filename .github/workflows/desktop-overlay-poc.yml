@@ -46,34 +46,35 @@ jobs:
       CPCV_WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.CPCV_WINDOWS_CERTIFICATE_PASSWORD }}
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Verify source manifest
         working-directory: .
         run: node scripts/verify-source-manifest.mjs
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 22.23.1
           cache: npm
           cache-dependency-path: desktop-overlay-poc/package-lock.json
 
       - name: Pin Desktop npm
         run: npm install --global npm@10.9.8
 
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.97.1"
-          components: rustfmt,clippy
+      - name: Install pinned Rust toolchain
+        shell: pwsh
+        run: rustup toolchain install 1.97.1 --profile minimal --component rustfmt --component clippy
 
       - name: Verify frozen build toolchain
         shell: pwsh
         run: |
+          $nodeVersion = (node --version).Trim()
           $npmVersion = (npm --version).Trim()
           $rustVersion = (rustc --version).Trim()
-          Write-Host "node=$(node --version)"
+          Write-Host "node=$nodeVersion"
           Write-Host "npm=$npmVersion"
           rustc --version --verbose
+          if ($nodeVersion -ne "v22.23.1") { throw "Unexpected node version: $nodeVersion" }
           if ($npmVersion -ne "10.9.8") { throw "Unexpected npm version: $npmVersion" }
           if ($rustVersion -notmatch '^rustc 1\.97\.1 ') { throw "Unexpected rustc version: $rustVersion" }
 
