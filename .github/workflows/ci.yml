@@ -18,8 +18,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
-      - name: Checkout
+      - name: Checkout exact source revision
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Verify exact source revision
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -81,7 +89,7 @@ jobs:
       - name: Upload source freeze candidate
         uses: actions/upload-artifact@v4
         with:
-          name: cpcv-u22-source-candidate-${{ github.sha }}
+          name: cpcv-u22-source-candidate-${{ github.event.pull_request.head.sha || github.sha }}
           path: .freeze-output/
           if-no-files-found: error
           include-hidden-files: true
