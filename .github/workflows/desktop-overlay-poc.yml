@@ -32,6 +32,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Verify source manifest
+        working-directory: .
+        run: node scripts/verify-source-manifest.mjs
+
       - name: Checkout current CPCV master for compatibility validation
         uses: actions/checkout@v6
         with:
