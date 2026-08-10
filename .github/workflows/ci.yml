@@ -53,6 +53,9 @@ jobs:
           npm run check:pdf-links
           npm run verify:final-docs
 
+      - name: Build source freeze candidate
+        run: node scripts/build-u22-freeze-bundle.mjs
+
       - name: Run all implemented-stage tests
         run: npm run check:stage08
 
@@ -66,3 +69,11 @@ jobs:
         run: |
           npm audit
           npm audit --omit=dev
+
+      - name: Upload source freeze candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpcv-u22-source-candidate-${{ github.sha }}
+          path: ../CPCV-freeze-output/
+          if-no-files-found: error
+          retention-days: 30
