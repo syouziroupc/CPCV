@@ -1,132 +1,96 @@
 name: CI
 
 on:
+  push:
   pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  group: ci-audit-patch-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-audited-nonworkflow-fixes:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'release/cpcv-u22-final-20260810'
+  check:
+    name: Full local validation
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 120
     steps:
-      - name: Checkout exact PR head
+      - name: Checkout exact source revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Apply non-workflow audit fixes and push
+      - name: Verify exact source revision
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - name: Pin and verify npm
         shell: bash
         run: |
-          set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-          import hashlib
+          npm install --global npm@11.18.0
+          test "$(node --version)" = "v22.23.1"
+          test "$(npm --version)" = "11.18.0"
 
-          def replace(path, old, new, count=1):
-              p = Path(path)
-              s = p.read_text()
-              if old not in s:
-                  if new in s:
-                      return
-                  raise SystemExit(f"expected source fragment missing: {path}: {old[:100]!r}")
-              p.write_text(s.replace(old, new, count))
+      - name: Install dependencies
+        shell: bash
+        env:
+          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
+        run: |
+          set -o pipefail
+          npm ci || {
+            echo "npm ci failed once; clearing the npm cache and retrying."
+            npm cache clean --force
+            npm ci
+          }
 
-          replace('public/assets/viewer.js',
-                  "const externalUrl = annotation.url || annotation.unsafeUrl || '';",
-                  "const externalUrl = annotation.url || '';")
+      - name: Verify install-script approvals
+        run: npm install-scripts ls
 
-          p = Path('scripts/verify-pdf-link-logic.mjs')
-          s = p.read_text()
-          marker = "if (viewer.includes('annotation.unsafeUrl'))"
-          if marker not in s:
-              needle = "if (viewer.includes('recentComments')) {\n  throw new Error('Recent comment replay must remain disabled');\n}\n"
-              addition = "\nif (viewer.includes('annotation.unsafeUrl')) {\n  throw new Error('PDF.js unsafeUrl must never become a clickable external link');\n}\n\nif (!viewer.includes(\"const externalUrl = annotation.url || '';\")) {\n  throw new Error('External PDF links must use only PDF.js validated annotation.url');\n}\n"
-              if needle not in s:
-                  raise SystemExit('PDF link verifier insertion point missing')
-              p.write_text(s.replace(needle, needle + addition, 1))
+      - name: Print final manifest input hashes
+        run: sha256sum package.json .gitignore .github/workflows/ci.yml .github/workflows/desktop-overlay-poc.yml .github/workflows/deploy-production.yml .github/workflows/responsive-and-ai-regression.yml scripts/verify-u22-freeze.mjs scripts/build-u22-freeze-bundle.mjs docs/INDEX.md docs/U22_DATA_FREEZE_PLAN.md
 
-          replace('scripts/stage-compatibility-checks.mjs',
-                  '    check("current password scheme uses PBKDF2-SHA-256 with 600000 iterations", passwords.includes("600_000") || passwords.includes("600000"));',
-                  '    check("current password scheme is PBKDF2-SHA-256 with 100000 iterations",\n      passwords.includes(\'PASSWORD_SCHEME = "pbkdf2-sha256-100000-v3"\') && passwords.includes("iterations: 100_000"));\n    check("600000-iteration PBKDF2 scheme remains verification-only compatibility",\n      passwords.includes(\'HIGH_ITERATION_PASSWORD_SCHEME = "pbkdf2-sha256-600000-v2"\') && passwords.includes("iterations: 600_000"));')
+      - name: Run static project and freeze checks
+        run: |
+          npm run verify:source-manifest
+          node scripts/verify-u22-freeze.mjs
+          npm run check
+          npm run check:project
+          npm run check:pdf-links
+          npm run verify:final-docs
 
-          replace('scripts/test-auth-v2.mjs',
-                  '  LEGACY_PASSWORD_SCHEME,\n  PASSWORD_SCHEME,',
-                  '  HIGH_ITERATION_PASSWORD_SCHEME,\n  LEGACY_PASSWORD_SCHEME,\n  PASSWORD_SCHEME,')
-          replace('scripts/test-auth-v2.mjs',
-                  'assert("current password scheme respects the Workers PBKDF2 limit", PASSWORD_SCHEME === "pbkdf2-sha256-100000-v3");',
-                  'assert("current password scheme is the 100000-iteration v3 scheme", PASSWORD_SCHEME === "pbkdf2-sha256-100000-v3");\n  assert("600000-iteration v2 scheme remains supported only for verification migration", HIGH_ITERATION_PASSWORD_SCHEME === "pbkdf2-sha256-600000-v2" && needsPasswordRehash(HIGH_ITERATION_PASSWORD_SCHEME));')
+      - name: Build source freeze candidate
+        run: node scripts/build-u22-freeze-bundle.mjs
 
-          replace('docs/current-system.md',
-                  '- PBKDF2-HMAC-SHA-256、600000 iterations',
-                  '- PBKDF2-HMAC-SHA-256。現行schemeは100,000 iterations。既存の600,000-iteration v2 hashは検証互換のみ残し、次回認証時の再hash対象')
-          replace('docs/final-stage08/04_SECURITY_AUTHORIZATION_SPEC.md',
-                  '- 現行iterationは600,000である。',
-                  '- 現行scheme `pbkdf2-sha256-100000-v3` は100,000 iterationsである。\n- 既存の`pbkdf2-sha256-600000-v2`は検証互換のみ残し、認証成功後の再hash対象とする。')
-          replace('docs/database-schema.md',
-                  '- password scheme: `pbkdf2-sha256-600000-v2`\n- 旧`pbkdf2-sha256-100000-v1`の検証互換',
-                  '- current password scheme: `pbkdf2-sha256-100000-v3`\n- `pbkdf2-sha256-600000-v2`は検証互換のみ。認証成功後の再hash対象\n- 旧`pbkdf2-sha256-100000-v1`も検証互換。認証成功後の再hash対象')
+      - name: Run all implemented-stage tests
+        run: npm run check:stage08
 
-          replace('scripts/audit-responsive-layout.py',
-                  '        """({source, width}) => {',
-                  '        r"""({source, width}) => {')
+      - name: Run Owner bootstrap regression
+        run: npm run test:owner-bootstrap
 
-          old_action = 'ea165f8d65b6e75b540449e92b4886f43607fa02'
-          new_action = '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
-          p = Path('scripts/verify-u22-freeze.mjs')
-          s = p.read_text()
-          if old_action in s:
-              p.write_text(s.replace(old_action, new_action))
-          elif new_action not in s:
-              raise SystemExit('artifact action pin missing from freeze verifier')
+      - name: Validate Wrangler bundle
+        run: npm run deploy:dry-run
 
-          changed = [
-              'public/assets/viewer.js',
-              'scripts/verify-pdf-link-logic.mjs',
-              'scripts/stage-compatibility-checks.mjs',
-              'scripts/test-auth-v2.mjs',
-              'scripts/audit-responsive-layout.py',
-              'scripts/verify-u22-freeze.mjs',
-              'docs/current-system.md',
-              'docs/final-stage08/04_SECURITY_AUTHORIZATION_SPEC.md',
-              'docs/database-schema.md',
-          ]
-          manifest = Path('SOURCE_SHA256SUMS.override.txt')
-          entries = []
-          for line in manifest.read_text().splitlines():
-              if not line:
-                  continue
-              digest, path = line.split('  ', 1)
-              entries.append([digest, path])
-          by_path = {path: digest for digest, path in entries}
-          for path in changed:
-              by_path[path] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
-          seen = set()
-          output = []
-          for _, path in entries:
-              if path not in seen:
-                  output.append(f'{by_path[path]}  {path}')
-                  seen.add(path)
-          for path in changed:
-              if path not in seen:
-                  output.append(f'{by_path[path]}  {path}')
-                  seen.add(path)
-          manifest.write_text('\n'.join(output) + '\n')
-          PY
-          git config user.name "CPCV freeze audit"
-          git config user.email "actions@users.noreply.github.com"
-          git add public/assets/viewer.js scripts/verify-pdf-link-logic.mjs scripts/stage-compatibility-checks.mjs scripts/test-auth-v2.mjs scripts/audit-responsive-layout.py scripts/verify-u22-freeze.mjs docs/current-system.md docs/final-stage08/04_SECURITY_AUTHORIZATION_SPEC.md docs/database-schema.md SOURCE_SHA256SUMS.override.txt
-          git diff --cached --check
-          if git diff --cached --quiet; then
-            echo "No non-workflow audit changes remain."
-            exit 0
-          fi
-          git commit -m "Apply audited non-workflow freeze fixes"
-          git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
+      - name: Audit all dependencies
+        run: |
+          npm audit
+          npm audit --omit=dev
+
+      - name: Upload source freeze candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cpcv-u22-source-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: .freeze-output/
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 30
