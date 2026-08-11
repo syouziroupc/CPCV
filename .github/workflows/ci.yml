@@ -58,7 +58,7 @@ jobs:
         run: npm install-scripts ls
 
       - name: Print final manifest input hashes
-        run: sha256sum package.json .gitignore .github/workflows/ci.yml .github/workflows/desktop-overlay-poc.yml scripts/verify-u22-freeze.mjs scripts/build-u22-freeze-bundle.mjs docs/INDEX.md docs/U22_DATA_FREEZE_PLAN.md
+        run: sha256sum package.json .gitignore .github/workflows/ci.yml .github/workflows/desktop-overlay-poc.yml .github/workflows/deploy-production.yml .github/workflows/responsive-and-ai-regression.yml scripts/verify-u22-freeze.mjs scripts/build-u22-freeze-bundle.mjs docs/INDEX.md docs/U22_DATA_FREEZE_PLAN.md
 
       - name: Run static project and freeze checks
         run: |
