@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { normalizeCommentInput } from '../src/comments/validation.js';
 import { getOrCreateParticipantToken } from '../src/comments/cookies.js';
 import { enforcePublicCommentEdgeLimit } from '../src/realtime/edge-rate-limit.js';
 import { BASE_SECURITY_HEADERS } from '../src/security-headers.js';
 import workerApp from '../src/index.js';
 
-const root = resolve(new URL('..', import.meta.url).pathname);
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const results = [];
 const text = (path) => readFileSync(resolve(root, path), 'utf8');
 function check(name, condition, detail = '') {
