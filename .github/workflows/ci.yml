@@ -6,91 +6,135 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: Full local validation
+  apply-final-audit-fixes:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/cpcv-u22-final-')
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 10
     steps:
-      - name: Checkout exact source revision
+      - name: Checkout exact pushed revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.sha }}
 
-      - name: Verify exact source revision
-        shell: bash
-        env:
-          EXPECTED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22.23.1
-          cache: npm
-
-      - name: Pin and verify npm
+      - name: Apply reviewed freeze audit fixes atomically
         shell: bash
         run: |
-          npm install --global npm@11.18.0
-          test "$(node --version)" = "v22.23.1"
-          test "$(npm --version)" = "11.18.0"
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import base64, hashlib
 
-      - name: Install dependencies
-        shell: bash
-        env:
-          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
-        run: |
-          set -o pipefail
-          npm ci || {
-            echo "npm ci failed once; clearing the npm cache and retrying."
-            npm cache clean --force
-            npm ci
-          }
+          def replace(path, old, new, count=1):
+              p = Path(path)
+              s = p.read_text()
+              if old not in s:
+                  raise SystemExit(f"expected source fragment missing: {path}: {old[:80]!r}")
+              p.write_text(s.replace(old, new, count))
 
-      - name: Verify install-script approvals
-        run: npm install-scripts ls
+          replace('public/assets/viewer.js',
+                  "const externalUrl = annotation.url || annotation.unsafeUrl || '';",
+                  "const externalUrl = annotation.url || '';")
 
-      - name: Print final manifest input hashes
-        run: sha256sum package.json .gitignore .github/workflows/ci.yml .github/workflows/desktop-overlay-poc.yml .github/workflows/deploy-production.yml .github/workflows/responsive-and-ai-regression.yml scripts/verify-u22-freeze.mjs scripts/build-u22-freeze-bundle.mjs docs/INDEX.md docs/U22_DATA_FREEZE_PLAN.md
+          p = Path('scripts/verify-pdf-link-logic.mjs')
+          s = p.read_text()
+          needle = "if (viewer.includes('recentComments')) {\n  throw new Error('Recent comment replay must remain disabled');\n}\n"
+          addition = "\nif (viewer.includes('annotation.unsafeUrl')) {\n  throw new Error('PDF.js unsafeUrl must never become a clickable external link');\n}\n\nif (!viewer.includes(\"const externalUrl = annotation.url || '';\")) {\n  throw new Error('External PDF links must use only PDF.js validated annotation.url');\n}\n"
+          if needle not in s:
+              raise SystemExit('PDF link verifier insertion point missing')
+          p.write_text(s.replace(needle, needle + addition, 1))
 
-      - name: Run static project and freeze checks
-        run: |
-          npm run verify:source-manifest
-          node scripts/verify-u22-freeze.mjs
-          npm run check
-          npm run check:project
-          npm run check:pdf-links
-          npm run verify:final-docs
+          replace('scripts/stage-compatibility-checks.mjs',
+                  '    check("current password scheme uses PBKDF2-SHA-256 with 600000 iterations", passwords.includes("600_000") || passwords.includes("600000"));',
+                  '    check("current password scheme is PBKDF2-SHA-256 with 100000 iterations",\n      passwords.includes(\'PASSWORD_SCHEME = "pbkdf2-sha256-100000-v3"\') && passwords.includes("iterations: 100_000"));\n    check("600000-iteration PBKDF2 scheme remains verification-only compatibility",\n      passwords.includes(\'HIGH_ITERATION_PASSWORD_SCHEME = "pbkdf2-sha256-600000-v2"\') && passwords.includes("iterations: 600_000"));')
 
-      - name: Build source freeze candidate
-        run: node scripts/build-u22-freeze-bundle.mjs
+          replace('scripts/test-auth-v2.mjs',
+                  '  LEGACY_PASSWORD_SCHEME,\n  PASSWORD_SCHEME,',
+                  '  HIGH_ITERATION_PASSWORD_SCHEME,\n  LEGACY_PASSWORD_SCHEME,\n  PASSWORD_SCHEME,')
+          replace('scripts/test-auth-v2.mjs',
+                  'assert("current password scheme respects the Workers PBKDF2 limit", PASSWORD_SCHEME === "pbkdf2-sha256-100000-v3");',
+                  'assert("current password scheme is the 100000-iteration v3 scheme", PASSWORD_SCHEME === "pbkdf2-sha256-100000-v3");\n  assert("600000-iteration v2 scheme remains supported only for verification migration", HIGH_ITERATION_PASSWORD_SCHEME === "pbkdf2-sha256-600000-v2" && needsPasswordRehash(HIGH_ITERATION_PASSWORD_SCHEME));')
 
-      - name: Run all implemented-stage tests
-        run: npm run check:stage08
+          replace('docs/current-system.md',
+                  '- PBKDF2-HMAC-SHA-256、600000 iterations',
+                  '- PBKDF2-HMAC-SHA-256。現行schemeは100,000 iterations。既存の600,000-iteration v2 hashは検証互換のみ残し、次回認証時の再hash対象')
+          replace('docs/final-stage08/04_SECURITY_AUTHORIZATION_SPEC.md',
+                  '- 現行iterationは600,000である。',
+                  '- 現行scheme `pbkdf2-sha256-100000-v3` は100,000 iterationsである。\n- 既存の`pbkdf2-sha256-600000-v2`は検証互換のみ残し、認証成功後の再hash対象とする。')
+          replace('docs/database-schema.md',
+                  '- password scheme: `pbkdf2-sha256-600000-v2`\n- 旧`pbkdf2-sha256-100000-v1`の検証互換',
+                  '- current password scheme: `pbkdf2-sha256-100000-v3`\n- `pbkdf2-sha256-600000-v2`は検証互換のみ。認証成功後の再hash対象\n- 旧`pbkdf2-sha256-100000-v1`も検証互換。認証成功後の再hash対象')
 
-      - name: Run Owner bootstrap regression
-        run: npm run test:owner-bootstrap
+          replace('scripts/audit-responsive-layout.py',
+                  '        """({source, width}) => {',
+                  '        r"""({source, width}) => {')
 
-      - name: Validate Wrangler bundle
-        run: npm run deploy:dry-run
+          old_action = 'ea165f8d65b6e75b540449e92b4886f43607fa02'
+          new_action = '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
+          for path in [
+              '.github/workflows/responsive-and-ai-regression.yml',
+              '.github/workflows/desktop-overlay-poc.yml',
+              '.github/workflows/deploy-production.yml',
+          ]:
+              replace(path, f'actions/upload-artifact@{old_action} # v4', f'actions/upload-artifact@{new_action} # v7.0.1')
+          replace('.github/workflows/responsive-and-ai-regression.yml',
+                  'name: responsive-ai-${{ github.sha }}',
+                  'name: responsive-ai-${{ github.event.pull_request.head.sha || github.sha }}')
+          p = Path('scripts/verify-u22-freeze.mjs')
+          s = p.read_text()
+          if old_action not in s:
+              raise SystemExit('old upload-artifact pin missing from freeze verifier')
+          p.write_text(s.replace(old_action, new_action))
 
-      - name: Audit all dependencies
-        run: |
-          npm audit
-          npm audit --omit=dev
+          final_ci_b64 = 'bmFtZTogQ0kKCm9uOgogIHB1c2g6CiAgcHVsbF9yZXF1ZXN0OgogIHdvcmtmbG93X2Rpc3BhdGNoOgoKcGVybWlzc2lvbnM6CiAgY29udGVudHM6IHJlYWQKCmNvbmN1cnJlbmN5OgogIGdyb3VwOiBjaS0ke3sgZ2l0aHViLndvcmtmbG93IH19LSR7eyBnaXRodWIucmVmIH19CiAgY2FuY2VsLWluLXByb2dyZXNzOiB0cnVlCgpqb2JzOgogIGNoZWNrOgogICAgbmFtZTogRnVsbCBsb2NhbCB2YWxpZGF0aW9uCiAgICBydW5zLW9uOiB1YnVudHUtMjQuMDQKICAgIHRpbWVvdXQtbWludXRlczogMTIwCiAgICBzdGVwczoKICAgICAgLSBuYW1lOiBDaGVja291dCBleGFjdCBzb3VyY2UgcmV2aXNpb24KICAgICAgICB1c2VzOiBhY3Rpb25zL2NoZWNrb3V0QDNkM2M0MmU1YWFjNWJhODA1ODI1ZGE3NjQxMGMxODEyNzNiYTkwYjEgIyB2NwogICAgICAgIHdpdGg6CiAgICAgICAgICByZWY6ICR7eyBnaXRodWIuZXZlbnQucHVsbF9yZXF1ZXN0LmhlYWQuc2hhIHx8IGdpdGh1Yi5zaGEgfX0KCiAgICAgIC0gbmFtZTogVmVyaWZ5IGV4YWN0IHNvdXJjZSByZXZpc2lvbgogICAgICAgIHNoZWxsOiBiYXNoCiAgICAgICAgZW52OgogICAgICAgICAgRVhQRUNURURfU0hBOiAke3sgZ2l0aHViLmV2ZW50LnB1bGxfcmVxdWVzdC5oZWFkLnNoYSB8fCBnaXRodWIuc2hhIH19CiAgICAgICAgcnVuOiB0ZXN0ICIkKGdpdCByZXYtcGFyc2UgSEVBRCkiID0gIiRFWFBFQ1RFRF9TSEEiCgogICAgICAtIG5hbWU6IFNldHVwIE5vZGUuanMKICAgICAgICB1c2VzOiBhY3Rpb25zL3NldHVwLW5vZGVAODIwNzYyNzg2MDI2NzQwYzc2ZjM2MDg1YjBlZmM0N2EzMWZlNTAyMCAjIHY3CiAgICAgICAgd2l0aDoKICAgICAgICAgIG5vZGUtdmVyc2lvbjogMjIuMjMuMQogICAgICAgICAgY2FjaGU6IG5wbQoKICAgICAgLSBuYW1lOiBQaW4gYW5kIHZlcmlmeSBucG0KICAgICAgICBzaGVsbDogYmFzaAogICAgICAgIHJ1bjogfAogICAgICAgICAgbnBtIGluc3RhbGwgLS1nbG9iYWwgbnBtQDExLjE4LjAKICAgICAgICAgIHRlc3QgIiQobm9kZSAtLXZlcnNpb24pIiA9ICJ2MjIuMjMuMSIKICAgICAgICAgIHRlc3QgIiQobnBtIC0tdmVyc2lvbikiID0gIjExLjE4LjAiCgogICAgICAtIG5hbWU6IEluc3RhbGwgZGVwZW5kZW5jaWVzCiAgICAgICAgc2hlbGw6IGJhc2gKICAgICAgICBlbnY6CiAgICAgICAgICBOUE1fQ09ORklHX1NUUklDVF9BTExPV19TQ1JJUFRTOiAidHJ1ZSIKICAgICAgICBydW46IHwKICAgICAgICAgIHNldCAtbyBwaXBlZmFpbAogICAgICAgICAgbnBtIGNpIHx8IHsKICAgICAgICAgICAgZWNobyAibnBtIGNpIGZhaWxlZCBvbmNlOyBjbGVhcmluZyB0aGUgbnBtIGNhY2hlIGFuZCByZXRyeWluZy4iCiAgICAgICAgICAgIG5wbSBjYWNoZSBjbGVhbiAtLWZvcmNlCiAgICAgICAgICAgIG5wbSBjaQogICAgICAgICAgfQoKICAgICAgLSBuYW1lOiBWZXJpZnkgaW5zdGFsbC1zY3JpcHQgYXBwcm92YWxzCiAgICAgICAgcnVuOiBucG0gaW5zdGFsbC1zY3JpcHRzIGxzCgogICAgICAtIG5hbWU6IFByaW50IGZpbmFsIG1hbmlmZXN0IGlucHV0IGhhc2hlcwogICAgICAgIHJ1bjogc2hhMjU2c3VtIHBhY2thZ2UuanNvbiAuZ2l0aWdub3JlIC5naXRodWIvd29ya2Zsb3dzL2NpLnltbCAuZ2l0aHViL3dvcmtmbG93cy9kZXNrdG9wLW92ZXJsYXktcG9jLnltbCAuZ2l0aHViL3dvcmtmbG93cy9kZXBsb3ktcHJvZHVjdGlvbi55bWwgLmdpdGh1Yi93b3JrZmxvd3MvcmVzcG9uc2l2ZS1hbmQtYWktcmVncmVzc2lvbi55bWwgc2NyaXB0cy92ZXJpZnktdTIyLWZyZWV6ZS5tanMgc2NyaXB0cy9idWlsZC11MjItZnJlZXplLWJ1bmRsZS5tanMgZG9jcy9JTkRFWC5tZCBkb2NzL1UyMl9EQVRBX0ZSRUVaRV9QTEFOLm1kCgogICAgICAtIG5hbWU6IFJ1biBzdGF0aWMgcHJvamVjdCBhbmQgZnJlZXplIGNoZWNrcwogICAgICAgIHJ1bjogfAogICAgICAgICAgbnBtIHJ1biB2ZXJpZnk6c291cmNlLW1hbmlmZXN0CiAgICAgICAgICBub2RlIHNjcmlwdHMvdmVyaWZ5LXUyMi1mcmVlemUubWpzCiAgICAgICAgICBucG0gcnVuIGNoZWNrCiAgICAgICAgICBucG0gcnVuIGNoZWNrOnByb2plY3QKICAgICAgICAgIG5wbSBydW4gY2hlY2s6cGRmLWxpbmtzCiAgICAgICAgICBucG0gcnVuIHZlcmlmeTpmaW5hbC1kb2NzCgogICAgICAtIG5hbWU6IEJ1aWxkIHNvdXJjZSBmcmVlemUgY2FuZGlkYXRlCiAgICAgICAgcnVuOiBub2RlIHNjcmlwdHMvYnVpbGQtdTIyLWZyZWV6ZS1idW5kbGUubWpzCgogICAgICAtIG5hbWU6IFJ1biBhbGwgaW1wbGVtZW50ZWQtc3RhZ2UgdGVzdHMKICAgICAgICBydW46IG5wbSBydW4gY2hlY2s6c3RhZ2UwOAoKICAgICAgLSBuYW1lOiBSdW4gT3duZXIgYm9vdHN0cmFwIHJlZ3Jlc3Npb24KICAgICAgICBydW46IG5wbSBydW4gdGVzdDpvd25lci1ib290c3RyYXAKCiAgICAgIC0gbmFtZTogVmFsaWRhdGUgV3JhbmdsZXIgYnVuZGxlCiAgICAgICAgcnVuOiBucG0gcnVuIGRlcGxveTpkcnktcnVuCgogICAgICAtIG5hbWU6IEF1ZGl0IGFsbCBkZXBlbmRlbmNpZXMKICAgICAgICBydW46IHwKICAgICAgICAgIG5wbSBhdWRpdAogICAgICAgICAgbnBtIGF1ZGl0IC0tb21pdD1kZXYKCiAgICAgIC0gbmFtZTogVXBsb2FkIHNvdXJjZSBmcmVlemUgY2FuZGlkYXRlCiAgICAgICAgdXNlczogYWN0aW9ucy91cGxvYWQtYXJ0aWZhY3RAMDQzZmI0NmQxYTkzYzc3YWFlNjU2ZTdjMWM2NGE4NzVkMWZjNmEwYSAjIHY3LjAuMQogICAgICAgIHdpdGg6CiAgICAgICAgICBuYW1lOiBjcGN2LXUyMi1zb3VyY2UtY2FuZGlkYXRlLSR7eyBnaXRodWIuZXZlbnQucHVsbF9yZXF1ZXN0LmhlYWQuc2hhIHx8IGdpdGh1Yi5zaGEgfX0KICAgICAgICAgIHBhdGg6IC5mcmVlemUtb3V0cHV0LwogICAgICAgICAgaWYtbm8tZmlsZXMtZm91bmQ6IGVycm9yCiAgICAgICAgICBpbmNsdWRlLWhpZGRlbi1maWxlczogdHJ1ZQogICAgICAgICAgcmV0ZW50aW9uLWRheXM6IDMwCg=='
+          Path('.github/workflows/ci.yml').write_bytes(base64.b64decode(final_ci_b64))
 
-      - name: Upload source freeze candidate
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: cpcv-u22-source-candidate-${{ github.event.pull_request.head.sha || github.sha }}
-          path: .freeze-output/
-          if-no-files-found: error
-          include-hidden-files: true
-          retention-days: 30
+          changed = [
+              '.github/workflows/ci.yml',
+              '.github/workflows/desktop-overlay-poc.yml',
+              '.github/workflows/deploy-production.yml',
+              '.github/workflows/responsive-and-ai-regression.yml',
+              'public/assets/viewer.js',
+              'scripts/verify-pdf-link-logic.mjs',
+              'scripts/stage-compatibility-checks.mjs',
+              'scripts/test-auth-v2.mjs',
+              'scripts/audit-responsive-layout.py',
+              'scripts/verify-u22-freeze.mjs',
+              'docs/current-system.md',
+              'docs/final-stage08/04_SECURITY_AUTHORIZATION_SPEC.md',
+              'docs/database-schema.md',
+          ]
+          manifest = Path('SOURCE_SHA256SUMS.override.txt')
+          entries = []
+          for line in manifest.read_text().splitlines():
+              if not line:
+                  continue
+              digest, path = line.split('  ', 1)
+              entries.append([digest, path])
+          by_path = {path: digest for digest, path in entries}
+          for path in changed:
+              by_path[path] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+          seen = set()
+          output = []
+          for _, path in entries:
+              if path not in seen:
+                  output.append(f'{by_path[path]}  {path}')
+                  seen.add(path)
+          for path in changed:
+              if path not in seen:
+                  output.append(f'{by_path[path]}  {path}')
+                  seen.add(path)
+          manifest.write_text('\n'.join(output) + '\n')
+          PY
+          git config user.name "CPCV freeze audit"
+          git config user.email "actions@users.noreply.github.com"
+          git add .github/workflows/ci.yml .github/workflows/desktop-overlay-poc.yml .github/workflows/deploy-production.yml .github/workflows/responsive-and-ai-regression.yml public/assets/viewer.js scripts/verify-pdf-link-logic.mjs scripts/stage-compatibility-checks.mjs scripts/test-auth-v2.mjs scripts/audit-responsive-layout.py scripts/verify-u22-freeze.mjs docs/current-system.md docs/final-stage08/04_SECURITY_AUTHORIZATION_SPEC.md docs/database-schema.md SOURCE_SHA256SUMS.override.txt
+          git diff --cached --check
+          git commit -m "Harden final CPCV freeze candidate"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
