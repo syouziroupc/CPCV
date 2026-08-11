@@ -110,7 +110,7 @@ jobs:
           cargo install cargo-audit --version 0.22.2 --locked
           $auditVersion = (cargo audit --version).Trim()
           Write-Host "cargo_audit=$auditVersion"
-          if ($auditVersion -notmatch '^cargo-audit 0\.22\.2') { throw "Unexpected cargo-audit version: $auditVersion" }
+          if ($auditVersion -notmatch '^cargo-audit(?:-audit)? 0\.22\.2(?:\s|$)') { throw "Unexpected cargo-audit version: $auditVersion" }
 
       - name: Audit Rust dependencies with RustSec
         run: cargo audit --file src-tauri/Cargo.lock
