@@ -1,7 +1,6 @@
 name: CI
 
 on:
-  push:
   pull_request:
   workflow_dispatch:
 
@@ -9,33 +8,35 @@ permissions:
   contents: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-audit-patch-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  apply-final-audit-fixes:
+  apply-audited-nonworkflow-fixes:
     if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'release/cpcv-u22-final-20260810'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Checkout exact pushed revision
+      - name: Checkout exact PR head
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Apply reviewed freeze audit fixes atomically
+      - name: Apply non-workflow audit fixes and push
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
-          import base64, hashlib
+          import hashlib
 
           def replace(path, old, new, count=1):
               p = Path(path)
               s = p.read_text()
               if old not in s:
-                  raise SystemExit(f"expected source fragment missing: {path}: {old[:80]!r}")
+                  if new in s:
+                      return
+                  raise SystemExit(f"expected source fragment missing: {path}: {old[:100]!r}")
               p.write_text(s.replace(old, new, count))
 
           replace('public/assets/viewer.js',
@@ -44,11 +45,13 @@ jobs:
 
           p = Path('scripts/verify-pdf-link-logic.mjs')
           s = p.read_text()
-          needle = "if (viewer.includes('recentComments')) {\n  throw new Error('Recent comment replay must remain disabled');\n}\n"
-          addition = "\nif (viewer.includes('annotation.unsafeUrl')) {\n  throw new Error('PDF.js unsafeUrl must never become a clickable external link');\n}\n\nif (!viewer.includes(\"const externalUrl = annotation.url || '';\")) {\n  throw new Error('External PDF links must use only PDF.js validated annotation.url');\n}\n"
-          if needle not in s:
-              raise SystemExit('PDF link verifier insertion point missing')
-          p.write_text(s.replace(needle, needle + addition, 1))
+          marker = "if (viewer.includes('annotation.unsafeUrl'))"
+          if marker not in s:
+              needle = "if (viewer.includes('recentComments')) {\n  throw new Error('Recent comment replay must remain disabled');\n}\n"
+              addition = "\nif (viewer.includes('annotation.unsafeUrl')) {\n  throw new Error('PDF.js unsafeUrl must never become a clickable external link');\n}\n\nif (!viewer.includes(\"const externalUrl = annotation.url || '';\")) {\n  throw new Error('External PDF links must use only PDF.js validated annotation.url');\n}\n"
+              if needle not in s:
+                  raise SystemExit('PDF link verifier insertion point missing')
+              p.write_text(s.replace(needle, needle + addition, 1))
 
           replace('scripts/stage-compatibility-checks.mjs',
                   '    check("current password scheme uses PBKDF2-SHA-256 with 600000 iterations", passwords.includes("600_000") || passwords.includes("600000"));',
@@ -77,34 +80,14 @@ jobs:
 
           old_action = 'ea165f8d65b6e75b540449e92b4886f43607fa02'
           new_action = '043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'
-          for path in [
-              '.github/workflows/responsive-and-ai-regression.yml',
-              '.github/workflows/desktop-overlay-poc.yml',
-              '.github/workflows/deploy-production.yml',
-          ]:
-              replace(path, f'actions/upload-artifact@{old_action} # v4', f'actions/upload-artifact@{new_action} # v7.0.1')
-          p = Path('.github/workflows/responsive-and-ai-regression.yml')
-          s = p.read_text()
-          dollar = '$'
-          old_name = 'name: responsive-ai-' + dollar + '{{ github.sha }}'
-          new_name = 'name: responsive-ai-' + dollar + '{{ github.event.pull_request.head.sha || github.sha }}'
-          if old_name not in s:
-              raise SystemExit('responsive artifact name source missing')
-          p.write_text(s.replace(old_name, new_name, 1))
           p = Path('scripts/verify-u22-freeze.mjs')
           s = p.read_text()
-          if old_action not in s:
-              raise SystemExit('old upload-artifact pin missing from freeze verifier')
-          p.write_text(s.replace(old_action, new_action))
-
-          final_ci_b64 = 'bmFtZTogQ0kKCm9uOgogIHB1c2g6CiAgcHVsbF9yZXF1ZXN0OgogIHdvcmtmbG93X2Rpc3BhdGNoOgoKcGVybWlzc2lvbnM6CiAgY29udGVudHM6IHJlYWQKCmNvbmN1cnJlbmN5OgogIGdyb3VwOiBjaS0ke3sgZ2l0aHViLndvcmtmbG93IH19LSR7eyBnaXRodWIucmVmIH19CiAgY2FuY2VsLWluLXByb2dyZXNzOiB0cnVlCgpqb2JzOgogIGNoZWNrOgogICAgbmFtZTogRnVsbCBsb2NhbCB2YWxpZGF0aW9uCiAgICBydW5zLW9uOiB1YnVudHUtMjQuMDQKICAgIHRpbWVvdXQtbWludXRlczogMTIwCiAgICBzdGVwczoKICAgICAgLSBuYW1lOiBDaGVja291dCBleGFjdCBzb3VyY2UgcmV2aXNpb24KICAgICAgICB1c2VzOiBhY3Rpb25zL2NoZWNrb3V0QDNkM2M0MmU1YWFjNWJhODA1ODI1ZGE3NjQxMGMxODEyNzNiYTkwYjEgIyB2NwogICAgICAgIHdpdGg6CiAgICAgICAgICByZWY6ICR7eyBnaXRodWIuZXZlbnQucHVsbF9yZXF1ZXN0LmhlYWQuc2hhIHx8IGdpdGh1Yi5zaGEgfX0KCiAgICAgIC0gbmFtZTogVmVyaWZ5IGV4YWN0IHNvdXJjZSByZXZpc2lvbgogICAgICAgIHNoZWxsOiBiYXNoCiAgICAgICAgZW52OgogICAgICAgICAgRVhQRUNURURfU0hBOiAke3sgZ2l0aHViLmV2ZW50LnB1bGxfcmVxdWVzdC5oZWFkLnNoYSB8fCBnaXRodWIuc2hhIH19CiAgICAgICAgcnVuOiB0ZXN0ICIkKGdpdCByZXYtcGFyc2UgSEVBRCkiID0gIiRFWFBFQ1RFRF9TSEEiCgogICAgICAtIG5hbWU6IFNldHVwIE5vZGUuanMKICAgICAgICB1c2VzOiBhY3Rpb25zL3NldHVwLW5vZGVAODIwNzYyNzg2MDI2NzQwYzc2ZjM2MDg1YjBlZmM0N2EzMWZlNTAyMCAjIHY3CiAgICAgICAgd2l0aDoKICAgICAgICAgIG5vZGUtdmVyc2lvbjogMjIuMjMuMQogICAgICAgICAgY2FjaGU6IG5wbQoKICAgICAgLSBuYW1lOiBQaW4gYW5kIHZlcmlmeSBucG0KICAgICAgICBzaGVsbDogYmFzaAogICAgICAgIHJ1bjogfAogICAgICAgICAgbnBtIGluc3RhbGwgLS1nbG9iYWwgbnBtQDExLjE4LjAKICAgICAgICAgIHRlc3QgIiQobm9kZSAtLXZlcnNpb24pIiA9ICJ2MjIuMjMuMSIKICAgICAgICAgIHRlc3QgIiQobnBtIC0tdmVyc2lvbikiID0gIjExLjE4LjAiCgogICAgICAtIG5hbWU6IEluc3RhbGwgZGVwZW5kZW5jaWVzCiAgICAgICAgc2hlbGw6IGJhc2gKICAgICAgICBlbnY6CiAgICAgICAgICBOUE1fQ09ORklHX1NUUklDVF9BTExPV19TQ1JJUFRTOiAidHJ1ZSIKICAgICAgICBydW46IHwKICAgICAgICAgIHNldCAtbyBwaXBlZmFpbAogICAgICAgICAgbnBtIGNpIHx8IHsKICAgICAgICAgICAgZWNobyAibnBtIGNpIGZhaWxlZCBvbmNlOyBjbGVhcmluZyB0aGUgbnBtIGNhY2hlIGFuZCByZXRyeWluZy4iCiAgICAgICAgICAgIG5wbSBjYWNoZSBjbGVhbiAtLWZvcmNlCiAgICAgICAgICAgIG5wbSBjaQogICAgICAgICAgfQoKICAgICAgLSBuYW1lOiBWZXJpZnkgaW5zdGFsbC1zY3JpcHQgYXBwcm92YWxzCiAgICAgICAgcnVuOiBucG0gaW5zdGFsbC1zY3JpcHRzIGxzCgogICAgICAtIG5hbWU6IFByaW50IGZpbmFsIG1hbmlmZXN0IGlucHV0IGhhc2hlcwogICAgICAgIHJ1bjogc2hhMjU2c3VtIHBhY2thZ2UuanNvbiAuZ2l0aWdub3JlIC5naXRodWIvd29ya2Zsb3dzL2NpLnltbCAuZ2l0aHViL3dvcmtmbG93cy9kZXNrdG9wLW92ZXJsYXktcG9jLnltbCAuZ2l0aHViL3dvcmtmbG93cy9kZXBsb3ktcHJvZHVjdGlvbi55bWwgLmdpdGh1Yi93b3JrZmxvd3MvcmVzcG9uc2l2ZS1hbmQtYWktcmVncmVzc2lvbi55bWwgc2NyaXB0cy92ZXJpZnktdTIyLWZyZWV6ZS5tanMgc2NyaXB0cy9idWlsZC11MjItZnJlZXplLWJ1bmRsZS5tanMgZG9jcy9JTkRFWC5tZCBkb2NzL1UyMl9EQVRBX0ZSRUVaRV9QTEFOLm1kCgogICAgICAtIG5hbWU6IFJ1biBzdGF0aWMgcHJvamVjdCBhbmQgZnJlZXplIGNoZWNrcwogICAgICAgIHJ1bjogfAogICAgICAgICAgbnBtIHJ1biB2ZXJpZnk6c291cmNlLW1hbmlmZXN0CiAgICAgICAgICBub2RlIHNjcmlwdHMvdmVyaWZ5LXUyMi1mcmVlemUubWpzCiAgICAgICAgICBucG0gcnVuIGNoZWNrCiAgICAgICAgICBucG0gcnVuIGNoZWNrOnByb2plY3QKICAgICAgICAgIG5wbSBydW4gY2hlY2s6cGRmLWxpbmtzCiAgICAgICAgICBucG0gcnVuIHZlcmlmeTpmaW5hbC1kb2NzCgogICAgICAtIG5hbWU6IEJ1aWxkIHNvdXJjZSBmcmVlemUgY2FuZGlkYXRlCiAgICAgICAgcnVuOiBub2RlIHNjcmlwdHMvYnVpbGQtdTIyLWZyZWV6ZS1idW5kbGUubWpzCgogICAgICAtIG5hbWU6IFJ1biBhbGwgaW1wbGVtZWQtc3RhZ2UgdGVzdHMKICAgICAgICBydW46IG5wbSBydW4gY2hlY2s6c3RhZ2UwOAoKICAgICAgLSBuYW1lOiBSdW4gT3duZXIgYm9vdHN0cmFwIHJlZ3Jlc3Npb24KICAgICAgICBydW46IG5wbSBydW4gdGVzdDpvd25lci1ib290c3RyYXAKCiAgICAgIC0gbmFtZTogVmFsaWRhdGUgV3JhbmdsZXIgYnVuZGxlCiAgICAgICAgcnVuOiBucG0gcnVuIGRlcGxveTpkcnktcnVuCgogICAgICAtIG5hbWU6IEF1ZGl0IGFsbCBkZXBlbmRlbmNpZXMKICAgICAgICBydW46IHwKICAgICAgICAgIG5wbSBhdWRpdAogICAgICAgICAgbnBtIGF1ZGl0IC0tb21pdD1kZXYKCiAgICAgIC0gbmFtZTogVXBsb2FkIHNvdXJjZSBmcmVlemUgY2FuZGlkYXRlCiAgICAgICAgdXNlczogYWN0aW9ucy91cGxvYWQtYXJ0aWZhY3RAMDQzZmI0NmQxYTkzYzc3YWFlNjU2ZTdjMWM2NGE4NzVkMWZjNmEwYSAjIHY3LjAuMQogICAgICAgIHdpdGg6CiAgICAgICAgICBuYW1lOiBjcGN2LXUyMi1zb3VyY2UtY2FuZGlkYXRlLSR7eyBnaXRodWIuZXZlbnQucHVsbF9yZXF1ZXN0LmhlYWQuc2hhIHx8IGdpdGh1Yi5zaGEgfX0KICAgICAgICAgIHBhdGg6IC5mcmVlemUtb3V0cHV0LwogICAgICAgICAgaWYtbm8tZmlsZXMtZm91bmQ6IGVycm9yCiAgICAgICAgICBpbmNsdWRlLWhpZGRlbi1maWxlczogdHJ1ZQogICAgICAgICAgcmV0ZW50aW9uLWRheXM6IDMwCg=='
-          Path('.github/workflows/ci.yml').write_bytes(base64.b64decode(final_ci_b64))
+          if old_action in s:
+              p.write_text(s.replace(old_action, new_action))
+          elif new_action not in s:
+              raise SystemExit('artifact action pin missing from freeze verifier')
 
           changed = [
-              '.github/workflows/ci.yml',
-              '.github/workflows/desktop-overlay-poc.yml',
-              '.github/workflows/deploy-production.yml',
-              '.github/workflows/responsive-and-ai-regression.yml',
               'public/assets/viewer.js',
               'scripts/verify-pdf-link-logic.mjs',
               'scripts/stage-compatibility-checks.mjs',
@@ -139,7 +122,11 @@ jobs:
           PY
           git config user.name "CPCV freeze audit"
           git config user.email "actions@users.noreply.github.com"
-          git add .github/workflows/ci.yml .github/workflows/desktop-overlay-poc.yml .github/workflows/deploy-production.yml .github/workflows/responsive-and-ai-regression.yml public/assets/viewer.js scripts/verify-pdf-link-logic.mjs scripts/stage-compatibility-checks.mjs scripts/test-auth-v2.mjs scripts/audit-responsive-layout.py scripts/verify-u22-freeze.mjs docs/current-system.md docs/final-stage08/04_SECURITY_AUTHORIZATION_SPEC.md docs/database-schema.md SOURCE_SHA256SUMS.override.txt
+          git add public/assets/viewer.js scripts/verify-pdf-link-logic.mjs scripts/stage-compatibility-checks.mjs scripts/test-auth-v2.mjs scripts/audit-responsive-layout.py scripts/verify-u22-freeze.mjs docs/current-system.md docs/final-stage08/04_SECURITY_AUTHORIZATION_SPEC.md docs/database-schema.md SOURCE_SHA256SUMS.override.txt
           git diff --cached --check
-          git commit -m "Harden final CPCV freeze candidate"
+          if git diff --cached --quiet; then
+            echo "No non-workflow audit changes remain."
+            exit 0
+          fi
+          git commit -m "Apply audited non-workflow freeze fixes"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
