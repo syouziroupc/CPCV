@@ -31,7 +31,7 @@ const incompleteConfig = current
   check("complete deployment configuration is accepted", valid.status === 0 && valid.stdout.includes("verified"), valid);
 
   const unrestrictedEmailPath = join(temp, "unrestricted-email.toml");
-  writeFileSync(unrestrictedEmailPath, validConfig.replace('allowed_sender_addresses = [ "noreply@szworld.uk" ]\n', ""));
+  writeFileSync(unrestrictedEmailPath, validConfig.replace(/^allowed_sender_addresses\s*=\s*\[\s*"noreply@szworld\.uk"\s*\]\r?\n/m, ""));
   const unrestrictedEmail = run("scripts/verify-deployment-config.mjs", [unrestrictedEmailPath]);
   check("unrestricted Email sender binding is rejected", unrestrictedEmail.status === 1 && unrestrictedEmail.stderr.includes("allowed_sender_addresses"), unrestrictedEmail);
 
