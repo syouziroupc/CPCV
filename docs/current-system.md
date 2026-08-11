@@ -38,7 +38,7 @@ Stage 8.2 migration `0017_final_integrity_hardening.sql`は組織・session・co
 - HttpOnly Cookie
 - productionでSecureとSameSite=Strict
 - unsafe requestでOrigin完全一致、JSON、CSRF
-- PBKDF2-HMAC-SHA-256、600000 iterations
+- PBKDF2-HMAC-SHA-256。現行schemeは100,000 iterations。既存の600,000-iteration v2 hashは検証互換のみ残し、次回認証時の再hash対象
 - login IPとaccountのRate Limiting
 - limiter障害時はfail closed
 - password変更は組織context取得後に一括確定

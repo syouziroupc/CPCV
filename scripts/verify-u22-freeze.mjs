@@ -47,7 +47,7 @@ check('Web npm is pinned to 11.18.0', rootPackage.packageManager === 'npm@11.18.
 check('Web CI pins Ubuntu 24.04', ciWorkflow.includes('runs-on: ubuntu-24.04'));
 check('Web CI pins Node 22.23.1', ciWorkflow.includes('node-version: 22.23.1') && ciWorkflow.includes('v22.23.1'));
 check('Web CI pins npm 11.18.0', ciWorkflow.includes('npm install --global npm@11.18.0') && ciWorkflow.includes('11.18.0'));
-check('Web CI pins official actions to immutable SHAs', ciWorkflow.includes('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1') && ciWorkflow.includes('actions/setup-node@820762786026740c76f36085b0efc47a31fe5020') && ciWorkflow.includes('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'));
+check('Web CI pins official actions to immutable SHAs', ciWorkflow.includes('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1') && ciWorkflow.includes('actions/setup-node@820762786026740c76f36085b0efc47a31fe5020') && ciWorkflow.includes('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'));
 check('Web CI checks out and verifies exact PR head', ciWorkflow.includes('ref: ${{ github.event.pull_request.head.sha || github.sha }}') && ciWorkflow.includes('Verify exact source revision'));
 
 check('Desktop package version is 0.2.2', desktopPackage.version === '0.2.2');
@@ -65,7 +65,7 @@ check('Desktop workflow pins Node 22.23.1', desktopWorkflow.includes('node-versi
 check('Desktop workflow pins npm 10.9.8', desktopWorkflow.includes('npm install --global npm@10.9.8'));
 check('Desktop workflow installs rustc 1.97.1 explicitly', desktopWorkflow.includes('rustup toolchain install 1.97.1'));
 check('Desktop workflow avoids moving third-party Rust action', !desktopWorkflow.includes('dtolnay/rust-toolchain@'));
-check('Desktop workflow pins official actions to immutable SHAs', desktopWorkflow.includes('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1') && desktopWorkflow.includes('actions/setup-node@820762786026740c76f36085b0efc47a31fe5020') && desktopWorkflow.includes('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'));
+check('Desktop workflow pins official actions to immutable SHAs', desktopWorkflow.includes('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1') && desktopWorkflow.includes('actions/setup-node@820762786026740c76f36085b0efc47a31fe5020') && desktopWorkflow.includes('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'));
 check('Desktop workflow runs pinned RustSec audit', desktopWorkflow.includes('cargo install cargo-audit --version 0.22.2 --locked') && desktopWorkflow.includes('cargo audit --file src-tauri/Cargo.lock'));
 check('Desktop artifact records build environment', desktopWorkflow.includes('CPCV_BUILD_ENVIRONMENT.txt'));
 
@@ -75,7 +75,7 @@ check('Production workflow pins Ubuntu, Node, npm and immutable actions',
   productionWorkflow.includes('npm install --global npm@11.18.0') &&
   productionWorkflow.includes('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1') &&
   productionWorkflow.includes('actions/setup-node@820762786026740c76f36085b0efc47a31fe5020') &&
-  productionWorkflow.includes('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'));
+  productionWorkflow.includes('actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a'));
 check('Production workflow enforces reviewed install scripts and freeze verification',
   productionWorkflow.includes('NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"') &&
   productionWorkflow.includes('npm install-scripts ls') &&

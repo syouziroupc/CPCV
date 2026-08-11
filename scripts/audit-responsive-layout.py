@@ -25,7 +25,7 @@ KEY_PAGES = {
 
 async def inspect(page, source: str, width: int) -> dict:
     return await page.evaluate(
-        """({source, width}) => {
+        r"""({source, width}) => {
           const visible = (el) => {
             const s = getComputedStyle(el);
             const r = el.getBoundingClientRect();

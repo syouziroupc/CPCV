@@ -21,6 +21,7 @@ import {
 import { AuthError } from "../src/auth/errors.js";
 import { authSessionLookupSql, requireAuth, requireRole } from "../src/auth/middleware.js";
 import {
+  HIGH_ITERATION_PASSWORD_SCHEME,
   LEGACY_PASSWORD_SCHEME,
   PASSWORD_SCHEME,
   constantTimeEqual,
@@ -145,7 +146,8 @@ async function testPasswords() {
   const hash = await hashPassword("correct horse battery", salt);
   assert("current PBKDF2 password verifies", await verifyPassword("correct horse battery", salt, hash, PASSWORD_SCHEME));
   assert("wrong current PBKDF2 password does not verify", !await verifyPassword("wrong password value", salt, hash, PASSWORD_SCHEME));
-  assert("current password scheme respects the Workers PBKDF2 limit", PASSWORD_SCHEME === "pbkdf2-sha256-100000-v3");
+  assert("current password scheme is the 100000-iteration v3 scheme", PASSWORD_SCHEME === "pbkdf2-sha256-100000-v3");
+  assert("600000-iteration v2 scheme remains supported only for verification migration", HIGH_ITERATION_PASSWORD_SCHEME === "pbkdf2-sha256-600000-v2" && needsPasswordRehash(HIGH_ITERATION_PASSWORD_SCHEME));
   const legacySalt = createSalt();
   const legacyHash = await legacyHashPassword("legacy password value", legacySalt);
   assert("legacy PBKDF2 v1 password verifies during migration", await verifyPassword("legacy password value", legacySalt, legacyHash, LEGACY_PASSWORD_SCHEME));

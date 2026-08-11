@@ -50,7 +50,10 @@ export function runStageCompatibility(stage) {
       "src/auth/passwords.js", "src/auth/permissions.js", "src/auth/sessions.js"
     ]) requireFile(path);
     const passwords = read("src/auth/passwords.js");
-    check("current password scheme uses PBKDF2-SHA-256 with 600000 iterations", passwords.includes("600_000") || passwords.includes("600000"));
+    check("current password scheme is PBKDF2-SHA-256 with 100000 iterations",
+      passwords.includes('PASSWORD_SCHEME = "pbkdf2-sha256-100000-v3"') && passwords.includes("iterations: 100_000"));
+    check("600000-iteration PBKDF2 scheme remains verification-only compatibility",
+      passwords.includes('HIGH_ITERATION_PASSWORD_SCHEME = "pbkdf2-sha256-600000-v2"') && passwords.includes("iterations: 600_000"));
     const csrf = read("src/auth/csrf.js");
     check("unsafe authenticated requests require origin, JSON, and CSRF checks", ["requireSameOrigin", "requireJsonContentType", "requireCsrf"].every((marker) => csrf.includes(marker)));
   }

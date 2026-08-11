@@ -22,4 +22,12 @@ if (viewer.includes('recentComments')) {
   throw new Error('Recent comment replay must remain disabled');
 }
 
+if (viewer.includes('annotation.unsafeUrl')) {
+  throw new Error('PDF.js unsafeUrl must never become a clickable external link');
+}
+
+if (!viewer.includes("const externalUrl = annotation.url || '';")) {
+  throw new Error('External PDF links must use only PDF.js validated annotation.url');
+}
+
 console.log('PDF link and reconnect logic verified');

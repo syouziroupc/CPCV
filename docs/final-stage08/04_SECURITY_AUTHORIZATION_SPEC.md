@@ -13,7 +13,8 @@
 ## 2. password
 
 - PBKDF2-HMAC-SHA-256を使用する。
-- 現行iterationは600,000である。
+- 現行scheme `pbkdf2-sha256-100000-v3` は100,000 iterationsである。
+- 既存の`pbkdf2-sha256-600000-v2`は検証互換のみ残し、認証成功後の再hash対象とする。
 - passwordは8文字以上128文字以下である。
 - password変更とreset後は既存sessionを失効する。
 - plaintext。hash。saltをlogへ出さない。

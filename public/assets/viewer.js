@@ -313,7 +313,7 @@ async function renderPdfLinks(page, viewport, requestId) {
   const linkGroups = new Map();
   for (const annotation of annotations) {
     if (annotation.subtype !== 'Link' || !Array.isArray(annotation.rect)) continue;
-    const externalUrl = annotation.url || annotation.unsafeUrl || '';
+    const externalUrl = annotation.url || '';
     if (!externalUrl && !annotation.dest) continue;
     const hitAreas = getPdfLinkHitAreas(annotation, viewport);
     const targetKey = externalUrl

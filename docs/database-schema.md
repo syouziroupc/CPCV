@@ -228,8 +228,9 @@ npx wrangler d1 execute DB_V2 --local --persist-to .stage02-d1 \
 
 ## 8. 第3段階Aで追加した認証基盤
 
-- password scheme: `pbkdf2-sha256-600000-v2`
-- 旧`pbkdf2-sha256-100000-v1`の検証互換
+- current password scheme: `pbkdf2-sha256-100000-v3`
+- `pbkdf2-sha256-600000-v2`は検証互換のみ。認証成功後の再hash対象
+- 旧`pbkdf2-sha256-100000-v1`も検証互換。認証成功後の再hash対象
 - production Cookie: `__Host-cpcv_session`
 - local Cookie: `cpcv_session_dev`
 - session idle期限: 2時間
