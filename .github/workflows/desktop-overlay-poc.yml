@@ -72,7 +72,15 @@ jobs:
         shell: pwsh
         working-directory: .
         run: |
-          $external = Join-Path $env:TEMP "cpcv-staging-cross-drive-$PID.toml"
+          $externalRoot = Join-Path $env:USERPROFILE "AppData\Local\Temp"
+          New-Item -ItemType Directory -Path $externalRoot -Force | Out-Null
+          $external = Join-Path $externalRoot "cpcv-staging-cross-drive-$PID.toml"
+          $repoDrive = [IO.Path]::GetPathRoot((Resolve-Path ".").Path)
+          $externalDrive = [IO.Path]::GetPathRoot((Resolve-Path $externalRoot).Path)
+          if ($repoDrive -eq $externalDrive) {
+            throw "Regression setup error: repository and external config must be on different Windows drives. repo=$repoDrive external=$externalDrive"
+          }
+          Write-Host "Cross-drive regression: repo=$repoDrive external=$externalDrive"
           try {
             "name = `"cross-drive-test`"" | Set-Content -LiteralPath $external -Encoding utf8NoBOM
             $hash = (Get-FileHash -LiteralPath $external -Algorithm SHA256).Hash.ToLowerInvariant()
