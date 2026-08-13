@@ -30,9 +30,9 @@ fb997f6b7d47b123e047c711d92c49af53196c74f8367d925a0f6f79ec179459  desktop-overla
 b085eb43bd7a4c913904d417680f62861de279225669c9be62e438621f47092d  desktop-overlay-poc/src-tauri/Cargo.lock
 89debbff7776c67c028c0c24687a9efee4351ad33c6fdae8a29fcf53e3f5c90b  desktop-overlay-poc/src-tauri/build.rs
 e39e4b47d0eeacd181d428fbe495969432d35c6cb83d1095229ea19b2ddda825  desktop-overlay-poc/src-tauri/capabilities/default.json
-3ebe9f80b761fd9c197d9a9621ea63ccef2a5b280982ddf9f8ab84af47ae0d35  desktop-overlay-poc/src-tauri/scripts/admin.js
+8569a8a4ce96efae1662fdb174d0c76b38221109ab16785bc843e881a49573a4  desktop-overlay-poc/src-tauri/scripts/admin.js
 7ebe4bd6980816d24d62c12cd650ac3d93c20e67e577775e6b4a704380084fc1  desktop-overlay-poc/src-tauri/scripts/overlay.js
-eb78b42aaf3952d85527488470a63ab59adf6e2c2aeec39ea90852eb44b0f51c  desktop-overlay-poc/src-tauri/src/main.rs
+41935a82b1bce11544394a69f9926f4590485db25b103e2892997e1490680f74  desktop-overlay-poc/src-tauri/src/main.rs
 c82efef956fbe99c17571822ce57548110eab9eb674954b78601e03430d991b7  desktop-overlay-poc/src-tauri/tauri.conf.json
 e94739a9e0c5e1d0401fb1e7387da9e7d814f55ab45c3358f78da6d11ca6d09a  desktop-overlay-poc/ui/app.css
 4d1503bea9afc3b5c7bd756d553c4abad331cdec8929e024fa5ea6d4e3b73a05  desktop-overlay-poc/ui/app.js
