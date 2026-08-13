@@ -14,6 +14,7 @@ on:
       - "public/assets/viewer.js"
       - "src/index.js"
       - "wrangler.toml"
+      - "scripts/materialize-staging-config.mjs"
   push:
     branches:
       - "master"
@@ -31,6 +32,7 @@ on:
       - "public/assets/viewer.js"
       - "src/index.js"
       - "wrangler.toml"
+      - "scripts/materialize-staging-config.mjs"
   workflow_dispatch:
 
 permissions:
@@ -65,6 +67,25 @@ jobs:
       - name: Verify source manifest
         working-directory: .
         run: node scripts/verify-source-manifest.mjs
+
+      - name: Verify Windows cross-drive staging config materialization
+        shell: pwsh
+        working-directory: .
+        run: |
+          $external = Join-Path $env:TEMP "cpcv-staging-cross-drive-$PID.toml"
+          try {
+            "name = `"cross-drive-test`"" | Set-Content -LiteralPath $external -Encoding utf8NoBOM
+            $hash = (Get-FileHash -LiteralPath $external -Algorithm SHA256).Hash.ToLowerInvariant()
+            node scripts/materialize-staging-config.mjs $external --expected-sha256 $hash
+            if (-not (Test-Path -LiteralPath ".cpcv-staging.wrangler.toml" -PathType Leaf)) {
+              throw "Windows cross-drive staging materialization did not create the runtime config."
+            }
+            $runtimeHash = (Get-FileHash -LiteralPath ".cpcv-staging.wrangler.toml" -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($runtimeHash -ne $hash) { throw "Windows cross-drive staging materialization changed bytes." }
+          } finally {
+            Remove-Item -LiteralPath $external -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath ".cpcv-staging.wrangler.toml" -Force -ErrorAction SilentlyContinue
+          }
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
