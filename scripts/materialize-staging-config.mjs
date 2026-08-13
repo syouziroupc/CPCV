@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { basename, dirname, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
@@ -59,5 +59,5 @@ function main() {
 
 function isInside(parent, child) {
   const value = relative(parent, child);
-  return value !== "" && value !== ".." && !value.startsWith(`..${sep}`) && !value.startsWith("../") && !value.startsWith("..\\");
+  return value !== "" && !isAbsolute(value) && value !== ".." && !value.startsWith(`..${sep}`) && !value.startsWith("../") && !value.startsWith("..\\");
 }
