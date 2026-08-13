@@ -238,9 +238,7 @@ fn monitor_index_and_label(
         return Err("利用可能なディスプレイが見つかりません。".to_string());
     }
 
-    let primary = app
-        .primary_monitor()
-        .map_err(|error| error.to_string())?;
+    let primary = app.primary_monitor().map_err(|error| error.to_string())?;
 
     let index = preferred
         .filter(|index| *index < monitors.len())
@@ -254,16 +252,17 @@ fn monitor_index_and_label(
         })
         .unwrap_or(0);
 
-    Ok((index, monitor_label(index, &monitors[index], primary.as_ref())))
+    Ok((
+        index,
+        monitor_label(index, &monitors[index], primary.as_ref()),
+    ))
 }
 
 fn monitor_options(app: &AppHandle) -> Result<Vec<String>, String> {
     let monitors = app
         .available_monitors()
         .map_err(|error| error.to_string())?;
-    let primary = app
-        .primary_monitor()
-        .map_err(|error| error.to_string())?;
+    let primary = app.primary_monitor().map_err(|error| error.to_string())?;
 
     Ok(monitors
         .iter()
@@ -538,9 +537,7 @@ fn toggle_qr(app: &AppHandle) -> Result<(), String> {
 
 fn select_monitor(app: &AppHandle, monitor_index: usize) -> Result<(), String> {
     let monitor = monitor_at(app, monitor_index)?;
-    let primary = app
-        .primary_monitor()
-        .map_err(|error| error.to_string())?;
+    let primary = app.primary_monitor().map_err(|error| error.to_string())?;
     let label = monitor_label(monitor_index, &monitor, primary.as_ref());
 
     if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
