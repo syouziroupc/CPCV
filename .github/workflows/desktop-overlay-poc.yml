@@ -101,6 +101,26 @@ jobs:
           cache: npm
           cache-dependency-path: desktop-overlay-poc/package-lock.json
 
+      - name: Pin Web npm for Windows Stage 8 regression
+        shell: pwsh
+        working-directory: .
+        run: |
+          npm install --global npm@11.18.0
+          $nodeVersion = (node --version).Trim()
+          $npmVersion = (npm --version).Trim()
+          if ($nodeVersion -ne "v22.23.1") { throw "Unexpected Web regression node version: $nodeVersion" }
+          if ($npmVersion -ne "11.18.0") { throw "Unexpected Web regression npm version: $npmVersion" }
+
+      - name: Install root dependencies for Windows Stage 8 regression
+        working-directory: .
+        env:
+          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
+        run: npm ci
+
+      - name: Run Windows Stage 8 regression on frozen Node
+        working-directory: .
+        run: npm run check:stage08
+
       - name: Pin Desktop npm
         run: npm install --global npm@10.9.8
 
