@@ -17,7 +17,9 @@
     overlayActive: false,
     commentsVisible: true,
     qrVisible: false,
+    monitorIndex: null,
     monitorLabel: '自動選択',
+    monitorOptions: [],
     environmentLabel: '',
     message: 'CPCVへ接続しています。',
     error: false
@@ -256,7 +258,8 @@
         color: #fff;
         font: 600 14px/1.25 "Segoe UI", "Yu Gothic UI", sans-serif;
       }
-      #cpcvDesktopBar button {
+      #cpcvDesktopBar button,
+      #cpcvDesktopBar select {
         min-height: 38px;
         border: 1px solid rgba(255,255,255,.34);
         border-radius: 0;
@@ -264,9 +267,15 @@
         background: #242a31;
         color: #fff;
         font: inherit;
+      }
+      #cpcvDesktopBar button { cursor: pointer; }
+      #cpcvDesktopBar select {
+        min-width: 250px;
+        max-width: 390px;
         cursor: pointer;
       }
-      #cpcvDesktopBar button:hover:not(:disabled) { background: #343c46; }
+      #cpcvDesktopBar button:hover:not(:disabled),
+      #cpcvDesktopBar select:hover:not(:disabled) { background: #343c46; }
       #cpcvDesktopBar button:disabled { opacity: .42; cursor: not-allowed; }
       #cpcvDesktopBar button[data-active="true"] {
         background: #fff;
@@ -327,7 +336,15 @@
     const stop = makeButton('cpcvDesktopStop', '投影停止', () => dispatch('overlay/stop'));
     const comments = makeButton('cpcvDesktopComments', 'コメント', toggleServerComments);
     const qr = makeButton('cpcvDesktopQr', 'QR', () => dispatch('qr/toggle'));
-    const monitor = makeButton('cpcvDesktopMonitor', '投影先', () => dispatch('monitor/next'));
+    const monitor = document.createElement('select');
+    monitor.id = 'cpcvDesktopMonitor';
+    monitor.setAttribute('aria-label', '投影先ディスプレイ');
+    monitor.addEventListener('change', () => {
+      const index = Number.parseInt(monitor.value, 10);
+      if (Number.isInteger(index) && index >= 0) {
+        dispatch('monitor/select', false, { index });
+      }
+    });
     const status = document.createElement('span');
     status.id = 'cpcvDesktopStatus';
     const environment = document.createElement('span');
@@ -359,7 +376,32 @@
     qr.dataset.active = String(state.qrVisible);
     comments.textContent = state.commentsVisible ? 'コメント ON' : 'コメント OFF';
     qr.textContent = state.qrVisible ? 'QR ON' : 'QR OFF';
-    monitor.textContent = `投影先: ${state.monitorLabel || '自動選択'}`;
+    const options = Array.isArray(state.monitorOptions) ? state.monitorOptions : [];
+    const selectedIndex = Number.isInteger(state.monitorIndex) ? state.monitorIndex : -1;
+    const currentSignature = options.join('\u0000');
+    if (monitor.dataset.options !== currentSignature) {
+      monitor.replaceChildren();
+      if (!options.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '投影先：未検出';
+        monitor.appendChild(option);
+      } else {
+        options.forEach((label, index) => {
+          const option = document.createElement('option');
+          option.value = String(index);
+          option.textContent = `投影先：${label}`;
+          monitor.appendChild(option);
+        });
+      }
+      monitor.dataset.options = currentSignature;
+    }
+    monitor.disabled = options.length === 0;
+    if (selectedIndex >= 0 && selectedIndex < options.length) {
+      monitor.value = String(selectedIndex);
+    }
+    monitor.title = state.monitorLabel ? `現在の投影先：${state.monitorLabel}` : '投影先を選択';
+
     status.textContent = !id && !state.error
       ? state.message || '授業を作成または選択すると投影できます。'
       : state.message;

@@ -19,6 +19,7 @@
 
   const hide = (element) => {
     if (!element) return;
+    element.classList.add('hidden');
     element.style.setProperty('display', 'none', 'important');
   };
 
@@ -54,8 +55,8 @@
       body[data-cpcv-desktop-overlay="true"] #emptyDocument,
       body[data-cpcv-desktop-overlay="true"] #topBar,
       body[data-cpcv-desktop-overlay="true"] #pdfPageControls,
-      body[data-cpcv-desktop-overlay="true"] #qrCorner,
-      body[data-cpcv-desktop-overlay="true"] #viewerLogin {
+      body[data-cpcv-desktop-overlay="true"] #viewerLogin,
+      body[data-cpcv-desktop-overlay="true"] #qrOverlay {
         display: none !important;
       }
       body[data-cpcv-desktop-overlay="true"] #commentPanel {
@@ -72,12 +73,26 @@
       }
       body[data-cpcv-desktop-overlay="true"] #commentList,
       body[data-cpcv-desktop-overlay="true"] #scrollCommentLayer,
-      body[data-cpcv-desktop-overlay="true"] #qrOverlay {
+      body[data-cpcv-desktop-overlay="true"] #qrCorner {
         pointer-events: none !important;
       }
-      body[data-cpcv-desktop-overlay="true"] #qrOverlay {
-        background: transparent !important;
-        background-color: transparent !important;
+      body[data-cpcv-desktop-overlay="true"] #qrCorner {
+        position: fixed !important;
+        top: 18px !important;
+        right: 18px !important;
+        bottom: auto !important;
+        left: auto !important;
+        width: clamp(160px, 16vw, 232px) !important;
+        height: clamp(160px, 16vw, 232px) !important;
+        z-index: 2147483646 !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+        cursor: default !important;
+      }
+      body[data-cpcv-desktop-overlay="true"] #qrCorner img {
+        display: block !important;
+        width: 100% !important;
+        height: 100% !important;
       }
     `;
     document.documentElement.appendChild(style);
@@ -108,6 +123,26 @@
     return badge;
   };
 
+  const applyQrVisibility = () => {
+    const qrOverlay = document.getElementById('qrOverlay');
+    hide(qrOverlay);
+
+    const qrCorner = document.getElementById('qrCorner');
+    if (!qrCorner) return;
+
+    const qrCornerImage = document.getElementById('qrCornerImage');
+    const hasQrImage = Boolean(qrCornerImage?.getAttribute('src'));
+    const visible = state.qrVisible && hasQrImage;
+
+    qrCorner.classList.toggle('hidden', !visible);
+    qrCorner.style.setProperty('display', visible ? 'block' : 'none', 'important');
+    qrCorner.style.setProperty('visibility', visible ? 'visible' : 'hidden', 'important');
+    qrCorner.style.setProperty('opacity', visible ? '1' : '0', 'important');
+    qrCorner.style.setProperty('pointer-events', 'none', 'important');
+    qrCorner.tabIndex = -1;
+    qrCorner.setAttribute('aria-hidden', visible ? 'false' : 'true');
+  };
+
   const apply = () => {
     ensureStyle();
     transparent(document.documentElement);
@@ -124,7 +159,6 @@
     hide(document.getElementById('emptyDocument'));
     hide(document.getElementById('topBar'));
     hide(document.getElementById('pdfPageControls'));
-    hide(document.getElementById('qrCorner'));
 
     const commentPanel = document.getElementById('commentPanel');
     if (commentPanel) {
@@ -151,12 +185,7 @@
     if (commentList) commentList.style.setProperty('pointer-events', 'none', 'important');
     if (scrollLayer) scrollLayer.style.setProperty('pointer-events', 'none', 'important');
 
-    const qrOverlay = document.getElementById('qrOverlay');
-    if (qrOverlay) {
-      qrOverlay.classList.toggle('hidden', !state.qrVisible);
-      qrOverlay.style.setProperty('pointer-events', 'none', 'important');
-      transparent(qrOverlay);
-    }
+    applyQrVisibility();
 
     const login = document.getElementById('viewerLogin');
     const loginVisible = Boolean(login && !login.classList.contains('hidden'));

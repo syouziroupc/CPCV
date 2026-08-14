@@ -53,7 +53,9 @@ struct AdminUiState {
     overlay_active: bool,
     comments_visible: bool,
     qr_visible: bool,
+    monitor_index: Option<usize>,
     monitor_label: String,
+    monitor_options: Vec<String>,
     environment_label: String,
     message: String,
     error: bool,
@@ -193,6 +195,38 @@ fn destroy_window_if_present(app: &AppHandle, label: &str) -> Result<(), String>
     Ok(())
 }
 
+fn internal_monitor_name(name: &str) -> bool {
+    let normalized = name.trim().to_ascii_uppercase();
+    normalized.starts_with(r"\\.\DISPLAY") || normalized.starts_with("DISPLAY\\")
+}
+
+fn monitor_label(
+    index: usize,
+    monitor: &tauri::Monitor,
+    primary: Option<&tauri::Monitor>,
+) -> String {
+    let size = monitor.size();
+    let is_primary = primary.is_some_and(|primary_monitor| {
+        primary_monitor.position() == monitor.position() && primary_monitor.size() == size
+    });
+
+    let mut parts = vec![if is_primary {
+        format!("画面{}（メイン）", index + 1)
+    } else {
+        format!("画面{}", index + 1)
+    }];
+
+    if let Some(name) = monitor
+        .name()
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty() && !internal_monitor_name(name))
+    {
+        parts.push(name.to_string());
+    }
+    parts.push(format!("{}×{}", size.width, size.height));
+    parts.join("｜")
+}
+
 fn monitor_index_and_label(
     app: &AppHandle,
     preferred: Option<usize>,
@@ -204,28 +238,37 @@ fn monitor_index_and_label(
         return Err("利用可能なディスプレイが見つかりません。".to_string());
     }
 
-    let primary = app
-        .primary_monitor()
-        .map_err(|error| error.to_string())?
-        .map(|monitor| (*monitor.position(), *monitor.size()));
+    let primary = app.primary_monitor().map_err(|error| error.to_string())?;
 
     let index = preferred
         .filter(|index| *index < monitors.len())
         .or_else(|| {
             monitors.iter().position(|monitor| {
-                primary.as_ref().is_some_and(|(position, size)| {
-                    *position != *monitor.position() || *size != *monitor.size()
+                primary.as_ref().is_some_and(|primary_monitor| {
+                    primary_monitor.position() != monitor.position()
+                        || primary_monitor.size() != monitor.size()
                 })
             })
         })
         .unwrap_or(0);
 
-    let monitor = &monitors[index];
-    let label = monitor
-        .name()
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| format!("ディスプレイ{}", index + 1));
-    Ok((index, label))
+    Ok((
+        index,
+        monitor_label(index, &monitors[index], primary.as_ref()),
+    ))
+}
+
+fn monitor_options(app: &AppHandle) -> Result<Vec<String>, String> {
+    let monitors = app
+        .available_monitors()
+        .map_err(|error| error.to_string())?;
+    let primary = app.primary_monitor().map_err(|error| error.to_string())?;
+
+    Ok(monitors
+        .iter()
+        .enumerate()
+        .map(|(index, monitor)| monitor_label(index, monitor, primary.as_ref()))
+        .collect())
 }
 
 fn monitor_at(app: &AppHandle, monitor_index: usize) -> Result<tauri::Monitor, String> {
@@ -304,9 +347,10 @@ fn admin_ui_state(app: &AppHandle) -> Result<AdminUiState, String> {
         )
     };
 
-    let monitor_label = monitor_index_and_label(app, preferred)
-        .map(|(_, label)| label)
-        .unwrap_or_else(|_| "未検出".to_string());
+    let (monitor_index, monitor_label) = monitor_index_and_label(app, preferred)
+        .map(|(index, label)| (Some(index), label))
+        .unwrap_or_else(|_| (None, "未検出".to_string()));
+    let monitor_options = monitor_options(app).unwrap_or_default();
 
     let environment_label = if origin_locked && origin == STAGING_ORIGIN {
         "試験環境".to_string()
@@ -320,7 +364,9 @@ fn admin_ui_state(app: &AppHandle) -> Result<AdminUiState, String> {
         overlay_active,
         comments_visible,
         qr_visible,
+        monitor_index,
         monitor_label,
+        monitor_options,
         environment_label,
         message,
         error,
@@ -489,6 +535,28 @@ fn toggle_qr(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn select_monitor(app: &AppHandle, monitor_index: usize) -> Result<(), String> {
+    let monitor = monitor_at(app, monitor_index)?;
+    let primary = app.primary_monitor().map_err(|error| error.to_string())?;
+    let label = monitor_label(monitor_index, &monitor, primary.as_ref());
+
+    if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
+        place_overlay(&overlay, &monitor)?;
+    }
+
+    {
+        let mut state = state_lock(app)?;
+        state.monitor_index = Some(monitor_index);
+        state.message = if state.overlay_active {
+            format!("投影先を「{label}」へ変更しました。")
+        } else {
+            format!("投影先に「{label}」を選択しました。")
+        };
+        state.error = false;
+    }
+    sync_admin_ui(app)
+}
+
 fn next_monitor(app: &AppHandle) -> Result<(), String> {
     let monitors = app
         .available_monitors()
@@ -504,23 +572,7 @@ fn next_monitor(app: &AppHandle) -> Result<(), String> {
             .map(|index| (index + 1) % monitors.len())
             .unwrap_or(0)
     };
-    let monitor = monitor_at(app, next_index)?;
-    let label = monitor
-        .name()
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| format!("ディスプレイ{}", next_index + 1));
-
-    if let Some(overlay) = app.get_webview_window(OVERLAY_LABEL) {
-        place_overlay(&overlay, &monitor)?;
-    }
-
-    {
-        let mut state = state_lock(app)?;
-        state.monitor_index = Some(next_index);
-        state.message = format!("投影先を{label}へ変更しました。");
-        state.error = false;
-    }
-    sync_admin_ui(app)
+    select_monitor(app, next_index)
 }
 
 fn report_message(report: &EnvironmentReport, active_count: usize) -> (String, bool) {
@@ -709,6 +761,10 @@ async fn handle_admin_action(app: AppHandle, url: tauri::Url) -> Result<(), Stri
             set_comments_visible(&app, visible)
         }
         "qr/toggle" => toggle_qr(&app),
+        "monitor/select" => {
+            let monitor_index = action_usize(&url, "index")?;
+            select_monitor(&app, monitor_index)
+        }
         "monitor/next" => next_monitor(&app),
         "environment/report" => handle_environment_report(&app, &url),
         _ => Err("不明なデスクトップ操作です。".to_string()),
@@ -829,6 +885,27 @@ mod tests {
         assert!(!action_url(
             &tauri::Url::parse("https://example.com/overlay/start").unwrap()
         ));
+    }
+
+    #[test]
+    fn hides_internal_windows_display_names() {
+        assert!(internal_monitor_name(r"\\.\DISPLAY1"));
+        assert!(internal_monitor_name(r"\\.\display12"));
+        assert!(!internal_monitor_name("DELL U2720Q"));
+        assert!(!internal_monitor_name("EPSON Projector"));
+    }
+
+    #[test]
+    fn parses_monitor_index_actions() {
+        let selected =
+            tauri::Url::parse("https://desktop.cpcv.local/monitor/select?index=1").unwrap();
+        let missing = tauri::Url::parse("https://desktop.cpcv.local/monitor/select").unwrap();
+        let invalid =
+            tauri::Url::parse("https://desktop.cpcv.local/monitor/select?index=abc").unwrap();
+
+        assert_eq!(action_usize(&selected, "index").unwrap(), 1);
+        assert!(action_usize(&missing, "index").is_err());
+        assert!(action_usize(&invalid, "index").is_err());
     }
 
     #[test]
