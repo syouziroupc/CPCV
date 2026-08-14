@@ -10,6 +10,7 @@ const files = {
   adminJs: read('public/assets/admin.js'),
   viewerHtml: read('public/viewer/index.html'),
   viewerJs: read('public/assets/viewer.js'),
+  desktopOverlay: read('desktop-overlay-poc/src-tauri/scripts/overlay.js'),
   worker: read('src/index.js'),
   wrangler: read('wrangler.toml')
 };
@@ -50,6 +51,7 @@ for (const id of [
   'scrollCommentLayer',
   'qrOverlay',
   'qrCorner',
+  'qrCornerImage',
   'viewerLogin',
   'connectionState'
 ]) {
@@ -61,10 +63,26 @@ for (const marker of [
   '/api/private/sessions/',
   'commentDisplayMode',
   'applyDisplayMode',
-  'scroll-mode'
+  'scroll-mode',
+  'setJoinQr',
+  'qrCornerImage'
 ]) {
   expect(files.viewerJs, marker, `viewer contract ${marker}`);
 }
+
+for (const marker of [
+  "getElementById('qrCorner')",
+  "getElementById('qrCornerImage')",
+  'applyQrVisibility',
+  'setQrVisible(value)'
+]) {
+  expect(files.desktopOverlay, marker, `Desktop QR contract ${marker}`);
+}
+reject(
+  files.desktopOverlay,
+  "hide(document.getElementById('qrCorner'))",
+  'Desktop overlay must not suppress the persistent QR corner'
+);
 
 for (const marker of [
   'path.startsWith("/api/auth/")',
@@ -94,6 +112,10 @@ function read(path) {
 
 function expect(content, marker, label) {
   if (!content.includes(marker)) failures.push(`${label} is missing`);
+}
+
+function reject(content, marker, label) {
+  if (content.includes(marker)) failures.push(label);
 }
 
 function expectId(content, id, label) {
