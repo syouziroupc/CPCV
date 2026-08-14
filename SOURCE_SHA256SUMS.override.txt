@@ -32,7 +32,7 @@ b085eb43bd7a4c913904d417680f62861de279225669c9be62e438621f47092d  desktop-overla
 e39e4b47d0eeacd181d428fbe495969432d35c6cb83d1095229ea19b2ddda825  desktop-overlay-poc/src-tauri/capabilities/default.json
 8569a8a4ce96efae1662fdb174d0c76b38221109ab16785bc843e881a49573a4  desktop-overlay-poc/src-tauri/scripts/admin.js
 7ebe4bd6980816d24d62c12cd650ac3d93c20e67e577775e6b4a704380084fc1  desktop-overlay-poc/src-tauri/scripts/overlay.js
-e158dbd59c291cf4e1640a6352faa373a32b1e16f167efc7fe5ea73f53a74a3a  desktop-overlay-poc/src-tauri/src/main.rs
+6d2517afc0fa3f9aa627a2825728723fd298f1fbbd21384f803f9a399cb0c221  desktop-overlay-poc/src-tauri/src/main.rs
 c82efef956fbe99c17571822ce57548110eab9eb674954b78601e03430d991b7  desktop-overlay-poc/src-tauri/tauri.conf.json
 e94739a9e0c5e1d0401fb1e7387da9e7d814f55ab45c3358f78da6d11ca6d09a  desktop-overlay-poc/ui/app.css
 4d1503bea9afc3b5c7bd756d553c4abad331cdec8929e024fa5ea6d4e3b73a05  desktop-overlay-poc/ui/app.js
