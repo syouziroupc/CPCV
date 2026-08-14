@@ -218,7 +218,7 @@ fn monitor_label(
 
     if let Some(name) = monitor
         .name()
-        .map(str::trim)
+        .map(|name| name.trim())
         .filter(|name| !name.is_empty() && !internal_monitor_name(name))
     {
         parts.push(name.to_string());
