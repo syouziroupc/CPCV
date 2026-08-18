@@ -1,0 +1,49 @@
+name: Package U22 final source
+
+on:
+  push:
+    branches: [packaging/u22-fullsource-02939]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout deployed production commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: 02939ed56717e133fc9c8acad0e7fd92a84fdd88
+          fetch-depth: 1
+
+      - name: Verify exact deployed commit
+        run: test "$(git rev-parse HEAD)" = "02939ed56717e133fc9c8acad0e7fd92a84fdd88"
+
+      - name: Build exact full-source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          git archive --format=zip --prefix=CPCV-U22-full-source-02939/ -o out/CPCV-U22-full-source-0.8.10-02939ed56717.zip HEAD
+          sha256sum out/CPCV-U22-full-source-0.8.10-02939ed56717.zip | tee out/CPCV-U22-full-source-0.8.10-02939ed56717.zip.sha256
+          unzip -t out/CPCV-U22-full-source-0.8.10-02939ed56717.zip >/dev/null
+          printf 'deployed_commit=02939ed56717e133fc9c8acad0e7fd92a84fdd88\nproduction_worker=https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev\ncloudflare_version=581fd8ef-2ec7-4222-9135-ef581addd028\ndeployment_run=32112518277\n' > out/DEPLOYED_SOURCE_RECORD.txt
+
+      - name: Upload exact source archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cpcv-u22-full-source-02939ed56717
+          path: out/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Report packaging run
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          gh issue comment 70 --repo "$GITHUB_REPOSITORY" --body "CPCV U22 full-source package: target=02939ed56717e133fc9c8acad0e7fd92a84fdd88 status=${JOB_STATUS} run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
