@@ -453,3 +453,45 @@ p, li, dd, dt, label, small, strong, span, a, button, th, td, summary {
     width: 100%;
   }
 }
+
+/* 2026-08-18 production overflow fix.
+   Account tables must fit the settings pane without creating a second horizontal
+   scrollbar. The page already provides responsive card layouts on small screens. */
+.account-page .filter-table-wrap {
+  overflow-x: visible;
+  scrollbar-gutter: auto;
+}
+.account-page .filter-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+.account-page .filter-table th,
+.account-page .filter-table td {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.account-page .filter-table input,
+.account-page .filter-table select,
+.account-page .filter-table .select,
+.account-page .filter-table .button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* A wrapped application menu is preferable to a nested horizontal scrollbar on
+   narrow screens, especially now that the Windows download is a first-class item. */
+@media (max-width: 720px) {
+  .app-nav {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    overflow-y: visible;
+  }
+  .app-nav a,
+  .app-nav button {
+    flex: 0 1 auto;
+  }
+}
