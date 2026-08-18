@@ -1,0 +1,83 @@
+name: Publish frozen Desktop download
+
+on:
+  push:
+    branches:
+      - agent/u22-responsive-dl-hotfix-20260818
+    paths:
+      - ".github/workflows/publish-frozen-desktop.yml"
+  pull_request:
+    branches:
+      - agent/desktop-monitor-selector-v023
+    paths:
+      - ".github/workflows/publish-frozen-desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE_RUN_ID: "31776425897"
+      ARTIFACT_NAME: "cpcv-desktop-v0.2.2-cpcv0.8.10-windows-release"
+      EXPECTED_EXE_SHA256: "e116a24b329fe522915e5b5bd5a9d59f7e5d8843d12227452c0b0c72ef534f4f"
+      RELEASE_TAG: "desktop-v0.2.2-e116"
+      RELEASE_TARGET: "9f67776959885bb3d92f7173fd3e180e84fd961a"
+      RELEASE_ASSET: "CPCV-Desktop-0.2.2-Windows.zip"
+    steps:
+      - name: Download the already verified Windows artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-input
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$ARTIFACT_NAME" \
+            --dir release-input
+
+      - name: Verify the frozen executable exactly
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(sha256sum release-input/cpcv-desktop.exe | awk '{print $1}')"
+          test "$actual" = "$EXPECTED_EXE_SHA256"
+          grep -Fq "$EXPECTED_EXE_SHA256" release-input/cpcv-desktop.exe.sha256
+          test -s release-input/CPCV_BUILD_ENVIRONMENT.txt
+
+      - name: Package the permanent download
+        shell: bash
+        run: |
+          set -euo pipefail
+          (
+            cd release-input
+            zip -9 "../$RELEASE_ASSET" \
+              cpcv-desktop.exe \
+              cpcv-desktop.exe.sha256 \
+              CPCV_BUILD_ENVIRONMENT.txt
+          )
+          unzip -t "$RELEASE_ASSET"
+
+      - name: Create or refresh the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          notes="CPCV Desktop 0.2.2 frozen Windows build for Web 0.8.10. Executable SHA-256: $EXPECTED_EXE_SHA256. Source build commit: $RELEASE_TARGET. The executable is copied from GitHub Actions run $SOURCE_RUN_ID and is hash-verified before publication."
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$RELEASE_ASSET" --clobber --repo "$GITHUB_REPOSITORY"
+            gh release edit "$RELEASE_TAG" --notes "$notes" --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "$RELEASE_ASSET" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$RELEASE_TARGET" \
+              --title "CPCV Desktop 0.2.2" \
+              --notes "$notes"
+          fi

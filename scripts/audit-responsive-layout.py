@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from playwright.async_api import async_playwright
@@ -14,9 +17,25 @@ VIEWPORTS = (
     ("phone-320", 320, 720),
     ("phone-375", 375, 812),
     ("tablet-768", 768, 1024),
+    ("desktop-901", 901, 800),
     ("desktop-1024", 1024, 768),
+    ("desktop-1100", 1100, 800),
     ("desktop-1440", 1440, 1000),
 )
+class QuietStaticHandler(SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args) -> None:
+        pass
+
+
+def start_static_server() -> tuple[ThreadingHTTPServer, threading.Thread, str]:
+    handler = partial(QuietStaticHandler, directory=str(PUBLIC))
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[:2]
+    return server, thread, f"http://{host}:{port}"
+
+
 KEY_PAGES = {
     "_admin_spa.html", "admin/index.html", "_viewer_spa.html", "viewer/index.html",
     "signup/index.html", "forgot-password/index.html", "account/index.html", "master/index.html",
@@ -89,6 +108,27 @@ async def inspect(page, source: str, width: int) -> dict:
               }
             }
           }
+          const accountOverlayFailures = [];
+          const accountNav = document.querySelector('.account-section-nav');
+          if (accountNav && visible(accountNav)) {
+            const nr = accountNav.getBoundingClientRect();
+            if (nr.bottom > 0 && nr.top < innerHeight) {
+              for (const content of document.querySelectorAll('#organizationSettings .workspace-panel, #organizationSettings .workspace-detail, #organizationSettings .filter-editor-panel')) {
+                if (!visible(content)) continue;
+                const r = content.getBoundingClientRect();
+                const verticalOverlap = Math.min(nr.bottom, r.bottom) - Math.max(nr.top, r.top);
+                const horizontalOverlap = Math.min(nr.right, r.right) - Math.max(nr.left, r.left);
+                if (verticalOverlap > 1 && horizontalOverlap > 1) {
+                  accountOverlayFailures.push({
+                    kind: 'account-nav-covers-settings',
+                    ...describe(content),
+                    navTop: nr.top, navBottom: nr.bottom, contentTop: r.top, contentBottom: r.bottom
+                  });
+                  break;
+                }
+              }
+            }
+          }
           return {
             source,
             viewportWidth: width,
@@ -96,7 +136,8 @@ async def inspect(page, source: str, width: int) -> dict:
             bodyWidth: document.body.scrollWidth,
             outside,
             authFailures,
-            viewerControlFailures
+            viewerControlFailures,
+            accountOverlayFailures
           };
         }""",
         {"source": source, "width": width},
@@ -108,46 +149,66 @@ async def main() -> None:
     html_files = sorted(PUBLIC.rglob("*.html"))
     failures: list[dict] = []
     checks = 0
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
-        context = await browser.new_context(java_script_enabled=False)
-        page = await context.new_page()
-        for path in html_files:
-            relative = path.relative_to(PUBLIC).as_posix()
-            for viewport_name, width, height in VIEWPORTS:
-                checks += 1
-                await page.set_viewport_size({"width": width, "height": height})
-                await page.goto(path.resolve().as_uri(), wait_until="load")
-                await page.wait_for_timeout(80)
-                if relative in {"_admin_spa.html", "admin/index.html"}:
-                    await page.evaluate("""() => {
-                      document.getElementById('adminBootSection')?.classList.add('hidden');
-                      document.getElementById('loginSection')?.classList.add('hidden');
-                      document.getElementById('adminHome')?.classList.add('hidden');
-                      document.getElementById('sessionSection')?.classList.remove('hidden');
-                    }""")
-                if relative in {"_viewer_spa.html", "viewer/index.html"}:
-                    await page.evaluate("""() => {
-                      document.getElementById('topBar')?.classList.remove('hidden');
-                      document.getElementById('pdfPageControls')?.classList.remove('hidden');
-                    }""")
-                result = await inspect(page, relative, width)
-                result["viewport"] = viewport_name
-                result["ok"] = (
-                    result["documentWidth"] <= width + 1
-                    and result["bodyWidth"] <= width + 1
-                    and not result["outside"]
-                    and not result["authFailures"]
-                    and not result["viewerControlFailures"]
-                )
-                if not result["ok"]:
-                    failures.append(result)
-                    safe = relative.replace("/", "__")
-                    await page.screenshot(path=str(OUT / f"FAIL-{safe}-{viewport_name}.png"), full_page=True)
-                elif relative in KEY_PAGES and viewport_name in {"pane-280", "phone-320", "desktop-1024"}:
-                    safe = relative.replace("/", "__")
-                    await page.screenshot(path=str(OUT / f"PASS-{safe}-{viewport_name}.png"), full_page=True)
-        await browser.close()
+    server, server_thread, base_url = start_static_server()
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-dev-shm-usage"])
+            context = await browser.new_context(java_script_enabled=False)
+            page = await context.new_page()
+            for path in html_files:
+                relative = path.relative_to(PUBLIC).as_posix()
+                for viewport_name, width, height in VIEWPORTS:
+                    checks += 1
+                    await page.set_viewport_size({"width": width, "height": height})
+                    await page.goto(f"{base_url}/{relative}", wait_until="load")
+                    await page.wait_for_timeout(80)
+                    if relative in {"_admin_spa.html", "admin/index.html"}:
+                        await page.evaluate("""() => {
+                          document.getElementById('adminBootSection')?.classList.add('hidden');
+                          document.getElementById('loginSection')?.classList.add('hidden');
+                          document.getElementById('adminHome')?.classList.add('hidden');
+                          document.getElementById('sessionSection')?.classList.remove('hidden');
+                        }""")
+                    if relative in {"_viewer_spa.html", "viewer/index.html"}:
+                        await page.evaluate("""() => {
+                          document.getElementById('topBar')?.classList.remove('hidden');
+                          document.getElementById('pdfPageControls')?.classList.remove('hidden');
+                        }""")
+                    if relative == "account/index.html":
+                        await page.evaluate("""() => {
+                          document.getElementById('loadingSection')?.classList.add('hidden');
+                          document.getElementById('accountSection')?.classList.remove('hidden');
+                          document.getElementById('organizationSettings')?.classList.remove('hidden');
+                          const packStatus = document.getElementById('filterPackStatus');
+                          if (packStatus) {
+                            packStatus.textContent = '500語を登録中。上限2000語。 日本語基本: 導入済み v2・128語 / 英語基本: 導入済み v2・161語 / 日本語文脈注意: 導入済み v2・111語 / 英語文脈注意: 導入済み v2・100語';
+                          }
+                          document.body.style.paddingBottom = '1200px';
+                          window.scrollTo(0, 420);
+                        }""")
+                        await page.wait_for_timeout(40)
+                    result = await inspect(page, relative, width)
+                    result["viewport"] = viewport_name
+                    result["ok"] = (
+                        result["documentWidth"] <= width + 1
+                        and result["bodyWidth"] <= width + 1
+                        and not result["outside"]
+                        and not result["authFailures"]
+                        and not result["viewerControlFailures"]
+                        and not result["accountOverlayFailures"]
+                    )
+                    if not result["ok"]:
+                        failures.append(result)
+                        safe = relative.replace("/", "__")
+                        await page.screenshot(path=str(OUT / f"FAIL-{safe}-{viewport_name}.png"), full_page=True)
+                    elif relative in KEY_PAGES and viewport_name in {"pane-280", "phone-320", "desktop-901", "desktop-1024", "desktop-1100"}:
+                        safe = relative.replace("/", "__")
+                        await page.screenshot(path=str(OUT / f"PASS-{safe}-{viewport_name}.png"), full_page=True)
+            await browser.close()
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=2)
 
     summary = {
         "ok": not failures,
