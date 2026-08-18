@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: cpcv-production-direct
@@ -190,3 +191,13 @@ jobs:
           path: deployment-records/
           if-no-files-found: warn
           retention-days: 90
+
+      - name: Report deployment result
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          set -euo pipefail
+          gh issue comment 70 --repo "$GITHUB_REPOSITORY" --body "CPCV production deploy: commit=${{ github.sha }} status=${JOB_STATUS} run=${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
