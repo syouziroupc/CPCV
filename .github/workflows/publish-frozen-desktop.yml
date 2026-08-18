@@ -6,6 +6,11 @@ on:
       - agent/u22-responsive-dl-hotfix-20260818
     paths:
       - ".github/workflows/publish-frozen-desktop.yml"
+  pull_request:
+    branches:
+      - agent/desktop-monitor-selector-v023
+    paths:
+      - ".github/workflows/publish-frozen-desktop.yml"
   workflow_dispatch:
 
 permissions:
@@ -14,6 +19,7 @@ permissions:
 
 jobs:
   publish:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
