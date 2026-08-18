@@ -55,21 +55,15 @@ jobs:
           }
           npm install-scripts ls
 
-      - name: Verify deployment secrets
+      - name: Verify Cloudflare deployment credentials
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          AUTH_RATE_LIMIT_PEPPER: ${{ secrets.AUTH_RATE_LIMIT_PEPPER }}
-          PUBLIC_RATE_LIMIT_PEPPER: ${{ secrets.PUBLIC_RATE_LIMIT_PEPPER }}
-          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
         run: |
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          test -n "$AUTH_RATE_LIMIT_PEPPER"
-          test -n "$PUBLIC_RATE_LIMIT_PEPPER"
-          test -n "$TURNSTILE_SECRET_KEY"
 
       - name: Run full validation
         shell: bash
@@ -129,18 +123,6 @@ jobs:
           npx wrangler d1 migrations apply class_comment_db --remote 2>&1 | tee deployment-records/10-legacy-migrations.txt
           npx wrangler d1 migrations apply class_comment_db_v2 --remote 2>&1 | tee deployment-records/11-v2-migrations.txt
           node scripts/verify-remote-d1.mjs 2>&1 | tee deployment-records/12-remote-d1-after-migration.txt
-
-      - name: Configure runtime secrets
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          AUTH_RATE_LIMIT_PEPPER: ${{ secrets.AUTH_RATE_LIMIT_PEPPER }}
-          PUBLIC_RATE_LIMIT_PEPPER: ${{ secrets.PUBLIC_RATE_LIMIT_PEPPER }}
-          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
-        run: |
-          set -o pipefail
-          node scripts/configure-rate-limit-secret.mjs 2>&1 | tee deployment-records/14-secret-configuration.txt
 
       - name: Record current Worker state
         shell: bash
