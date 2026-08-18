@@ -14,7 +14,9 @@ VIEWPORTS = (
     ("phone-320", 320, 720),
     ("phone-375", 375, 812),
     ("tablet-768", 768, 1024),
+    ("desktop-901", 901, 800),
     ("desktop-1024", 1024, 768),
+    ("desktop-1100", 1100, 800),
     ("desktop-1440", 1440, 1000),
 )
 KEY_PAGES = {
@@ -89,6 +91,27 @@ async def inspect(page, source: str, width: int) -> dict:
               }
             }
           }
+          const accountOverlayFailures = [];
+          const accountNav = document.querySelector('.account-section-nav');
+          if (accountNav && visible(accountNav)) {
+            const nr = accountNav.getBoundingClientRect();
+            if (nr.bottom > 0 && nr.top < innerHeight) {
+              for (const content of document.querySelectorAll('#organizationSettings .workspace-panel, #organizationSettings .workspace-detail, #organizationSettings .filter-editor-panel')) {
+                if (!visible(content)) continue;
+                const r = content.getBoundingClientRect();
+                const verticalOverlap = Math.min(nr.bottom, r.bottom) - Math.max(nr.top, r.top);
+                const horizontalOverlap = Math.min(nr.right, r.right) - Math.max(nr.left, r.left);
+                if (verticalOverlap > 1 && horizontalOverlap > 1) {
+                  accountOverlayFailures.push({
+                    kind: 'account-nav-covers-settings',
+                    ...describe(content),
+                    navTop: nr.top, navBottom: nr.bottom, contentTop: r.top, contentBottom: r.bottom
+                  });
+                  break;
+                }
+              }
+            }
+          }
           return {
             source,
             viewportWidth: width,
@@ -96,7 +119,8 @@ async def inspect(page, source: str, width: int) -> dict:
             bodyWidth: document.body.scrollWidth,
             outside,
             authFailures,
-            viewerControlFailures
+            viewerControlFailures,
+            accountOverlayFailures
           };
         }""",
         {"source": source, "width": width},
@@ -131,6 +155,19 @@ async def main() -> None:
                       document.getElementById('topBar')?.classList.remove('hidden');
                       document.getElementById('pdfPageControls')?.classList.remove('hidden');
                     }""")
+                if relative == "account/index.html":
+                    await page.evaluate("""() => {
+                      document.getElementById('loadingSection')?.classList.add('hidden');
+                      document.getElementById('accountSection')?.classList.remove('hidden');
+                      document.getElementById('organizationSettings')?.classList.remove('hidden');
+                      const packStatus = document.getElementById('filterPackStatus');
+                      if (packStatus) {
+                        packStatus.textContent = '500語を登録中。上限2000語。 日本語基本: 導入済み v2・128語 / 英語基本: 導入済み v2・161語 / 日本語文脈注意: 導入済み v2・111語 / 英語文脈注意: 導入済み v2・100語';
+                      }
+                      document.body.style.paddingBottom = '1200px';
+                      window.scrollTo(0, 420);
+                    }""")
+                    await page.wait_for_timeout(40)
                 result = await inspect(page, relative, width)
                 result["viewport"] = viewport_name
                 result["ok"] = (
@@ -139,12 +176,13 @@ async def main() -> None:
                     and not result["outside"]
                     and not result["authFailures"]
                     and not result["viewerControlFailures"]
+                    and not result["accountOverlayFailures"]
                 )
                 if not result["ok"]:
                     failures.append(result)
                     safe = relative.replace("/", "__")
                     await page.screenshot(path=str(OUT / f"FAIL-{safe}-{viewport_name}.png"), full_page=True)
-                elif relative in KEY_PAGES and viewport_name in {"pane-280", "phone-320", "desktop-1024"}:
+                elif relative in KEY_PAGES and viewport_name in {"pane-280", "phone-320", "desktop-901", "desktop-1024", "desktop-1100"}:
                     safe = relative.replace("/", "__")
                     await page.screenshot(path=str(OUT / f"PASS-{safe}-{viewport_name}.png"), full_page=True)
         await browser.close()

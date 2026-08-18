@@ -412,3 +412,44 @@ p, li, dd, dt, label, small, strong, span, a, button, th, td, summary {
     inset: 48px 0 170px;
   }
 }
+
+
+/* U-22 final responsive hotfix: account navigation must never cover settings.
+   Historical CSS made only this secondary navigation sticky while the app
+   header itself is relative, so scrolling could place the tabs on top of the
+   AI/dictionary controls. Keep it in normal document flow instead. */
+.account-page .account-section-nav {
+  position: static;
+  top: auto;
+  z-index: auto;
+}
+
+/* Preserve the explicit one-column contract. The generic .settings-grid rule
+   otherwise overrides .settings-grid-single in this final stylesheet. */
+.settings-grid.settings-grid-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* The two account setting panels become cramped just above the old 900px
+   breakpoint. Stack them sooner and keep all nested controls shrinkable. */
+.account-settings-grid > *,
+.account-page .filter-heading-row > *,
+.account-page .filter-pack-details,
+.account-page .filter-mode-description,
+.account-page .filter-mode-state {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 1100px) {
+  .account-page .account-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .account-page .filter-heading-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+  .account-page .filter-mode-state {
+    width: 100%;
+  }
+}
