@@ -24,7 +24,16 @@
   word-break: break-word;
 }
 
-/* app-base.css already collapses the lesson workspace at 1180px. The live
+/* Keep the explicit containment contracts in this top-level stylesheet too.
+   Regression checks intentionally inspect app.css directly. */
+.page { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
+.card { width: 100%; min-width: 0; }
+.section { min-width: 0; }
+.grid { min-width: 0; }
+.local-log-table-wrap { width: 100%; min-width: 0; max-width: 100%; overflow: auto; }
+.local-log-table { width: 100%; min-width: 560px; }
+
+/* app-current.css collapses the lesson workspace at 1180px. The live
    column must stop being sticky at the same breakpoint, otherwise a one-column
    layout can cover the settings column while scrolling. */
 @media (max-width: 1180px) {
