@@ -77,6 +77,31 @@
 }
 
 @media (max-width: 480px) {
+  .admin-page .settings-panel > .row.between {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .admin-page .moderation-section > .row.between > .row {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-page .moderation-section .inline-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    width: 100%;
+  }
+
+  .admin-page #moderationStateFilter,
+  .admin-page #refreshModerationButton {
+    width: 100%;
+    min-width: 0;
+  }
+
   .admin-page .danger-panel .row {
     align-items: stretch;
   }
