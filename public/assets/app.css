@@ -33,22 +33,24 @@
 .local-log-table-wrap { width: 100%; min-width: 0; max-width: 100%; overflow: auto; }
 .local-log-table { width: 100%; min-width: 560px; }
 
-/* app-current.css collapses the lesson workspace at 1180px. The live
-   column must stop being sticky at the same breakpoint, otherwise a one-column
-   layout can cover the settings column while scrolling. */
+/* The administration workspace must become ordinary document flow before
+   tablet/zoom widths. A one-column grid is not enough if the live column
+   remains sticky: while scrolling, settings can pass underneath it. */
 @media (max-width: 1180px) {
   .admin-page .session-command-center {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .admin-page .lesson-live-column {
-    position: static;
-    top: auto;
+    display: block;
+    grid-template-columns: none;
   }
 
   .admin-page .lesson-live-column,
   .admin-page .lesson-settings-column {
     width: 100%;
+    position: static;
+    inset: auto;
+  }
+
+  .admin-page .lesson-settings-column {
+    margin-top: 24px;
   }
 }
 
