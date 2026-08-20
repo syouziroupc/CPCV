@@ -1,0 +1,62 @@
+name: Verify live staging mid-width fix
+
+on:
+  push:
+    branches:
+      - agent/deploy-midwidth-fix-staging-20260820
+    paths:
+      - ".github/workflows/verify-midwidth-staging-live-20260820.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify-live:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+      RELEASE_COMMIT: 300c5bf90deaee1fe44a2f4c1c1acb4eaf7f5e85
+    steps:
+      - name: Wait until actual staging serves fixed assets
+        id: probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 60); do
+            if curl --fail -sS --retry 2 --retry-delay 1 -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/admin/?midwidth_probe=$i" -o /tmp/admin.html; then
+              if grep -Fq 'app.css?v=0.8.10-u22fix2-staging' /tmp/admin.html; then
+                if curl --fail -sS --retry 2 --retry-delay 1 -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/assets/app.css?v=0.8.10-u22fix2-staging&midwidth_probe=$i" -o /tmp/app.css \
+                  && grep -Fq '@media (max-width: 1180px)' /tmp/app.css \
+                  && grep -Fq 'display: block;' /tmp/app.css \
+                  && grep -Fq '.admin-page .lesson-settings-column {' /tmp/app.css \
+                  && grep -Fq 'position: static;' /tmp/app.css; then
+                  ok=1
+                  break
+                fi
+              fi
+            fi
+            sleep 10
+          done
+          echo "ok=$ok" >> "$GITHUB_OUTPUT"
+          if [ "$ok" = 1 ]; then
+            echo "Live staging now serves the cache-busted fixed CSS."
+          else
+            echo "Live staging did not expose the fixed CSS within the verification window."
+          fi
+
+      - name: Report verification to issue 70
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROBE_OK: ${{ steps.probe.outputs.ok }}
+        run: |
+          set -euo pipefail
+          if [ "$PROBE_OK" = "1" ]; then status=success; else status=failure; fi
+          body="CPCV staging mid-width live verification: commit=$RELEASE_COMMIT status=$status origin=$STAGING_ORIGIN run=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh api "repos/$GITHUB_REPOSITORY/issues/70/comments" -f body="$body" >/dev/null
+          test "$status" = success
