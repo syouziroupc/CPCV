@@ -1,0 +1,164 @@
+name: Deploy current mid-width admin fix to staging
+
+on:
+  push:
+    branches:
+      - agent/deploy-midwidth-fix-staging-20260820
+    paths:
+      - ".github/workflows/deploy-midwidth-fix-staging-20260820.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cpcv-midwidth-staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy exact master fix to staging and verify served assets
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 60
+    env:
+      RELEASE_COMMIT: 300c5bf90deaee1fe44a2f4c1c1acb4eaf7f5e85
+      STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+    steps:
+      - name: Checkout exact fixed master revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 300c5bf90deaee1fe44a2f4c1c1acb4eaf7f5e85
+          fetch-depth: 0
+
+      - name: Verify exact revision
+        shell: bash
+        run: test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - name: Install pinned dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global npm@11.18.0
+          npm ci
+          test "$(node --version)" = "v22.23.1"
+          test "$(npm --version)" = "11.18.0"
+
+      - name: Verify fixed source before staging-only patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run verify:source-manifest
+          grep -F '@media (max-width: 1180px)' public/assets/app.css
+          grep -F 'display: block;' public/assets/app.css
+          grep -F '.admin-page .lesson-settings-column {' public/assets/app.css
+          grep -F 'position: static;' public/assets/app.css
+
+      - name: Force staging cache bust for admin CSS
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          for name in ('public/_admin_spa.html', 'public/admin/index.html'):
+              p = Path(name)
+              s = p.read_text(encoding='utf-8')
+              old = 'app.css?v=0.8.10-u22fix1'
+              new = 'app.css?v=0.8.10-u22fix2-staging'
+              if old not in s:
+                  raise SystemExit(f'cache-bust anchor missing: {name}')
+              p.write_text(s.replace(old, new), encoding='utf-8')
+          PY
+          grep -F 'app.css?v=0.8.10-u22fix2-staging' public/_admin_spa.html
+          grep -F 'app.css?v=0.8.10-u22fix2-staging' public/admin/index.html
+
+      - name: Materialize isolated current staging configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp wrangler.toml .staging.wrangler.toml
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.staging.wrangler.toml')
+          s = p.read_text(encoding='utf-8')
+          replacements = {
+            'name = "class-pdf-comment-viewer-v01"': 'name = "class-pdf-comment-viewer-v01-staging"',
+            'database_name = "class_comment_db"': 'database_name = "class_comment_db_staging"',
+            'database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"': 'database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"',
+            'database_name = "class_comment_db_v2"': 'database_name = "class_comment_db_v2_staging"',
+            'database_id = "8315a076-67ad-44e6-8286-11887af52ad3"': 'database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"',
+            'cpcv-ai-jobs"': 'cpcv-ai-jobs-staging"',
+            'cpcv-ai-translation-jobs"': 'cpcv-ai-translation-jobs-staging"',
+            'cpcv-ai-translation-dlq"': 'cpcv-ai-translation-dlq-staging"',
+            'cpcv-ai-moderation-jobs"': 'cpcv-ai-moderation-jobs-staging"',
+            'cpcv-ai-moderation-dlq"': 'cpcv-ai-moderation-dlq-staging"',
+            '826071901': '826071801',
+            '826071902': '826071802',
+            '826071903': '826071803',
+            '826071904': '826071804',
+            '826071905': '826071805',
+            '826071906': '826071806',
+            'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev': 'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev',
+            'TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"': 'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"',
+          }
+          for old, new in replacements.items():
+              if old not in s:
+                  raise SystemExit(f'missing staging replacement anchor: {old}')
+              s = s.replace(old, new)
+          p.write_text(s, encoding='utf-8')
+          PY
+          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .staging.wrangler.toml
+
+      - name: Verify Cloudflare credentials and dry-run
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          npx wrangler deploy --dry-run --config .staging.wrangler.toml
+
+      - name: Apply current staging migrations
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler d1 migrations apply class_comment_db_v2_staging --remote --config .staging.wrangler.toml
+
+      - name: Deploy exact fixed revision to staging
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config .staging.wrangler.toml --keep-vars
+
+      - name: Verify actual staging URL serves the fixed admin CSS
+        shell: bash
+        run: |
+          set -euo pipefail
+          fetch() { curl --fail-with-body -sS --retry 12 --retry-delay 3 --retry-all-errors -H 'Cache-Control: no-cache' "$1"; }
+          fetch "$STAGING_ORIGIN/admin/?deploy=$RELEASE_COMMIT" > /tmp/admin.html
+          grep -F 'app.css?v=0.8.10-u22fix2-staging' /tmp/admin.html
+          fetch "$STAGING_ORIGIN/assets/app.css?v=0.8.10-u22fix2-staging&deploy=$RELEASE_COMMIT" > /tmp/app.css
+          grep -F '@media (max-width: 1180px)' /tmp/app.css
+          grep -F 'display: block;' /tmp/app.css
+          grep -F '.admin-page .lesson-settings-column {' /tmp/app.css
+          grep -F 'position: static;' /tmp/app.css
+          printf 'release_commit=%s\nstaging_origin=%s\nverified_at_utc=%s\n' "$RELEASE_COMMIT" "$STAGING_ORIGIN" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > staging-deploy-record.txt
+
+      - name: Upload staging deployment proof
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-midwidth-staging-${{ github.run_id }}
+          path: staging-deploy-record.txt
+          if-no-files-found: warn
+          retention-days: 30
