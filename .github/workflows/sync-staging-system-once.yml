@@ -1,0 +1,159 @@
+name: Sync staging system to current production
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/sync-staging-system-once.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  SOURCE_COMMIT: 0f61a65ff056539742657272cc63fba4af8560ac
+  STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+
+jobs:
+  sync:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact production source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - name: Install exact dependencies
+        env:
+          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
+        run: |
+          npm install --global npm@11.18.0
+          npm ci
+          npm install-scripts ls
+      - name: Verify exact production source
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          npm run verify:source-manifest
+          node scripts/verify-u22-freeze.mjs
+          npm run check:v0810
+
+      - name: Materialize production-equivalent staging config
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          source=Path('wrangler.toml').read_text(encoding='utf-8')
+          replacements={
+            'name = "class-pdf-comment-viewer-v01"':'name = "class-pdf-comment-viewer-v01-staging"',
+            'database_name = "class_comment_db"':'database_name = "class_comment_db_staging"',
+            'database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"':'database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"',
+            'database_name = "class_comment_db_v2"':'database_name = "class_comment_db_v2_staging"',
+            'database_id = "8315a076-67ad-44e6-8286-11887af52ad3"':'database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"',
+            'queue = "cpcv-ai-jobs"':'queue = "cpcv-ai-jobs-staging"',
+            'queue = "cpcv-ai-translation-jobs"':'queue = "cpcv-ai-translation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-translation-dlq"':'dead_letter_queue = "cpcv-ai-translation-dlq-staging"',
+            'queue = "cpcv-ai-moderation-jobs"':'queue = "cpcv-ai-moderation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-moderation-dlq"':'dead_letter_queue = "cpcv-ai-moderation-dlq-staging"',
+            '826071901':'826071801','826071902':'826071802','826071903':'826071803','826071904':'826071804',
+            '826071905':'826071805','826071906':'826071806',
+            'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev':'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev',
+            'TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"':'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"',
+          }
+          for old,new in replacements.items():
+            if old not in source: raise SystemExit(f'missing staging replacement: {old}')
+            source=source.replace(old,new)
+          Path('.cpcv-staging.wrangler.toml').write_text(source,encoding='utf-8')
+          PY
+          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .cpcv-staging.wrangler.toml
+          npx wrangler deploy --dry-run --config .cpcv-staging.wrangler.toml
+
+      - name: Apply staging migrations and verify D1
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p staging-sync-records
+          npx wrangler d1 migrations apply class_comment_db_staging --remote --config .cpcv-staging.wrangler.toml 2>&1 | tee staging-sync-records/01-legacy-migrations.txt
+          npx wrangler d1 migrations apply class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml 2>&1 | tee staging-sync-records/02-v2-migrations.txt
+          node scripts/verify-remote-d1.mjs --config .cpcv-staging.wrangler.toml --database class_comment_db_v2_staging 2>&1 | tee staging-sync-records/03-d1-health.txt
+
+      - name: Deploy current production source to staging
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config .cpcv-staging.wrangler.toml --keep-vars 2>&1 | tee staging-sync-records/04-deploy.txt
+          npx wrangler deployments status --config .cpcv-staging.wrangler.toml 2>&1 | tee staging-sync-records/05-deployment-status.txt
+
+      - name: Smoke staging after system sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee staging-sync-records/06-smoke.txt
+          curl --fail-with-body --silent --show-error -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/?system_sync=$SOURCE_COMMIT" | grep -F '学生の「わからない」を' > staging-sync-records/07-source-marker.txt
+
+      - name: Verify runtime binding parity after deployment
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
+          for worker in class-pdf-comment-viewer-v01 class-pdf-comment-viewer-v01-staging; do
+            curl --fail-with-body --silent --show-error "${api}/workers/scripts/${worker}/settings" "${auth[@]}" > "staging-sync-records/settings-${worker}.json"
+          done
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path('staging-sync-records/settings-class-pdf-comment-viewer-v01.json').read_text())['result']
+          s=json.loads(Path('staging-sync-records/settings-class-pdf-comment-viewer-v01-staging.json').read_text())['result']
+          expected_separate={'DB','DB_V2','COMMENT_ROOM','AI_JOBS_QUEUE','AI_TRANSLATION_QUEUE','AI_MODERATION_QUEUE','AUTH_LOGIN_IP_LIMITER','AUTH_LOGIN_ACCOUNT_LIMITER','PUBLIC_COMMENT_RATE_LIMITER','AUTH_PUBLIC_EMAIL_LIMITER','AI_TRANSLATION_RATE_LIMITER','AI_MODERATION_RATE_LIMITER','AUTH_ORIGIN','PUBLIC_ORIGIN','TURNSTILE_SITE_KEY','MASTER_TOKEN','TEACHER_TOKEN'}
+          def vals(r):
+            out={}
+            for b in r.get('bindings') or []:
+              n=b.get('name')
+              if n in {'MASTER_TOKEN','TEACHER_TOKEN'}: continue
+              if b.get('type')=='plain_text': out[n]=(b.get('type'),b.get('text'))
+              else: out[n]=(b.get('type'), 'present')
+            return out
+          pv,sv=vals(p),vals(s)
+          failures=[]
+          for n in sorted(set(pv)|set(sv)):
+            if n in expected_separate: continue
+            if pv.get(n)!=sv.get(n): failures.append((n,pv.get(n),sv.get(n)))
+          if failures: raise SystemExit('behavior binding mismatch: '+repr(failures))
+          if p.get('compatibility_date')!=s.get('compatibility_date'): raise SystemExit('compatibility_date mismatch')
+          print('production-equivalent behavior bindings verified; environment resources remain separated')
+          PY
+
+      - name: Report staging system sync
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          status="${{ job.status }}"
+          body="CPCV staging system sync: source=${SOURCE_COMMIT} status=${status} origin=${STAGING_ORIGIN} run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh issue comment 70 --repo "$GITHUB_REPOSITORY" --body "$body"
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: staging-system-sync-${{ env.SOURCE_COMMIT }}
+          path: staging-sync-records/
+          if-no-files-found: warn
+          retention-days: 30
