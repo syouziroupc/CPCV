@@ -101,7 +101,18 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee staging-sync-records/06-smoke.txt
-          curl --fail-with-body --silent --show-error -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/?system_sync=$SOURCE_COMMIT" | grep -F '学生の「わからない」を' > staging-sync-records/07-source-marker.txt
+          curl --fail-with-body --silent --show-error -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/?system_sync=$SOURCE_COMMIT" > staging-sync-records/07-live-home.html
+          python - <<'PY'
+          from pathlib import Path
+          import re, html
+          text=Path('staging-sync-records/07-live-home.html').read_text(encoding='utf-8')
+          title=re.search(r'<title>(.*?)</title>',text,re.S|re.I)
+          h1=re.search(r'<h1[^>]*>(.*?)</h1>',text,re.S|re.I)
+          clean=lambda x: html.unescape(re.sub(r'<[^>]+>',' ',x or '')).replace('\n',' ').strip()
+          out=f'title={clean(title.group(1) if title else "")}\nh1={clean(h1.group(1) if h1 else "")}\n'
+          Path('staging-sync-records/07-live-home-marker.txt').write_text(out,encoding='utf-8')
+          print(out,end='')
+          PY
 
       - name: Verify runtime binding parity after deployment
         shell: bash
@@ -127,7 +138,7 @@ jobs:
               n=b.get('name')
               if n in {'MASTER_TOKEN','TEACHER_TOKEN'}: continue
               if b.get('type')=='plain_text': out[n]=(b.get('type'),b.get('text'))
-              else: out[n]=(b.get('type'), 'present')
+              else: out[n]=(b.get('type'),'present')
             return out
           pv,sv=vals(p),vals(s)
           failures=[]
@@ -146,7 +157,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           status="${{ job.status }}"
-          body="CPCV staging system sync: source=${SOURCE_COMMIT} status=${status} origin=${STAGING_ORIGIN} run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          marker=""
+          if [ -f staging-sync-records/07-live-home-marker.txt ]; then marker="$(tr '\n' ' ' < staging-sync-records/07-live-home-marker.txt)"; fi
+          body="CPCV staging system sync: source=${SOURCE_COMMIT} status=${status} origin=${STAGING_ORIGIN} ${marker} run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           gh issue comment 70 --repo "$GITHUB_REPOSITORY" --body "$body"
 
       - name: Upload evidence
