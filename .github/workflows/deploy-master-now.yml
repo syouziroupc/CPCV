@@ -65,10 +65,6 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
 
-      - name: Print changed source hashes
-        shell: bash
-        run: sha256sum public/_admin_spa.html public/admin/index.html public/assets/admin.js public/index.html public/privacy/index.html
-
       - name: Run full validation
         shell: bash
         run: |
