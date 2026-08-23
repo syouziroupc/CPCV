@@ -1,0 +1,7 @@
+/* Extreme narrow-width landing correction. Loaded after landing.css. */
+@media (max-width: 360px) {
+  .refined-hero h1 {
+    font-size: clamp(1.72rem, 9.6vw, 2rem);
+    letter-spacing: -0.035em;
+  }
+}
