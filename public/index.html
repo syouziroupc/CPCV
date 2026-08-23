@@ -5,79 +5,152 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="CPCVは、学生の匿名コメントを授業中のPDF投影へリアルタイム表示する授業参加ツールです。">
   <title>CPCV | 授業の反応をその場で確認</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav3">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-lp4">
 </head>
 <body class="site-page clear-public-page">
   <header class="site-header clear-site-header public-site-header">
     <a class="brand" href="/"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業コメント</small></span></a>
     <nav class="site-nav" aria-label="メインメニュー">
-      <a aria-current="page" href="/">ホーム</a>
-      <a href="/guide">使い方</a>
-      <a href="/about">機能概要</a>
+      <a href="#features">できること</a>
+      <a href="#how">使い方</a>
+      <a href="#desktop">Windows版</a>
       <a href="/privacy">情報の扱い</a>
-      <a href="/#desktop">Windows版</a>
-      <a class="nav-cta" href="/admin">先生ログイン</a>
+      <a href="/admin">先生ログイン</a>
+      <a class="nav-cta" href="#start">今すぐはじめる</a>
     </nav>
   </header>
 
-  <main class="clear-public-main">
-    <section class="clear-hero">
+  <main class="clear-public-main landing-main">
+    <section class="clear-hero cpcv-hero">
       <div class="clear-hero-copy">
-        <p class="eyebrow">匿名コメントを授業中に共有</p>
-        <h1>学生の反応を、<br>その場で確認する。</h1>
-        <p class="clear-lead">匿名コメントをリアルタイムに共有。承認・翻訳は授業ごとに切り替えられます。</p>
-        <div class="clear-actions">
-          <a class="button primary large" href="#join">学生として参加</a>
-          <a class="button large" href="/admin">先生としてログイン</a>
+        <p class="eyebrow">授業中の反応を、取りこぼさない</p>
+        <h1>学生の「わからない」を、<br>その場で拾う。</h1>
+        <p class="clear-lead">CPCVは、匿名コメントを授業中の画面へリアルタイムに表示する参加ツールです。声を上げにくい学生の質問も、その場で授業へ戻せます。</p>
+        <div class="clear-actions hero-actions">
+          <a class="button primary large" href="#start">今すぐはじめる</a>
+          <a class="button large" href="#how">使い方を見る</a>
         </div>
+        <ul class="hero-facts" aria-label="CPCVの特徴">
+          <li>学生は登録不要</li>
+          <li>QRコード・6文字コードで参加</li>
+          <li>PDF本体はブラウザ内で表示</li>
+        </ul>
+      </div>
+
+      <div class="hero-live-preview" aria-label="コメント投影の表示イメージ">
+        <div class="hero-preview-head"><span>投影イメージ</span><strong>CPCV LIVE</strong></div>
+        <div class="hero-preview-slide">
+          <p class="hero-preview-page">授業資料</p>
+          <div class="hero-preview-comment"><span>匿名</span><strong>ここ、もう一度説明してほしいです</strong></div>
+          <div class="hero-preview-comment"><span>匿名</span><strong>この例なら理解できました</strong></div>
+          <div class="hero-preview-comment"><span>匿名</span><strong>前のページとの違いは何ですか？</strong></div>
+        </div>
+        <div class="hero-preview-foot"><span class="live-dot" aria-hidden="true"></span>コメント受付中</div>
       </div>
     </section>
 
-    <section id="join" class="home-join-panel" aria-labelledby="joinHeading">
-      <div>
-        <p class="section-kicker">学生用</p>
-        <h2 id="joinHeading">授業に参加</h2>
+    <section id="start" class="start-section" aria-labelledby="startHeading">
+      <div class="clear-section-heading start-heading">
+        <p class="section-kicker">START</p>
+        <h2 id="startHeading">使う立場を選ぶ</h2>
+        <p>学生は授業コードだけで参加できます。先生はログイン後に授業を作成します。</p>
       </div>
-      <div class="join-form clear-join-form">
-        <label class="sr-only" for="homePublicCode">授業の合言葉</label>
-        <input id="homePublicCode" class="input code-input" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="ABC123">
-        <button id="homeJoinButton" class="button primary" type="button">参加する</button>
-        <p id="homeJoinStatus" class="status" aria-live="polite"></p>
+      <div class="start-grid">
+        <section class="start-path student-path" aria-labelledby="studentStartHeading">
+          <p class="path-number">01</p>
+          <div>
+            <p class="role-label">学生</p>
+            <h3 id="studentStartHeading">授業に参加する</h3>
+            <p>先生から案内された6文字のコードを入力してください。</p>
+          </div>
+          <div class="join-form clear-join-form start-join-form">
+            <label class="sr-only" for="homePublicCode">授業の合言葉</label>
+            <input id="homePublicCode" class="input code-input" maxlength="6" autocomplete="off" autocapitalize="characters" placeholder="ABC123">
+            <button id="homeJoinButton" class="button primary" type="button">参加する</button>
+            <p id="homeJoinStatus" class="status" aria-live="polite"></p>
+          </div>
+        </section>
+
+        <section class="start-path teacher-path" aria-labelledby="teacherStartHeading">
+          <p class="path-number">02</p>
+          <div>
+            <p class="role-label">先生</p>
+            <h3 id="teacherStartHeading">授業を始める</h3>
+            <p>ログインして授業を作成すると、学生用QRコードと参加コードが発行されます。</p>
+          </div>
+          <div class="start-teacher-actions">
+            <a class="button primary" href="/admin">先生ログイン</a>
+            <a class="button" href="/signup">初めて使う方</a>
+          </div>
+        </section>
       </div>
     </section>
 
-    <section id="desktop" class="clear-section" aria-labelledby="desktopHeading">
-      <div class="clear-section-heading">
-        <p class="section-kicker">先生用 Windows アプリ</p>
-        <h2 id="desktopHeading">Desktop版をダウンロード</h2>
+    <section id="how" class="clear-section landing-section" aria-labelledby="howHeading">
+      <div class="clear-section-heading landing-heading">
+        <p class="section-kicker">HOW IT WORKS</p>
+        <h2 id="howHeading">授業開始まで、3ステップ</h2>
       </div>
-      <p>CPCV Desktopは、PowerPoint・PDF・動画・ブラウザの上にコメントとQRコードを透明オーバーレイ表示します。</p>
-      <div class="clear-actions">
+      <ol class="landing-steps">
+        <li><span>1</span><div><strong>先生が授業を作成</strong><p>授業名を入力すると、参加用のQRコードと6文字コードが発行されます。</p></div></li>
+        <li><span>2</span><div><strong>学生がその場で参加</strong><p>登録は不要です。スマートフォンから匿名でコメントを送れます。</p></div></li>
+        <li><span>3</span><div><strong>コメントを授業へ戻す</strong><p>質問や反応を投影し、必要に応じて承認・翻訳・フィルターを使えます。</p></div></li>
+      </ol>
+      <div class="section-link-row"><a href="/guide">詳しい操作手順を見る</a></div>
+    </section>
+
+    <section id="features" class="clear-section landing-section clear-feature-section" aria-labelledby="featureHeading">
+      <div class="clear-section-heading landing-heading">
+        <p class="section-kicker">FEATURES</p>
+        <h2 id="featureHeading">授業に必要な機能だけ使う</h2>
+        <p>最初から全部を設定する必要はありません。授業ごとに必要な機能だけ有効にできます。</p>
+      </div>
+      <div class="clear-feature-grid landing-feature-grid">
+        <article><span>01</span><h3>リアルタイム表示</h3><p>学生の匿名コメントを縦表示または横流れで投影します。</p></article>
+        <article><span>02</span><h3>表示前の確認</h3><p>必要な授業では、先生が承認したコメントだけを表示できます。</p></article>
+        <article><span>03</span><h3>判定と翻訳</h3><p>辞書フィルターやAI判定、翻訳を授業ごとに切り替えられます。</p></article>
+        <article><span>04</span><h3>ページ別の反応</h3><p>PDFのどのページで反応があったかを必要な場合だけ集計します。</p></article>
+      </div>
+      <div class="section-link-row"><a href="/about">機能を詳しく見る</a></div>
+    </section>
+
+    <section id="desktop" class="clear-section landing-section desktop-section" aria-labelledby="desktopHeading">
+      <div class="desktop-copy">
+        <p class="section-kicker">WINDOWS APP</p>
+        <h2 id="desktopHeading">PowerPointの上にも、コメントを表示。</h2>
+        <p>CPCV Desktopなら、PowerPoint・PDF・動画・ブラウザの上にコメントとQRコードを重ねて表示できます。</p>
+      </div>
+      <div class="desktop-action">
         <a class="button primary large" href="https://github.com/syouziroupc/CPCV/releases/download/desktop-v0.2.2-e116/CPCV-Desktop-0.2.2-Windows.zip">Windows版をダウンロード</a>
       </div>
     </section>
 
-    <section class="clear-section clear-feature-section" aria-labelledby="featureHeading">
-      <div class="clear-section-heading">
-        <p class="section-kicker">授業ごとに選択</p>
-        <h2 id="featureHeading">必要な機能だけ使う</h2>
+    <section class="trust-strip" aria-labelledby="trustHeading">
+      <div>
+        <p class="section-kicker">DATA</p>
+        <h2 id="trustHeading">PDF本体は送信しません。</h2>
       </div>
-      <div class="clear-feature-grid">
-        <article><h3>コメント表示</h3><p>縦表示または横流れで投影します。</p></article>
-        <article><h3>承認と辞書</h3><p>表示前確認、伏字、投稿拒否を設定できます。</p></article>
-        <article><h3>AI判定と翻訳</h3><p>必要な授業だけ有効にし、翻訳は速度と精度を選べます。</p></article>
-        <article><h3>ページ別分析</h3><p>PDFページと匿名反応を必要な場合だけ集計します。</p></article>
+      <p>PDFは先生のブラウザ内で表示します。送信する情報や保持期間は「情報の扱い」で確認できます。</p>
+      <a href="/privacy">情報の扱いを見る</a>
+    </section>
+
+    <section class="landing-final-cta" aria-labelledby="finalCtaHeading">
+      <div>
+        <p class="section-kicker">GET STARTED</p>
+        <h2 id="finalCtaHeading">次の授業から、試せます。</h2>
+        <p>学生は登録不要。先生は授業を作成してQRコードを共有するだけです。</p>
       </div>
+      <a class="button primary large" href="#start">今すぐはじめる</a>
     </section>
   </main>
 
-  <footer class="site-footer clear-footer">
+  <footer class="site-footer clear-footer landing-footer">
     <span>CPCV</span>
     <nav aria-label="フッター">
-      <a href="/guide">使い方</a>
-      <a href="/about">機能概要</a>
-      <a href="/privacy">情報の扱い</a>
+      <a href="#features">できること</a>
+      <a href="#how">使い方</a>
       <a href="#desktop">Windows版</a>
+      <a href="/privacy">情報の扱い</a>
       <a href="/admin">先生ログイン</a>
     </nav>
   </footer>
