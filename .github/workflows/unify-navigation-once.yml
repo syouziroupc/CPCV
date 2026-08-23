@@ -1,4 +1,4 @@
-name: Unify CPCV navigation once
+name: Repair CPCV source manifest once
 
 on:
   push:
@@ -9,22 +9,47 @@ permissions:
   contents: write
 
 jobs:
-  unify:
+  repair:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: master
           fetch-depth: 0
-      - name: Apply navigation changes
-        run: python .github/scripts/unify_navigation.py
-      - name: Verify and commit
+      - name: Update source manifest
         shell: bash
         run: |
           set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          paths = [
+              'public/assets/account.js',
+              'public/assets/join.js',
+              'public/assets/master.js',
+              'public/assets/organization-settings.js',
+              'public/assets/viewer.js',
+              '.github/workflows/unify-navigation-once.yml',
+          ]
+          manifest = Path('SOURCE_SHA256SUMS.override.txt')
+          order = []
+          values = {}
+          for line in manifest.read_text(encoding='utf-8').splitlines():
+              if not line:
+                  continue
+              digest, path = line.split('  ', 1)
+              order.append(path)
+              values[path] = digest
+          for path in paths:
+              values[path] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+              if path not in order:
+                  order.append(path)
+          manifest.write_text(''.join(f'{values[path]}  {path}\n' for path in order), encoding='utf-8', newline='\n')
+          PY
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add public SOURCE_SHA256SUMS.override.txt
-          git commit -m "Unify public and authenticated navigation"
+          git add SOURCE_SHA256SUMS.override.txt
+          git commit -m "Update manifest for final UI cleanup"
           git push origin HEAD:master
