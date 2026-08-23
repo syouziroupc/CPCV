@@ -113,3 +113,31 @@
     width: 100%;
   }
 }
+
+/* Public navigation is canonical on every signed-out/public page. Historical
+   mobile rules in the imported stylesheet must not hide ordinary links. */
+.public-site-header .site-nav a,
+.clear-site-header .site-nav a {
+  display: inline-flex !important;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .public-site-header,
+  .clear-site-header {
+    align-items: stretch;
+  }
+
+  .public-site-header .site-nav,
+  .clear-site-header .site-nav {
+    width: 100%;
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+    padding-bottom: 4px;
+  }
+}
