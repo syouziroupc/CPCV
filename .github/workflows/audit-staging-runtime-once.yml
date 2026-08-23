@@ -1,0 +1,125 @@
+name: Audit staging runtime once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/audit-staging-runtime-once.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch production and staging Worker settings
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          for worker in class-pdf-comment-viewer-v01 class-pdf-comment-viewer-v01-staging; do
+            curl --fail-with-body --silent --show-error \
+              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${worker}/settings" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H "Content-Type: application/json" \
+              > "${worker}.json"
+          done
+
+      - name: Build redacted runtime comparison
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          workers = {
+              'production': 'class-pdf-comment-viewer-v01.json',
+              'staging': 'class-pdf-comment-viewer-v01-staging.json',
+          }
+          visible_text = {
+              'APP_ENV','AUTH_V2_ENABLED','EMAIL_AUTH_REQUIRED',
+              'AI_MODERATION_MODEL','AI_MODERATION_FALLBACK_MODEL',
+              'AI_TRANSLATION_MODEL','AI_TRANSLATION_BALANCED_MODEL','AI_TRANSLATION_ACCURATE_MODEL',
+              'AI_TIMEOUT_MS','AI_TRANSLATION_TIMEOUT_MS','AI_TRANSLATION_BALANCED_TIMEOUT_MS',
+              'AI_TRANSLATION_ACCURATE_TIMEOUT_MS','AI_QUEUE_PARALLELISM',
+              'AI_TRANSLATION_QUEUE_PARALLELISM','AI_MODERATION_QUEUE_PARALLELISM',
+              'AUTH_ORIGIN','PUBLIC_ORIGIN','AUTH_EMAIL_FROM','AUTH_EMAIL_REPLY_TO','TURNSTILE_SITE_KEY',
+          }
+          safe_fields = {
+              'type','name','namespace_id','namespace','id','database_id','database_name',
+              'queue_name','queue','class_name','script_name','service','environment','dataset',
+          }
+
+          def normalized(path):
+              raw = json.loads(Path(path).read_text())
+              if not raw.get('success'):
+                  raise SystemExit(f'Cloudflare API failed for {path}: {raw.get("errors")}')
+              result = raw.get('result') or {}
+              out = {'bindings': {}}
+              for b in result.get('bindings') or []:
+                  name = b.get('name') or b.get('binding') or '(unnamed)'
+                  item = {k: b[k] for k in safe_fields if k in b}
+                  if b.get('type') == 'plain_text' and name in visible_text:
+                      item['value'] = b.get('text', '')
+                  elif b.get('type') in {'secret_text','secret_key'}:
+                      item['secret_present'] = True
+                  out['bindings'][name] = item
+              for key in ('compatibility_date','compatibility_flags','usage_model','placement','observability'):
+                  if key in result:
+                      out[key] = result[key]
+              return out
+
+          data = {name: normalized(path) for name, path in workers.items()}
+          prod, stage = data['production'], data['staging']
+          names = sorted(set(prod['bindings']) | set(stage['bindings']))
+          rows = []
+          for name in names:
+              p = prod['bindings'].get(name)
+              s = stage['bindings'].get(name)
+              if p == s:
+                  state = 'same'
+              elif p is None:
+                  state = 'staging-only'
+              elif s is None:
+                  state = 'production-only'
+              elif p.get('type') != s.get('type'):
+                  state = 'type-diff'
+              else:
+                  state = 'value/resource-diff'
+              rows.append((name, state, p, s))
+
+          report = []
+          report.append('## CPCV staging / production runtime audit')
+          report.append('')
+          report.append('Secrets are redacted. Resource IDs/names and selected non-secret behavior variables are shown.')
+          report.append('')
+          report.append('| binding | state | production | staging |')
+          report.append('|---|---|---|---|')
+          def short(v):
+              if v is None: return 'missing'
+              return '`' + json.dumps(v, ensure_ascii=False, sort_keys=True, separators=(',', ':')).replace('`','')[:700] + '`'
+          for name, state, p, s in rows:
+              report.append(f'| `{name}` | **{state}** | {short(p)} | {short(s)} |')
+          report.append('')
+          report.append('### Worker-level settings')
+          report.append('```json')
+          report.append(json.dumps({k:{x:y for x,y in v.items() if x != 'bindings'} for k,v in data.items()}, ensure_ascii=False, indent=2, sort_keys=True))
+          report.append('```')
+          Path('runtime-audit.md').write_text('\n'.join(report), encoding='utf-8')
+          PY
+          cat runtime-audit.md
+
+      - name: Report audit to issue 70
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          jq -n --rawfile body runtime-audit.md '{body:$body}' > payload.json
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/issues/70/comments" --input payload.json
