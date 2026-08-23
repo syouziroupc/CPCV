@@ -35,6 +35,9 @@ jobs:
               'public/index.html',
               'public/assets/landing.css',
               '.github/workflows/landing-manifest-repair.yml',
+              '.github/workflows/audit-staging-runtime-once.yml',
+              '.github/workflows/sync-staging-system-once.yml',
+              '.github/workflows/deploy-refined-landing-staging-once.yml',
           ]
           manifest = Path('SOURCE_SHA256SUMS.override.txt')
           order = []
