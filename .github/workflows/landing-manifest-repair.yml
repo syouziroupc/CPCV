@@ -6,6 +6,7 @@ on:
     paths:
       - "public/index.html"
       - "public/assets/landing.css"
+      - "public/assets/landing-narrow.css"
       - ".github/workflows/landing-manifest-repair.yml"
 
 permissions:
@@ -34,6 +35,7 @@ jobs:
           targets = [
               'public/index.html',
               'public/assets/landing.css',
+              'public/assets/landing-narrow.css',
               '.github/workflows/landing-manifest-repair.yml',
               '.github/workflows/audit-staging-runtime-once.yml',
               '.github/workflows/sync-staging-system-once.yml',
