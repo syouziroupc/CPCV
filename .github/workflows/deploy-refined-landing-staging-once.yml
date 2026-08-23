@@ -1,5 +1,5 @@
 name: Deploy refined landing to staging once
-# Triggered after creation so GitHub Actions sees the workflow on the default branch.
+# LP-only staging gate with explicit typography and alignment checks.
 
 on:
   push:
@@ -13,7 +13,7 @@ permissions:
 
 env:
   SYSTEM_COMMIT: 0f61a65ff056539742657272cc63fba4af8560ac
-  LP_COMMIT: 5dad4a78346a414f660722cca29aa16b0b1446b1
+  LP_COMMIT: 0412159945b4128b5b1d398dcd719a123e2a80ca
   STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
 
 jobs:
@@ -22,13 +22,13 @@ jobs:
     environment: production
     timeout-minutes: 90
     steps:
-      - name: Checkout refined LP revision
+      - name: Checkout corrected LP revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ env.LP_COMMIT }}
           fetch-depth: 0
 
-      - name: Prove runtime behavior is unchanged
+      - name: Prove application runtime is unchanged
         shell: bash
         run: |
           set -euo pipefail
@@ -41,14 +41,20 @@ jobs:
             'public/assets/landing.css',
             'SOURCE_SHA256SUMS.override.txt',
             '.github/workflows/landing-manifest-repair.yml',
+            '.github/workflows/audit-staging-runtime-once.yml',
+            '.github/workflows/sync-staging-system-once.yml',
+            '.github/workflows/deploy-refined-landing-staging-once.yml',
           }
           changed={x.strip() for x in Path('/tmp/lp-diff.txt').read_text().splitlines() if x.strip()}
           unexpected=changed-allowed
           if unexpected:
-            raise SystemExit('LP revision changes runtime/system files: '+', '.join(sorted(unexpected)))
-          if 'public/index.html' not in changed or 'public/assets/landing.css' not in changed:
+            raise SystemExit('LP revision changes application runtime files: '+', '.join(sorted(unexpected)))
+          required={'public/index.html','public/assets/landing.css'}
+          if not required.issubset(changed):
             raise SystemExit('Expected LP files are missing from diff')
-          print('LP-only runtime diff verified:', ', '.join(sorted(changed)))
+          if any(p.startswith('src/') or p.startswith('migrations') for p in changed):
+            raise SystemExit('Backend or migration change detected in LP revision')
+          print('LP-only application diff verified:', ', '.join(sorted(changed)))
           PY
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
@@ -58,6 +64,7 @@ jobs:
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
         with:
           python-version: "3.12.12"
+
       - name: Install frozen dependencies and Chromium
         env:
           NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
@@ -68,13 +75,13 @@ jobs:
           python -m pip install --disable-pip-version-check -r requirements-visual.txt
           python -m playwright install --with-deps chromium
 
-      - name: Validate refined LP revision
+      - name: Validate corrected LP revision
         run: |
           npm run verify:source-manifest
           npm run check:v0810
           python scripts/audit-responsive-layout.py
 
-      - name: Materialize same staging runtime config
+      - name: Materialize identical staging runtime config
         shell: bash
         run: |
           set -euo pipefail
@@ -114,7 +121,7 @@ jobs:
           mkdir -p landing-evidence
           node scripts/verify-remote-d1.mjs --config .cpcv-staging.wrangler.toml --database class_comment_db_v2_staging 2>&1 | tee landing-evidence/01-db-health-before.txt
 
-      - name: Deploy LP-only revision to staging
+      - name: Deploy corrected LP to staging
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -130,13 +137,14 @@ jobs:
           set -euo pipefail
           node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee landing-evidence/04-smoke.txt
           curl --fail-with-body --silent --show-error -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/?lp=$LP_COMMIT" > landing-evidence/live-home.html
-          grep -F '/assets/landing.css?v=0.8.10-lp5' landing-evidence/live-home.html >/dev/null
+          grep -F '/assets/landing.css?v=0.8.10-lp6' landing-evidence/live-home.html >/dev/null
+          grep -F 'hero-line-main' landing-evidence/live-home.html >/dev/null
           grep -F 'projection-demo' landing-evidence/live-home.html >/dev/null
           grep -F 'homePublicCode' landing-evidence/live-home.html >/dev/null
           grep -F 'homeJoinButton' landing-evidence/live-home.html >/dev/null
           grep -F 'homeJoinStatus' landing-evidence/live-home.html >/dev/null
 
-      - name: Render and measure live staging LP
+      - name: Render, measure and reject bad Japanese line breaks
         shell: bash
         run: |
           python - <<'PY'
@@ -157,39 +165,103 @@ jobs:
               page.wait_for_timeout(500)
               data=page.evaluate('''() => {
                 const root=document.documentElement;
-                const hero=document.querySelector('.refined-hero');
-                const projection=document.querySelector('.projection-screen');
-                const start=document.querySelector('#start');
                 const ids=['homePublicCode','homeJoinButton','homeJoinStatus'];
                 const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom}};
+                const lineData=(el)=>{
+                  if(!el) return [];
+                  const lines=[];
+                  const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);
+                  let node;
+                  while((node=walker.nextNode())){
+                    for(let i=0;i<node.data.length;i++){
+                      const ch=node.data[i];
+                      if(/\\s/.test(ch)) continue;
+                      const range=document.createRange();
+                      range.setStart(node,i); range.setEnd(node,i+1);
+                      const rs=[...range.getClientRects()].filter(r=>r.width>0 && r.height>0);
+                      if(!rs.length) continue;
+                      const top=Math.round(rs[0].top*2)/2;
+                      let line=lines.find(x=>Math.abs(x.top-top)<1.5);
+                      if(!line){line={top,count:0,text:''};lines.push(line);}
+                      line.count+=1; line.text+=ch;
+                    }
+                  }
+                  return lines.sort((a,b)=>a.top-b.top);
+                };
+                const headings={
+                  hero:lineData(document.querySelector('.refined-hero h1')),
+                  start:lineData(document.querySelector('#startHeading')),
+                  how:lineData(document.querySelector('#howHeading')),
+                  features:lineData(document.querySelector('#featureHeading')),
+                  desktop:lineData(document.querySelector('#desktopHeading')),
+                  trust:lineData(document.querySelector('#trustHeading')),
+                  final:lineData(document.querySelector('#finalCtaHeading')),
+                };
+                const headingBlocks=[...document.querySelectorAll('.start-heading,.landing-heading')].map(block=>{
+                  const kids=[...block.children].filter(x=>getComputedStyle(x).display!=='none');
+                  return {xs:kids.map(x=>rect(x).x), kicker:kids[0]?rect(kids[0]):null};
+                });
                 return {
                   title:document.title,
-                  h1:document.querySelector('h1')?.innerText||'',
                   overflow:root.scrollWidth-window.innerWidth,
-                  hero:hero?rect(hero):null,
-                  projection:projection?rect(projection):null,
-                  start:start?rect(start):null,
+                  projection:rect(document.querySelector('.projection-screen')),
                   ids:Object.fromEntries(ids.map(id=>[id,Boolean(document.getElementById(id))])),
-                  landingCss:[...document.styleSheets].some(x=>String(x.href||'').includes('/assets/landing.css'))
+                  landingCss:[...document.styleSheets].some(x=>String(x.href||'').includes('/assets/landing.css')),
+                  headings,
+                  headingBlocks
                 };
               }''')
-              if data['overflow']>1: raise RuntimeError(f'horizontal overflow {width}: {data["overflow"]}')
-              if not data['landingCss']: raise RuntimeError(f'landing css missing {width}')
-              if not all(data['ids'].values()): raise RuntimeError(f'join IDs missing {width}: {data["ids"]}')
-              if not data['projection'] or data['projection']['width'] < 250: raise RuntimeError(f'projection too small/missing {width}')
-              ratio=data['projection']['width']/data['projection']['height']
-              if not (1.73 <= ratio <= 1.83): raise RuntimeError(f'projection ratio not 16:9-ish {width}: {ratio}')
+
+              if data['overflow']>1:
+                raise RuntimeError(f'horizontal overflow {width}: {data["overflow"]}')
+              if not data['landingCss']:
+                raise RuntimeError(f'landing css missing {width}')
+              if not all(data['ids'].values()):
+                raise RuntimeError(f'join IDs missing {width}: {data["ids"]}')
+              projection=data['projection']
+              if not projection or projection['width'] < 250:
+                raise RuntimeError(f'projection too small/missing {width}')
+              ratio=projection['width']/projection['height']
+              if not (1.73 <= ratio <= 1.83):
+                raise RuntimeError(f'projection ratio not 16:9-ish {width}: {ratio}')
+
+              headings=data['headings']
+              if width >= 768:
+                if len(headings['hero']) != 2:
+                  raise RuntimeError(f'hero must be exactly two readable lines at {width}: {headings["hero"]}')
+                for name in ('start','how','features','trust','final'):
+                  lines=headings[name]
+                  if len(lines) > 2:
+                    raise RuntimeError(f'{name} heading has too many lines at {width}: {lines}')
+                  if any(line['count'] < 4 for line in lines):
+                    raise RuntimeError(f'{name} heading has orphan glyph line at {width}: {lines}')
+                if len(headings['desktop']) != 2:
+                  raise RuntimeError(f'desktop heading must use controlled two-line break at {width}: {headings["desktop"]}')
+              else:
+                for name,lines in headings.items():
+                  if any(line['count'] < 3 for line in lines):
+                    raise RuntimeError(f'{name} heading has orphan glyph line on mobile: {lines}')
+
+              for block in data['headingBlocks']:
+                xs=block['xs']
+                if xs and max(xs)-min(xs) > 2:
+                  raise RuntimeError(f'section heading left edges are misaligned at {width}: {xs}')
+                kicker=block['kicker']
+                if kicker and (kicker['height'] > 36 or kicker['width'] < 32):
+                  raise RuntimeError(f'section kicker is vertical/cramped at {width}: {kicker}')
+
               page.screenshot(path=str(out/f'landing-{width}.png'),full_page=True)
               data['viewport']={'width':width,'height':height}
               data['projectionRatio']=ratio
               results.append(data)
               page.close()
             browser.close()
+
           Path('landing-evidence/05-visual-metrics.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
           print(json.dumps(results,ensure_ascii=False,indent=2))
           PY
 
-      - name: Report refined staging LP
+      - name: Report corrected staging LP
         if: always()
         shell: bash
         env:
@@ -197,14 +269,14 @@ jobs:
         run: |
           status="${{ job.status }}"
           version="$(grep -oE 'Current Version ID: [0-9a-f-]+' landing-evidence/02-deploy.txt 2>/dev/null | tail -1 | cut -d' ' -f4 || true)"
-          body="CPCV refined LP staging: source=${LP_COMMIT} system_base=${SYSTEM_COMMIT} status=${status} version=${version:-unknown} origin=${STAGING_ORIGIN} run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="CPCV corrected LP staging: source=${LP_COMMIT} system_base=${SYSTEM_COMMIT} status=${status} version=${version:-unknown} origin=${STAGING_ORIGIN} run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           gh issue comment 70 --repo "$GITHUB_REPOSITORY" --body "$body"
 
       - name: Upload live visual evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: cpcv-refined-landing-live-${{ env.LP_COMMIT }}
+          name: cpcv-corrected-landing-live-${{ env.LP_COMMIT }}
           path: landing-evidence/
           if-no-files-found: warn
           retention-days: 30
