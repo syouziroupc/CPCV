@@ -1,0 +1,229 @@
+from pathlib import Path
+import hashlib
+import re
+
+ROOT = Path('.')
+WORKFLOW = '.github/workflows/unify-navigation-once.yml'
+SCRIPT = '.github/scripts/unify_navigation.py'
+
+public_pages = {
+    'public/index.html': 'home',
+    'public/about/index.html': 'about',
+    'public/guide/index.html': 'guide',
+    'public/privacy/index.html': 'privacy',
+}
+auth_pages = [
+    'public/signup/index.html',
+    'public/forgot-password/index.html',
+    'public/check-email/index.html',
+    'public/verify-email/index.html',
+    'public/reset-password/index.html',
+    'public/accept-invitation/index.html',
+    'public/confirm-email-change/index.html',
+]
+
+
+def header(active='', extra=''):
+    cls = 'site-header clear-site-header public-site-header' + (f' {extra}' if extra else '')
+
+    def link(key, href, label, css=''):
+        current = ' aria-current="page"' if active == key else ''
+        class_attr = f' class="{css}"' if css else ''
+        return f'      <a{class_attr}{current} href="{href}">{label}</a>'
+
+    return '\n'.join([
+        f'  <header class="{cls}">',
+        '    <a class="brand" href="/"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業コメント</small></span></a>',
+        '    <nav class="site-nav" aria-label="メインメニュー">',
+        link('home', '/', 'ホーム'),
+        link('guide', '/guide', '使い方'),
+        link('about', '/about', '機能概要'),
+        link('privacy', '/privacy', '情報の扱い'),
+        link('desktop', '/#desktop', 'Windows版'),
+        link('login', '/admin', '先生ログイン', 'nav-cta'),
+        '    </nav>',
+        '  </header>',
+    ])
+
+
+header_re = re.compile(r'\n\s*<header class="(?:site-header clear-site-header|compact-public-header)[^"]*">.*?</header>', re.S)
+
+
+def add_body_class(text, cls):
+    m = re.search(r'<body class="([^"]*)">', text)
+    if not m:
+        raise RuntimeError(f'body class not found for {cls}')
+    classes = m.group(1).split()
+    if cls not in classes:
+        classes.append(cls)
+    return text[:m.start()] + f'<body class="{" ".join(classes)}">' + text[m.end():]
+
+
+def replace_or_insert_public_header(path, active='', auth_layout=False):
+    p = ROOT / path
+    text = p.read_text(encoding='utf-8')
+    new_header = header(active)
+    if header_re.search(text):
+        text = header_re.sub('\n' + new_header, text, count=1)
+    else:
+        body = re.search(r'<body[^>]*>\n', text)
+        if not body:
+            raise RuntimeError(f'body not found: {path}')
+        text = text[:body.end()] + new_header + '\n' + text[body.end():]
+    if auth_layout:
+        text = add_body_class(text, 'public-auth-layout')
+    p.write_text(text, encoding='utf-8', newline='\n')
+
+
+for path, active in public_pages.items():
+    replace_or_insert_public_header(path, active=active)
+for path in auth_pages:
+    replace_or_insert_public_header(path, active='login', auth_layout=True)
+
+private_transition = (
+    '        <span class="app-nav-divider" aria-hidden="true"></span>\n'
+    '        <a class="app-nav-public" href="/">公開サイト</a>'
+)
+private_link_re = re.compile(
+    r'\s*<a href="/">ホーム</a>\s*'
+    r'<a class="desktop-download-link"[^>]*>Windows版DL</a>'
+)
+
+for path in ['public/_admin_spa.html', 'public/admin/index.html']:
+    p = ROOT / path
+    text = p.read_text(encoding='utf-8')
+    if 'public-auth-header' not in text:
+        skip = re.search(r'(<a class="skip-link"[^>]*>.*?</a>\s*)', text, re.S)
+        if not skip:
+            raise RuntimeError(f'skip link not found: {path}')
+        text = text[:skip.end()] + header('login', 'public-auth-header') + '\n' + text[skip.end():]
+    text, count = private_link_re.subn('\n' + private_transition, text, count=1)
+    if count != 1:
+        raise RuntimeError(f'private navigation pattern not found: {path}')
+    text = text.replace(
+        '<div class="auth-intro-links"><a href="/">ホーム</a><a href="/guide#teacher">先生の使い方</a></div>',
+        '<div class="auth-intro-links"><a href="/guide#teacher">先生の使い方</a></div>'
+    )
+    p.write_text(text, encoding='utf-8', newline='\n')
+
+for path in ['public/account/index.html', 'public/master/index.html']:
+    p = ROOT / path
+    text = add_body_class(p.read_text(encoding='utf-8'), 'stateful-auth-page')
+    if 'public-auth-header' not in text:
+        skip = re.search(r'(<a class="skip-link"[^>]*>.*?</a>\s*)', text, re.S)
+        if not skip:
+            raise RuntimeError(f'skip link not found: {path}')
+        text = text[:skip.end()] + header('login', 'public-auth-header') + '\n' + text[skip.end():]
+    text, count = private_link_re.subn('\n' + private_transition, text, count=1)
+    if count != 1:
+        raise RuntimeError(f'private navigation pattern not found: {path}')
+    p.write_text(text, encoding='utf-8', newline='\n')
+
+css_path = ROOT / 'public/assets/app-current.css'
+css = css_path.read_text(encoding='utf-8')
+marker = '/* Unified public/private navigation boundary. */'
+if marker not in css:
+    css += r'''
+
+/* Unified public/private navigation boundary. */
+.public-site-header {
+  width: 100%;
+  max-width: 100%;
+}
+.public-auth-layout {
+  padding: 0;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  place-items: start stretch;
+}
+.public-auth-layout > .public-site-header { align-self: start; }
+.public-auth-layout > .auth-shell {
+  width: min(960px, calc(100% - 32px));
+  max-width: 960px;
+  margin: clamp(24px, 6vh, 64px) auto;
+  justify-self: center;
+}
+.app-nav-divider {
+  flex: 0 0 1px;
+  width: 1px;
+  height: 1.5rem;
+  margin-inline: 4px;
+  background: #d9d9d9;
+  align-self: center;
+}
+.app-nav-public { font-weight: 650; }
+.admin-page > .public-auth-header { display: none; }
+.admin-page:not([data-view]) .app-topbar { display: none; }
+.admin-page[data-view="auth"] > .public-auth-header { display: flex; }
+.admin-page[data-view="auth"] .app-topbar { display: none; }
+.admin-page[data-view="application"] > .public-auth-header { display: none; }
+.admin-page[data-view="application"] .app-topbar { display: flex; }
+.admin-page.auth-view {
+  padding: 0;
+  place-items: start stretch;
+  align-content: start;
+}
+.admin-page.auth-view .admin-shell {
+  width: min(1040px, calc(100% - 32px));
+  margin: clamp(24px, 6vh, 64px) auto;
+}
+.stateful-auth-page > .public-auth-header,
+.stateful-auth-page .app-topbar { display: none; }
+.stateful-auth-page:has(#loginRequired:not(.hidden)) > .public-auth-header,
+.stateful-auth-page:has(#masterLoginSection:not(.hidden)) > .public-auth-header { display: flex; }
+.stateful-auth-page:has(#accountSection:not(.hidden)) .app-topbar,
+.stateful-auth-page:has(#masterPanel:not(.hidden)) .app-topbar { display: flex; }
+@media (max-width: 720px) {
+  .public-auth-layout > .auth-shell,
+  .admin-page.auth-view .admin-shell {
+    width: calc(100% - 24px);
+    margin-block: 20px 28px;
+  }
+  .app-nav-divider { height: 1.25rem; }
+}
+@media (max-width: 420px) {
+  .public-auth-layout > .auth-shell,
+  .admin-page.auth-view .admin-shell {
+    width: calc(100% - 16px);
+    margin-block: 12px 20px;
+  }
+}
+'''
+css_path.write_text(css, encoding='utf-8', newline='\n')
+
+changed = list(public_pages) + auth_pages + [
+    'public/_admin_spa.html',
+    'public/admin/index.html',
+    'public/account/index.html',
+    'public/master/index.html',
+    'public/assets/app-current.css',
+    WORKFLOW,
+    SCRIPT,
+]
+
+for path in list(public_pages) + auth_pages:
+    text = (ROOT / path).read_text(encoding='utf-8')
+    assert 'compact-public-header' not in text, path
+    assert text.count('public-site-header') == 1, path
+    assert 'href="/#desktop">Windows版</a>' in text, path
+for path in ['public/_admin_spa.html', 'public/admin/index.html', 'public/account/index.html', 'public/master/index.html']:
+    text = (ROOT / path).read_text(encoding='utf-8')
+    assert 'desktop-download-link' not in text, path
+    assert 'class="app-nav-public" href="/">公開サイト</a>' in text, path
+    assert text.count('public-auth-header') == 1, path
+
+override_path = ROOT / 'SOURCE_SHA256SUMS.override.txt'
+order = []
+values = {}
+for line in override_path.read_text(encoding='utf-8').splitlines():
+    if not line:
+        continue
+    digest, path = line.split('  ', 1)
+    order.append(path)
+    values[path] = digest
+for path in changed:
+    digest = hashlib.sha256((ROOT / path).read_bytes()).hexdigest()
+    if path not in values:
+        order.append(path)
+    values[path] = digest
+override_path.write_text(''.join(f'{values[path]}  {path}\n' for path in order), encoding='utf-8', newline='\n')
