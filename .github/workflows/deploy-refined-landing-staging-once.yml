@@ -1,0 +1,209 @@
+name: Deploy refined landing to staging once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/deploy-refined-landing-staging-once.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  SYSTEM_COMMIT: 0f61a65ff056539742657272cc63fba4af8560ac
+  LP_COMMIT: 5dad4a78346a414f660722cca29aa16b0b1446b1
+  STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+
+jobs:
+  deploy-and-render:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 90
+    steps:
+      - name: Checkout refined LP revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.LP_COMMIT }}
+          fetch-depth: 0
+
+      - name: Prove runtime behavior is unchanged
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$LP_COMMIT"
+          git diff --name-only "$SYSTEM_COMMIT" "$LP_COMMIT" | tee /tmp/lp-diff.txt
+          python - <<'PY'
+          from pathlib import Path
+          allowed={
+            'public/index.html',
+            'public/assets/landing.css',
+            'SOURCE_SHA256SUMS.override.txt',
+            '.github/workflows/landing-manifest-repair.yml',
+          }
+          changed={x.strip() for x in Path('/tmp/lp-diff.txt').read_text().splitlines() if x.strip()}
+          unexpected=changed-allowed
+          if unexpected:
+            raise SystemExit('LP revision changes runtime/system files: '+', '.join(sorted(unexpected)))
+          if 'public/index.html' not in changed or 'public/assets/landing.css' not in changed:
+            raise SystemExit('Expected LP files are missing from diff')
+          print('LP-only runtime diff verified:', ', '.join(sorted(changed)))
+          PY
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12.12"
+      - name: Install frozen dependencies and Chromium
+        env:
+          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
+        run: |
+          npm install --global npm@11.18.0
+          npm ci
+          npm install-scripts ls
+          python -m pip install --disable-pip-version-check -r requirements-visual.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Validate refined LP revision
+        run: |
+          npm run verify:source-manifest
+          npm run check:v0810
+          python scripts/audit-responsive-layout.py
+
+      - name: Materialize same staging runtime config
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          source=Path('wrangler.toml').read_text(encoding='utf-8')
+          replacements={
+            'name = "class-pdf-comment-viewer-v01"':'name = "class-pdf-comment-viewer-v01-staging"',
+            'database_name = "class_comment_db"':'database_name = "class_comment_db_staging"',
+            'database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"':'database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"',
+            'database_name = "class_comment_db_v2"':'database_name = "class_comment_db_v2_staging"',
+            'database_id = "8315a076-67ad-44e6-8286-11887af52ad3"':'database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"',
+            'queue = "cpcv-ai-jobs"':'queue = "cpcv-ai-jobs-staging"',
+            'queue = "cpcv-ai-translation-jobs"':'queue = "cpcv-ai-translation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-translation-dlq"':'dead_letter_queue = "cpcv-ai-translation-dlq-staging"',
+            'queue = "cpcv-ai-moderation-jobs"':'queue = "cpcv-ai-moderation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-moderation-dlq"':'dead_letter_queue = "cpcv-ai-moderation-dlq-staging"',
+            '826071901':'826071801','826071902':'826071802','826071903':'826071803','826071904':'826071804',
+            '826071905':'826071805','826071906':'826071806',
+            'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev':'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev',
+            'TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"':'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"',
+          }
+          for old,new in replacements.items():
+            if old not in source: raise SystemExit(f'missing staging replacement: {old}')
+            source=source.replace(old,new)
+          Path('.cpcv-staging.wrangler.toml').write_text(source,encoding='utf-8')
+          PY
+          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .cpcv-staging.wrangler.toml
+
+      - name: Read-only staging DB health before LP deploy
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          mkdir -p landing-evidence
+          node scripts/verify-remote-d1.mjs --config .cpcv-staging.wrangler.toml --database class_comment_db_v2_staging 2>&1 | tee landing-evidence/01-db-health-before.txt
+
+      - name: Deploy LP-only revision to staging
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config .cpcv-staging.wrangler.toml --keep-vars 2>&1 | tee landing-evidence/02-deploy.txt
+          npx wrangler deployments status --config .cpcv-staging.wrangler.toml 2>&1 | tee landing-evidence/03-deployment-status.txt
+
+      - name: Smoke application behavior after LP deploy
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee landing-evidence/04-smoke.txt
+          curl --fail-with-body --silent --show-error -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/?lp=$LP_COMMIT" > landing-evidence/live-home.html
+          grep -F '/assets/landing.css?v=0.8.10-lp5' landing-evidence/live-home.html >/dev/null
+          grep -F 'projection-demo' landing-evidence/live-home.html >/dev/null
+          grep -F 'homePublicCode' landing-evidence/live-home.html >/dev/null
+          grep -F 'homeJoinButton' landing-evidence/live-home.html >/dev/null
+          grep -F 'homeJoinStatus' landing-evidence/live-home.html >/dev/null
+
+      - name: Render and measure live staging LP
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          from playwright.sync_api import sync_playwright
+
+          origin='https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
+          out=Path('landing-evidence/screenshots'); out.mkdir(parents=True,exist_ok=True)
+          results=[]
+          with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+            for width,height in [(390,844),(768,1024),(1024,900),(1440,1000)]:
+              page=browser.new_page(viewport={'width':width,'height':height},device_scale_factor=1)
+              response=page.goto(f'{origin}/?visual={width}',wait_until='networkidle',timeout=60000)
+              if not response or response.status>=400:
+                raise RuntimeError(f'HTTP failure at {width}: {response.status if response else "none"}')
+              page.wait_for_timeout(500)
+              data=page.evaluate('''() => {
+                const root=document.documentElement;
+                const hero=document.querySelector('.refined-hero');
+                const projection=document.querySelector('.projection-screen');
+                const start=document.querySelector('#start');
+                const ids=['homePublicCode','homeJoinButton','homeJoinStatus'];
+                const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom}};
+                return {
+                  title:document.title,
+                  h1:document.querySelector('h1')?.innerText||'',
+                  overflow:root.scrollWidth-window.innerWidth,
+                  hero:hero?rect(hero):null,
+                  projection:projection?rect(projection):null,
+                  start:start?rect(start):null,
+                  ids:Object.fromEntries(ids.map(id=>[id,Boolean(document.getElementById(id))])),
+                  landingCss:[...document.styleSheets].some(x=>String(x.href||'').includes('/assets/landing.css'))
+                };
+              }''')
+              if data['overflow']>1: raise RuntimeError(f'horizontal overflow {width}: {data["overflow"]}')
+              if not data['landingCss']: raise RuntimeError(f'landing css missing {width}')
+              if not all(data['ids'].values()): raise RuntimeError(f'join IDs missing {width}: {data["ids"]}')
+              if not data['projection'] or data['projection']['width'] < 250: raise RuntimeError(f'projection too small/missing {width}')
+              ratio=data['projection']['width']/data['projection']['height']
+              if not (1.73 <= ratio <= 1.83): raise RuntimeError(f'projection ratio not 16:9-ish {width}: {ratio}')
+              page.screenshot(path=str(out/f'landing-{width}.png'),full_page=True)
+              data['viewport']={'width':width,'height':height}
+              data['projectionRatio']=ratio
+              results.append(data)
+              page.close()
+            browser.close()
+          Path('landing-evidence/05-visual-metrics.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(results,ensure_ascii=False,indent=2))
+          PY
+
+      - name: Report refined staging LP
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          status="${{ job.status }}"
+          version="$(grep -oE 'Current Version ID: [0-9a-f-]+' landing-evidence/02-deploy.txt 2>/dev/null | tail -1 | cut -d' ' -f4 || true)"
+          body="CPCV refined LP staging: source=${LP_COMMIT} system_base=${SYSTEM_COMMIT} status=${status} version=${version:-unknown} origin=${STAGING_ORIGIN} run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          gh issue comment 70 --repo "$GITHUB_REPOSITORY" --body "$body"
+
+      - name: Upload live visual evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-refined-landing-live-${{ env.LP_COMMIT }}
+          path: landing-evidence/
+          if-no-files-found: warn
+          retention-days: 30
