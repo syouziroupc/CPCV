@@ -249,7 +249,7 @@ function displayError(error, target = setStatus) {
     showNotFound();
     return;
   }
-  target(`操作に失敗しました: ${error.code || error.message}`, true);
+  target('操作に失敗しました。時間をおいてもう一度お試しください。', true);
 }
 
 async function verifySession() {
@@ -581,7 +581,7 @@ async function loadPdfState({ quiet = false } = {}) {
       return;
     }
     const sizeMb = (Number(state.fileSizeBytes || 0) / 1048576).toFixed(1);
-    documentInfo.textContent = `${state.pageCount}ページ / 現在 ${state.currentPage}ページ / ${sizeMb} MB / 識別子 ${String(state.documentSha256 || '').slice(0, 12)}…`;
+    documentInfo.textContent = `${state.pageCount}ページ / 現在 ${state.currentPage}ページ / ${sizeMb} MB`;
   } catch (error) {
     if (!quiet) displayError(error, (text) => { documentInfo.textContent = text; });
   }
@@ -693,7 +693,7 @@ async function loadAnalyticsSnapshots() {
     for (const snapshot of Array.isArray(data.snapshots) ? data.snapshots : []) {
       const option = document.createElement('option');
       option.value = snapshot.id;
-      option.textContent = `${formatDateTime(snapshot.createdAt)} / ${String(snapshot.checksumSha256 || '').slice(0, 10)}…`;
+      option.textContent = formatDateTime(snapshot.createdAt);
       analyticsSnapshotSelect.appendChild(option);
     }
     downloadAnalyticsSnapshotButton.disabled = true;
@@ -710,7 +710,7 @@ async function createAnalyticsSnapshot() {
         headers: { 'content-type': 'application/json' },
         body: '{}'
       });
-      analyticsStatus.textContent = `確定記録を作成しました。SHA-256 ${String(data.snapshot?.checksumSha256 || '').slice(0, 16)}…`;
+      analyticsStatus.textContent = '確定記録を作成しました。';
       await Promise.all([loadSessionAnalytics({ quiet: true }), loadAnalyticsSnapshots()]);
       if (data.snapshot?.id) {
         analyticsSnapshotSelect.value = data.snapshot.id;
@@ -816,7 +816,7 @@ function appendAiModerationCell(row, comment) {
   badge.className = `ai-result-badge ai-${result.recommendation || result.status || 'unknown'}`;
   const sourceLabel = result.source === 'local_privacy_guard' ? 'ローカル保護' : 'AI';
   badge.textContent = `${sourceLabel}参考: ${label}`;
-  if (result.error) badge.title = `失敗理由: ${result.error}`;
+  if (result.error) badge.title = 'AI処理に失敗しました。';
   cell.appendChild(badge);
   if (Number.isFinite(result.confidence)) {
     const confidence = document.createElement('small');
@@ -879,7 +879,7 @@ function aiStatusLabel(status, error = '') {
     AI_STALE_MAX_ATTEMPTS: 'AI応答なし・再試行上限',
     AI_DAILY_LIMIT_REACHED: 'AI利用上限',
     AI_BINDING_NOT_CONFIGURED: 'AI未設定'
-  }[error] || error;
+  }[error] || '処理エラー';
   return error ? `${base} (${errorLabel})` : base;
 }
 
@@ -1859,7 +1859,7 @@ async function boot() {
     if (error.status === 401) showLogin();
     else {
       show(adminBootSection, true);
-      if (adminBootStatus) adminBootStatus.textContent = `読み込みに失敗しました: ${error.code || error.message || 'API_ERROR'}。再読み込みしてください。`;
+      if (adminBootStatus) adminBootStatus.textContent = '読み込みに失敗しました。再読み込みしてください。';
     }
   }
 }
