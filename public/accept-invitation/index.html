@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="no-referrer">
   <title>組織への招待</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-ui4">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav3">
 </head>
 <body class="page auth-page public-auth-layout">
   <header class="site-header clear-site-header public-site-header">
@@ -26,7 +26,7 @@
     <p id="status" class="status" aria-live="polite">招待を確認しています。</p>
     <section id="existingSection" class="section hidden">
       <h2>既存アカウントで承認</h2>
-      <p class="muted">招待先と同じメールアドレスでログインしてください。</p>
+      <p>招待先と同じメールアドレスでログインしてください。</p>
       <label class="label" for="loginEmail">メールアドレス</label>
       <input id="loginEmail" class="input" type="email" autocomplete="email" maxlength="254">
       <label class="label" for="loginPassword">パスワード</label>
@@ -38,7 +38,7 @@
       <button id="loginButton" class="button primary auth-submit" type="button">ログインして承認</button>
     </section>
     <section id="loggedInSection" class="section hidden">
-      <p id="loggedInIdentity" class="muted break"></p>
+      <p id="loggedInIdentity" class="break"></p>
       <button id="acceptExistingButton" class="button primary" type="button">このアカウントで承認</button>
     </section>
     <section id="newSection" class="section hidden">
@@ -47,7 +47,7 @@
       <input id="displayName" class="input" autocomplete="name" maxlength="80">
       <label class="label" for="newPassword">パスワード</label>
       <input id="newPassword" class="input" type="password" autocomplete="new-password" minlength="8" maxlength="128">
-      <p class="muted">8文字以上。128文字以下。</p>
+      <p>8文字以上。</p>
       <button id="createButton" class="button primary auth-submit" type="button">アカウントを作成して承認</button>
     </section>
     <section id="completeSection" class="section hidden">
