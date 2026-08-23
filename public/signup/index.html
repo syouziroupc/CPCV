@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>組織を登録 | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav1">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav3">
   <link rel="preconnect" href="https://challenges.cloudflare.com">
   <script src="/assets/turnstile-bootstrap.js?v=0.8.10"></script>
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=cpcvTurnstileReady&amp;render=explicit" defer></script>
@@ -36,7 +36,7 @@
         <input id="displayName" class="input" autocomplete="name" maxlength="80" required>
         <label class="label" for="password">パスワード</label>
         <input id="password" class="input" type="password" autocomplete="new-password" minlength="8" maxlength="128" required aria-describedby="passwordHint">
-        <p id="passwordHint" class="muted small-text" aria-live="polite">8文字以上、128文字以下。</p>
+        <p id="passwordHint" class="muted small-text" aria-live="polite">8文字以上。</p>
         <div id="turnstileWidget" class="auth-challenge"></div>
         <button id="submitButton" class="button primary auth-submit" type="submit" disabled>確認メールを送る</button>
       </form>
