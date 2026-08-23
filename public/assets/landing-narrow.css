@@ -1,7 +1,82 @@
-/* Extreme narrow-width landing correction. Loaded after landing.css. */
+/* Responsive landing polish loaded after landing.css. */
+
+/* A 768px tablet has enough horizontal room for the three hero facts. Keeping
+   them in one row preserves the visual rhythm instead of leaving a loose,
+   vertical list under the CTA. */
+@media (min-width: 621px) and (max-width: 860px) {
+  .refined-hero .hero-facts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+  }
+
+  .refined-hero .hero-facts li {
+    padding-right: 16px;
+  }
+
+  .refined-hero .hero-facts li + li {
+    padding-left: 16px;
+    border-left: 1px solid #e0e0dc;
+  }
+}
+
+/* On phones the full six-link desktop navigation becomes a row of microscopic
+   text. Keep only the two actions that actually matter at this width. */
+@media (max-width: 620px) {
+  .public-site-header .site-nav > a:nth-child(-n + 4) {
+    display: none;
+  }
+
+  .public-site-header .site-nav {
+    gap: 8px;
+  }
+
+  .public-site-header .site-nav > a {
+    font-size: .72rem;
+    white-space: nowrap;
+  }
+
+  .refined-hero .hero-facts {
+    gap: 0;
+    padding-top: 10px;
+  }
+
+  .refined-hero .hero-facts li,
+  .refined-hero .hero-facts li + li {
+    display: grid;
+    grid-template-columns: 104px minmax(0, 1fr);
+    gap: 10px;
+    align-items: baseline;
+    padding: 9px 0;
+    border-left: 0;
+    border-top: 1px solid #e3e3df;
+  }
+
+  .refined-hero .hero-facts li:first-child {
+    border-top: 0;
+  }
+
+  .refined-hero .hero-facts strong {
+    margin: 0;
+  }
+
+  .refined-hero .hero-facts span {
+    line-height: 1.45;
+  }
+}
+
+/* Preserve the phrase 「わからない」を、 even on the smallest supported
+   widths without forcing horizontal overflow. */
 @media (max-width: 360px) {
   .refined-hero h1 {
     font-size: clamp(1.72rem, 9.6vw, 2rem);
     letter-spacing: -0.035em;
+  }
+
+  .public-site-header .site-nav {
+    gap: 5px;
+  }
+
+  .public-site-header .site-nav > a {
+    font-size: .66rem;
   }
 }
