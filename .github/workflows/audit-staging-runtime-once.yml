@@ -14,7 +14,7 @@ jobs:
   audit:
     runs-on: ubuntu-24.04
     steps:
-      - name: Fetch production and staging Worker settings
+      - name: Fetch Cloudflare runtime metadata
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -23,97 +23,176 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
+          auth=(-H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" -H "Content-Type: application/json")
+          api="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}"
+
           for worker in class-pdf-comment-viewer-v01 class-pdf-comment-viewer-v01-staging; do
+            curl --fail-with-body --silent --show-error "${api}/workers/scripts/${worker}/settings" "${auth[@]}" > "settings-${worker}.json"
+            curl --fail-with-body --silent --show-error "${api}/workers/scripts/${worker}/schedules" "${auth[@]}" > "schedules-${worker}.json"
+          done
+          curl --fail-with-body --silent --show-error "${api}/queues?per_page=100" "${auth[@]}" > queues.json
+
+          query_db() {
+            local id="$1" tag="$2" sql="$3"
+            jq -n --arg sql "$sql" '{sql:$sql}' > query.json
             curl --fail-with-body --silent --show-error \
-              "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/${worker}/settings" \
-              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-              -H "Content-Type: application/json" \
-              > "${worker}.json"
+              -X POST "${api}/d1/database/${id}/query" "${auth[@]}" --data @query.json > "${tag}.json"
+          }
+
+          for spec in \
+            "f11457fa-27af-468d-94cc-6cdf1ae814e4 prod-legacy" \
+            "20e4531c-2765-46b5-a68f-940daa94d6a9 stage-legacy" \
+            "8315a076-67ad-44e6-8286-11887af52ad3 prod-v2" \
+            "7b30a11d-5b3c-49f5-bc54-9a1326818089 stage-v2"; do
+            set -- $spec
+            query_db "$1" "$2-schema" "SELECT type,name,sql FROM sqlite_schema WHERE type IN ('table','index','trigger','view') AND name NOT LIKE 'sqlite_%' ORDER BY type,name"
+            query_db "$1" "$2-migrations" "SELECT id,name FROM d1_migrations ORDER BY id"
+            query_db "$1" "$2-integrity" "PRAGMA quick_check"
           done
 
-      - name: Build redacted runtime comparison
+      - name: Build redacted parity report
         shell: bash
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
 
-          workers = {
-              'production': 'class-pdf-comment-viewer-v01.json',
-              'staging': 'class-pdf-comment-viewer-v01-staging.json',
+          prod_worker='class-pdf-comment-viewer-v01'
+          stage_worker='class-pdf-comment-viewer-v01-staging'
+          visible_text={
+            'APP_ENV','AUTH_V2_ENABLED','EMAIL_AUTH_REQUIRED','AI_MODERATION_MODEL','AI_MODERATION_FALLBACK_MODEL',
+            'AI_TRANSLATION_MODEL','AI_TRANSLATION_BALANCED_MODEL','AI_TRANSLATION_ACCURATE_MODEL','AI_TIMEOUT_MS',
+            'AI_TRANSLATION_TIMEOUT_MS','AI_TRANSLATION_BALANCED_TIMEOUT_MS','AI_TRANSLATION_ACCURATE_TIMEOUT_MS',
+            'AI_QUEUE_PARALLELISM','AI_TRANSLATION_QUEUE_PARALLELISM','AI_MODERATION_QUEUE_PARALLELISM',
+            'AUTH_ORIGIN','PUBLIC_ORIGIN','AUTH_EMAIL_FROM','AUTH_EMAIL_REPLY_TO','TURNSTILE_SITE_KEY'
           }
-          visible_text = {
-              'APP_ENV','AUTH_V2_ENABLED','EMAIL_AUTH_REQUIRED',
-              'AI_MODERATION_MODEL','AI_MODERATION_FALLBACK_MODEL',
-              'AI_TRANSLATION_MODEL','AI_TRANSLATION_BALANCED_MODEL','AI_TRANSLATION_ACCURATE_MODEL',
-              'AI_TIMEOUT_MS','AI_TRANSLATION_TIMEOUT_MS','AI_TRANSLATION_BALANCED_TIMEOUT_MS',
-              'AI_TRANSLATION_ACCURATE_TIMEOUT_MS','AI_QUEUE_PARALLELISM',
-              'AI_TRANSLATION_QUEUE_PARALLELISM','AI_MODERATION_QUEUE_PARALLELISM',
-              'AUTH_ORIGIN','PUBLIC_ORIGIN','AUTH_EMAIL_FROM','AUTH_EMAIL_REPLY_TO','TURNSTILE_SITE_KEY',
-          }
-          safe_fields = {
-              'type','name','namespace_id','namespace','id','database_id','database_name',
-              'queue_name','queue','class_name','script_name','service','environment','dataset',
-          }
+          safe={'type','name','namespace_id','id','database_id','queue_name','class_name'}
 
-          def normalized(path):
-              raw = json.loads(Path(path).read_text())
-              if not raw.get('success'):
-                  raise SystemExit(f'Cloudflare API failed for {path}: {raw.get("errors")}')
-              result = raw.get('result') or {}
-              out = {'bindings': {}}
-              for b in result.get('bindings') or []:
-                  name = b.get('name') or b.get('binding') or '(unnamed)'
-                  item = {k: b[k] for k in safe_fields if k in b}
-                  if b.get('type') == 'plain_text' and name in visible_text:
-                      item['value'] = b.get('text', '')
-                  elif b.get('type') in {'secret_text','secret_key'}:
-                      item['secret_present'] = True
-                  out['bindings'][name] = item
-              for key in ('compatibility_date','compatibility_flags','usage_model','placement','observability'):
-                  if key in result:
-                      out[key] = result[key]
-              return out
+          def api_result(path):
+            raw=json.loads(Path(path).read_text())
+            if not raw.get('success'):
+              raise SystemExit(f'API failed {path}: {raw.get("errors")}')
+            return raw.get('result')
 
-          data = {name: normalized(path) for name, path in workers.items()}
-          prod, stage = data['production'], data['staging']
-          names = sorted(set(prod['bindings']) | set(stage['bindings']))
-          rows = []
-          for name in names:
-              p = prod['bindings'].get(name)
-              s = stage['bindings'].get(name)
-              if p == s:
-                  state = 'same'
-              elif p is None:
-                  state = 'staging-only'
-              elif s is None:
-                  state = 'production-only'
-              elif p.get('type') != s.get('type'):
-                  state = 'type-diff'
-              else:
-                  state = 'value/resource-diff'
-              rows.append((name, state, p, s))
+          def settings(worker):
+            r=api_result(f'settings-{worker}.json') or {}
+            bindings={}
+            for b in r.get('bindings') or []:
+              name=b.get('name') or '(unnamed)'
+              item={k:b[k] for k in safe if k in b}
+              if b.get('type')=='plain_text' and name in visible_text: item['value']=b.get('text','')
+              elif b.get('type') in {'secret_text','secret_key'}: item['secret_present']=True
+              bindings[name]=item
+            return {
+              'bindings':bindings,
+              'compatibility_date':r.get('compatibility_date'),
+              'compatibility_flags':r.get('compatibility_flags') or [],
+              'usage_model':r.get('usage_model'),
+              'observability':r.get('observability') or {},
+            }
 
-          report = []
-          report.append('## CPCV staging / production runtime audit')
-          report.append('')
-          report.append('Secrets are redacted. Resource IDs/names and selected non-secret behavior variables are shown.')
-          report.append('')
-          report.append('| binding | state | production | staging |')
-          report.append('|---|---|---|---|')
-          def short(v):
-              if v is None: return 'missing'
-              return '`' + json.dumps(v, ensure_ascii=False, sort_keys=True, separators=(',', ':')).replace('`','')[:700] + '`'
-          for name, state, p, s in rows:
-              report.append(f'| `{name}` | **{state}** | {short(p)} | {short(s)} |')
-          report.append('')
-          report.append('### Worker-level settings')
-          report.append('```json')
-          report.append(json.dumps({k:{x:y for x,y in v.items() if x != 'bindings'} for k,v in data.items()}, ensure_ascii=False, indent=2, sort_keys=True))
-          report.append('```')
-          Path('runtime-audit.md').write_text('\n'.join(report), encoding='utf-8')
+          prod=settings(prod_worker); stage=settings(stage_worker)
+          same_behavior=[]; expected_separation=[]; concerns=[]
+          separation_names={'DB','DB_V2','COMMENT_ROOM','AI_JOBS_QUEUE','AI_TRANSLATION_QUEUE','AI_MODERATION_QUEUE',
+            'AUTH_LOGIN_IP_LIMITER','AUTH_LOGIN_ACCOUNT_LIMITER','PUBLIC_COMMENT_RATE_LIMITER','AUTH_PUBLIC_EMAIL_LIMITER',
+            'AI_TRANSLATION_RATE_LIMITER','AI_MODERATION_RATE_LIMITER','AUTH_ORIGIN','PUBLIC_ORIGIN'}
+          ignored_legacy={'MASTER_TOKEN','TEACHER_TOKEN'}
+          for name in sorted(set(prod['bindings'])|set(stage['bindings'])):
+            p=prod['bindings'].get(name); s=stage['bindings'].get(name)
+            if name in separation_names:
+              ok=p is not None and s is not None and p != s and p.get('type')==s.get('type')
+              (expected_separation if ok else concerns).append(name)
+            elif name in ignored_legacy:
+              # AUTH_V2_ENABLED=1 makes legacy /api/master and legacy teacher auth unavailable.
+              continue
+            elif p==s:
+              same_behavior.append(name)
+            else:
+              concerns.append(name)
+
+          if prod['compatibility_date']!=stage['compatibility_date'] or prod['compatibility_flags']!=stage['compatibility_flags']:
+            concerns.append('Worker compatibility')
+          if prod['usage_model']!=stage['usage_model']:
+            concerns.append('Worker usage model')
+
+          schedules={}
+          for label,worker in [('production',prod_worker),('staging',stage_worker)]:
+            r=api_result(f'schedules-{worker}.json') or []
+            if isinstance(r,dict): r=r.get('schedules') or []
+            schedules[label]=sorted(x.get('cron') for x in r if x.get('cron'))
+          if schedules['production']!=schedules['staging']: concerns.append('Cron schedules')
+
+          queues=api_result('queues.json') or []
+          if isinstance(queues,dict): queues=queues.get('result') or queues.get('queues') or []
+          qmap={q.get('queue_name'):q for q in queues if q.get('queue_name')}
+          pairs=[
+            ('legacy','cpcv-ai-jobs','cpcv-ai-jobs-staging'),
+            ('translation','cpcv-ai-translation-jobs','cpcv-ai-translation-jobs-staging'),
+            ('moderation','cpcv-ai-moderation-jobs','cpcv-ai-moderation-jobs-staging'),
+          ]
+          queue_rows=[]
+          for label,pn,sn in pairs:
+            p=qmap.get(pn); s=qmap.get(sn)
+            def consumer(q,worker):
+              if not q: return None
+              items=[c for c in (q.get('consumers') or []) if c.get('script_name')==worker]
+              if not items: return None
+              c=items[0]
+              settings=c.get('settings') or {}
+              return {
+                'batch_size':settings.get('batch_size'),
+                'max_wait_time_ms':settings.get('max_wait_time_ms'),
+                'max_retries':settings.get('max_retries'),
+                'max_concurrency':settings.get('max_concurrency'),
+                'dead_letter_queue':c.get('dead_letter_queue') or ''
+              }
+            pc=consumer(p,prod_worker); sc=consumer(s,stage_worker)
+            queue_rows.append((label,pn,sn,pc,sc,pc==sc))
+            if pc!=sc: concerns.append(f'Queue consumer {label}')
+
+          def d1_rows(path):
+            r=api_result(path)
+            if not isinstance(r,list): r=[r]
+            rows=[]
+            for part in r:
+              rows.extend(part.get('results') or [])
+            return rows
+          schema_pairs=[]
+          for label in ('legacy','v2'):
+            p=d1_rows(f'prod-{label}-schema.json'); s=d1_rows(f'stage-{label}-schema.json')
+            pm=d1_rows(f'prod-{label}-migrations.json'); sm=d1_rows(f'stage-{label}-migrations.json')
+            pi=d1_rows(f'prod-{label}-integrity.json'); si=d1_rows(f'stage-{label}-integrity.json')
+            schema_equal=p==s
+            migration_equal=pm==sm
+            integrity_ok=all('ok' in [str(v).lower() for v in row.values()] for row in pi+si)
+            schema_pairs.append((label,schema_equal,migration_equal,integrity_ok,len(p),len(s),len(pm),len(sm)))
+            if not schema_equal: concerns.append(f'D1 {label} schema')
+            if not migration_equal: concerns.append(f'D1 {label} migrations')
+            if not integrity_ok: concerns.append(f'D1 {label} quick_check')
+
+          report=[]
+          report += ['## CPCV staging / production deep parity audit','',
+            'Production data rows were not copied or modified. Only runtime metadata and schema/migration metadata were read.','',
+            f'- Behavior-equivalent bindings: **{len(same_behavior)}**',
+            f'- Intentionally separated bindings/resources: **{len(expected_separation)}**',
+            f'- Unresolved parity concerns: **{len(set(concerns))}**',
+            f'- Cron schedules: production `{schedules["production"]}` / staging `{schedules["staging"]}`','']
+          report += ['### Queue consumers','', '| workload | production queue | staging queue | settings equal |','|---|---|---|---|']
+          for label,pn,sn,pc,sc,eq in queue_rows:
+            report.append(f'| {label} | `{pn}` | `{sn}` | **{"yes" if eq else "NO"}** |')
+            if not eq:
+              report.append(f'\n- `{label}` production: `{json.dumps(pc,sort_keys=True)}`; staging: `{json.dumps(sc,sort_keys=True)}`')
+          report += ['', '### D1 schema/migrations','', '| DB | schema equal | migrations equal | quick_check | objects prod/stage | migrations prod/stage |','|---|---|---|---|---:|---:|']
+          for label,se,me,io,pl,sl,pml,sml in schema_pairs:
+            report.append(f'| {label} | **{"yes" if se else "NO"}** | **{"yes" if me else "NO"}** | **{"ok" if io else "FAIL"}** | {pl}/{sl} | {pml}/{sml} |')
+          report += ['', '### Expected resource separation', '', ', '.join(f'`{x}`' for x in expected_separation) or 'none', '', '### Unresolved concerns', '']
+          report.append(', '.join(f'`{x}`' for x in sorted(set(concerns))) if concerns else '**none**')
+          report += ['', 'Note: production-only `MASTER_TOKEN` / `TEACHER_TOKEN` are legacy credentials. With `AUTH_V2_ENABLED=1`, the current router returns 410 for legacy auth/master routes before those credentials are used.']
+          Path('runtime-audit.md').write_text('\n'.join(report),encoding='utf-8')
+          print(Path('runtime-audit.md').read_text())
+          if concerns:
+            Path('parity-concerns.txt').write_text('\n'.join(sorted(set(concerns))),encoding='utf-8')
           PY
-          cat runtime-audit.md
 
       - name: Report audit to issue 70
         shell: bash
