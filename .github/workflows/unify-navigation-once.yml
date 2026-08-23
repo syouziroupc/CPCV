@@ -16,7 +16,7 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
-      - name: Update source manifest
+      - name: Update public navigation cache key and source manifest
         shell: bash
         run: |
           set -euo pipefail
@@ -24,13 +24,28 @@ jobs:
           from pathlib import Path
           import hashlib
 
+          for path in [Path('public/_admin_spa.html'), Path('public/admin/index.html')]:
+              text = path.read_text(encoding='utf-8')
+              text = text.replace('/assets/app.css?v=0.8.10-u22fix1', '/assets/app.css?v=0.8.10-nav3')
+              path.write_text(text, encoding='utf-8', newline='\n')
+
           paths = [
-              'public/assets/account.js',
-              'public/assets/join.js',
-              'public/assets/master.js',
-              'public/assets/organization-settings.js',
-              'public/assets/viewer.js',
+              '.github/workflows/deploy-master-now.yml',
               '.github/workflows/unify-navigation-once.yml',
+              'public/assets/app.css',
+              'public/index.html',
+              'public/about/index.html',
+              'public/guide/index.html',
+              'public/privacy/index.html',
+              'public/signup/index.html',
+              'public/forgot-password/index.html',
+              'public/reset-password/index.html',
+              'public/accept-invitation/index.html',
+              'public/check-email/index.html',
+              'public/confirm-email-change/index.html',
+              'public/verify-email/index.html',
+              'public/_admin_spa.html',
+              'public/admin/index.html',
           ]
           manifest = Path('SOURCE_SHA256SUMS.override.txt')
           order = []
@@ -39,7 +54,8 @@ jobs:
               if not line:
                   continue
               digest, path = line.split('  ', 1)
-              order.append(path)
+              if path not in order:
+                  order.append(path)
               values[path] = digest
           for path in paths:
               values[path] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
@@ -50,6 +66,6 @@ jobs:
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add SOURCE_SHA256SUMS.override.txt
-          git commit -m "Update manifest for final UI cleanup"
+          git add public/_admin_spa.html public/admin/index.html SOURCE_SHA256SUMS.override.txt
+          git commit -m "Finalize public navigation and source manifest"
           git push origin HEAD:master
