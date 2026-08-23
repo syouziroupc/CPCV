@@ -640,7 +640,7 @@ async function applyRealtimeEvent(event) {
   if (event.type === 'message:remove') {
     await removeModeratedComment(event.commentId).catch((error) => {
       console.error('Moderation removal failed', error);
-      setLocalLogState('モデレーション反映エラー', true);
+      setLocalLogState('コメント反映エラー', true);
     });
     return;
   }
@@ -857,7 +857,6 @@ async function applyTranslation(payload) {
       force: original.type === 'message:restore'
     });
   }
-
   queue = queue.map((item) => String(item?.id || '') === commentId ? { ...item, translation } : item);
   for (const element of document.querySelectorAll(`[data-comment-id="${CSS.escape(commentId)}"]`)) {
     if (element.classList.contains('scroll-comment')) {
@@ -1130,6 +1129,10 @@ function toggleFullscreen() {
   else document.exitFullscreen().catch(() => {});
 }
 
+function roleLabel(role) {
+  return ({ owner: '所有者', admin: '管理者', teacher: '先生' })[role] || '利用者';
+}
+
 async function loginWithPassword() {
   const account = viewerLoginId.value.trim();
   const password = viewerPassword.value;
@@ -1161,13 +1164,13 @@ async function loginWithPassword() {
       for (const organization of error.data.organizations || []) {
         const option = document.createElement('option');
         option.value = organization.id;
-        option.textContent = `${organization.name} (${organization.role})`;
+        option.textContent = `${organization.name} (${roleLabel(organization.role)})`;
         viewerOrganization.appendChild(option);
       }
       show(viewerOrganizationGroup, true);
       setLoginStatus('組織を選択してもう一度ログインしてください。');
     } else {
-      setLoginStatus('ログインIDまたはパスワードを確認してください。', true);
+      setLoginStatus('メールアドレスまたはパスワードを確認してください。', true);
     }
   } finally {
     viewerLoginButton.disabled = false;
@@ -1281,8 +1284,8 @@ async function boot() {
     void connectWebSocket();
   } catch (error) {
     if (handleAuthError(error)) return;
-    titleEl.textContent = error.code === 'SESSION_NOT_FOUND' ? '授業が見つかりません' : 'viewerを開けません';
-    setConnection(`${error.status || ''} ${error.code || error.message}`.trim());
+    titleEl.textContent = error.code === 'SESSION_NOT_FOUND' ? '授業が見つかりません' : '投影画面を開けません';
+    setConnection(error.code === 'SESSION_NOT_FOUND' ? '授業コードを確認してください' : '再読み込みしてください');
     showViewerShell();
   }
 }
