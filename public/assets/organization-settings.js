@@ -64,7 +64,7 @@ if (section) {
       FILTER_POLICY_INVALID: '処理基準を確認してください。',
       REQUEST_TIMEOUT: '通信がタイムアウトしました。もう一度試してください。',
       NETWORK_ERROR: 'ネットワークに接続できません。接続を確認してください。'
-    })[error?.code] || `処理できませんでした。${error?.code ? ` (${error.code})` : ''}`;
+    })[error?.code] || '処理できませんでした。時間をおいてもう一度お試しください。';
   }
 
   async function withButton(button, label, task) {
@@ -79,9 +79,10 @@ if (section) {
   function ownerEditable() { return identity?.organization?.role === 'owner'; }
   function termEditable() { return ['owner', 'admin'].includes(identity?.organization?.role); }
   function visible() { return termEditable(); }
-  function categoryLabel(id) { return filterData.categories.find((item) => item.id === id)?.label || id || '-'; }
-  function languageLabel(id) { return filterData.languages.find((item) => item.id === id)?.label || id || '自動'; }
-  function boundaryLabel(id) { return ({ auto: '自動', word: '単語', substring: '部分' })[id] || id || '自動'; }
+  function roleLabel(role) { return ({ owner: '所有者', admin: '管理者', teacher: '先生' })[role] || '権限不明'; }
+  function categoryLabel(id) { return filterData.categories.find((item) => item.id === id)?.label || '不明'; }
+  function languageLabel(id) { return filterData.languages.find((item) => item.id === id)?.label || '自動'; }
+  function boundaryLabel(id) { return ({ auto: '自動', word: '単語', substring: '部分' })[id] || '自動'; }
 
   function presetLabel(mode) { return ({ standard: '推奨', strict: '厳格', off: '無効', custom: 'カスタム' })[mode] || 'カスタム'; }
   function presetDescription(mode) {
@@ -150,7 +151,7 @@ if (section) {
     csrfToken = identity.csrfToken || '';
     if (!visible()) return;
     section.classList.remove('hidden');
-    $('organizationRoleStatus').textContent = `${identity.organization?.name || '組織'} / ${identity.organization?.role || ''}`;
+    $('organizationRoleStatus').textContent = `${identity.organization?.name || '組織'} / ${roleLabel(identity.organization?.role)}`;
     await Promise.all([loadAiSettings(), loadFilterSettings()]);
   }
 
@@ -162,7 +163,7 @@ if (section) {
       $('aiModerationDailyLimit').value = String(data.settings.moderationDailyLimit);
       $('aiTranslationDailyLimit').value = String(data.settings.translationDailyLimit);
       for (const id of ['organizationAiEnabled', 'aiModerationDailyLimit', 'aiTranslationDailyLimit', 'saveOrganizationAiButton']) $(id).disabled = !ownerEditable();
-      setStatus('organizationAiStatus', ownerEditable() ? 'Ownerは変更できます。' : 'AI上限は閲覧のみです。語句の追加と編集はできます。');
+      setStatus('organizationAiStatus', ownerEditable() ? '所有者は変更できます。' : 'AI上限は閲覧のみです。語句の追加と編集はできます。');
     } catch (error) { setStatus('organizationAiStatus', errorText(error), true); }
   }
 
@@ -212,7 +213,7 @@ if (section) {
   function renderPackStatus() {
     const packs = filterData.packs || [];
     const byId = (id) => packs.find((pack) => pack.id === id);
-    const label = (pack) => pack?.installed ? `導入済み v${pack.installedVersion || pack.version}・${pack.termCount}語` : `未導入・${pack?.termCount || 0}語`;
+    const label = (pack) => pack?.installed ? `導入済み・${pack.termCount}語` : `未導入・${pack?.termCount || 0}語`;
     $('filterPackStatus').textContent = `日本語基本: ${label(byId('ja-core-v1'))} / 英語基本: ${label(byId('en-core-v1'))} / 日本語文脈: ${label(byId('ja-context-v1'))} / 英語文脈: ${label(byId('en-context-v1'))}`;
     setPackButton($('installJapaneseFilterPackButton'), byId('ja-core-v1'));
     setPackButton($('installEnglishFilterPackButton'), byId('en-core-v1'));
