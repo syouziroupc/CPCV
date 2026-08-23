@@ -1,4 +1,5 @@
 name: Deploy final landing polish to staging once
+# Triggered after tablet/mobile polish; production remains untouched.
 
 on:
   push:
