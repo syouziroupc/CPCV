@@ -13,7 +13,7 @@ permissions:
 
 env:
   SYSTEM_COMMIT: 0f61a65ff056539742657272cc63fba4af8560ac
-  LP_COMMIT: 0412159945b4128b5b1d398dcd719a123e2a80ca
+  LP_COMMIT: 38ba5743e5f21f724ef51ab453d888b7db70c0a3
   STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
 
 jobs:
