@@ -95,8 +95,18 @@ const guide = text('public/guide/index.html');
 check('keyboard focus is visibly styled', appCss.includes(':focus-visible') && appCss.includes('outline: 3px solid #1d4ed8'));
 check('compact tables switch before tablet overflow', appCss.includes('@media (max-width: 820px)') && appCss.includes('compact table and header fixes'));
 check('local browser log cap is reduced', viewerJs.includes('MAX_LOCAL_LOG_ENTRIES = 2_000'));
-check('privacy page explains retention and AI provider', privacy.includes('標準保持期間は30日') && privacy.includes('Cloudflare Workers AI') && privacy.includes('2,000件'));
-check('guide uses the current account label', guide.includes('「アカウント設定」') && !guide.includes('アカウント・辞書設定'));
+check(
+  'privacy page keeps useful retention details without implementation leakage',
+  privacy.includes('30日') &&
+    privacy.includes('2,000件') &&
+    privacy.includes('AI判定と翻訳') &&
+    !privacy.includes('Cloudflare Workers AI') &&
+    !privacy.includes('SHA-256')
+);
+check(
+  'guide returns users to the unified landing flow',
+  guide.includes('今すぐはじめる') && guide.includes('/#start') && !guide.includes('アカウント・辞書設定')
+);
 
 const failed = results.filter((result) => !result.ok).length;
 console.log(`\nv0.8.10 security and UI test summary: ${results.length - failed} passed, ${failed} failed, ${results.length} total.`);
