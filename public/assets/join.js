@@ -120,7 +120,7 @@ async function loadSession() {
         NETWORK_ERROR: 'ネットワークに接続できません。',
         INVALID_SERVER_RESPONSE: 'サーバー応答を確認できませんでした。'
       };
-      setStatus(map[code] || `授業情報の取得に失敗しました: ${code}`, true);
+      setStatus(map[code] || '授業情報を取得できませんでした。時間をおいて再読み込みしてください。', true);
     }
   } finally {
     sessionRefreshRunning = false;
@@ -156,7 +156,7 @@ sendButton.addEventListener('click', async () => {
     counterEl.textContent = '0 / 140';
     pendingSubmission = null;
     setStatus(data.aiSchedulingPending
-      ? '送信しました。AI処理は自動で再試行しています。'
+      ? '送信しました。反映に少し時間がかかる場合があります。'
       : data.duplicate ? '送信済みのコメントを確認しました。'
         : data.moderationState === 'pending' ? '承認待ちとして送信しました。'
           : data.filter?.action === 'mask' ? '一部を伏字にして送信しました。'
@@ -168,13 +168,13 @@ sendButton.addEventListener('click', async () => {
       URL_NOT_ALLOWED: 'URLは投稿できません。',
       CONTENT_REJECTED: 'この投稿は授業の投稿ルールにより送信できません。',
       MESSAGE_TOO_LONG: '140字以内にしてください。',
-      IDEMPOTENCY_KEY_INVALID: '送信識別子が不正です。ページを再読み込みしてください。',
+      IDEMPOTENCY_KEY_INVALID: '送信を続けられませんでした。ページを再読み込みしてください。',
       COMMENT_ROOM_UNAVAILABLE: '一時的に送信処理が混雑しています。もう一度送信してください。',
       COMMENT_ROOM_OVERLOADED: '現在アクセスが集中しています。少し待ってからもう一度送信してください。',
       REQUEST_TIMEOUT: '通信がタイムアウトしました。同じ内容を再送しても重複投稿されません。',
       INVALID_SERVER_RESPONSE: 'サーバー応答を確認できませんでした。もう一度送信してください。'
     };
-    setStatus(map[error.message] || `送信失敗: ${error.message}`, true);
+    setStatus(map[error.message] || '送信できませんでした。時間をおいてもう一度お試しください。', true);
   } finally {
     sendButton.disabled = !postingEnabled || messageEl.value.trim().length === 0;
   }
@@ -204,7 +204,7 @@ for (const button of understandingButtons) {
         UNDERSTANDING_WRITE_CONFLICT: 'ページ状態が更新されました。再読み込みしてもう一度回答してください。',
         POSTING_CLOSED: '授業は終了しています。'
       };
-      understandingStatus.textContent = map[error.message] || `回答失敗: ${error.message}`;
+      understandingStatus.textContent = map[error.message] || '回答を送信できませんでした。時間をおいてもう一度お試しください。';
       understandingStatus.style.color = '#dc2626';
     } finally {
       await loadSession();
