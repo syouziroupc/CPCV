@@ -13,7 +13,7 @@ permissions:
 
 env:
   SYSTEM_COMMIT: 0f61a65ff056539742657272cc63fba4af8560ac
-  LP_COMMIT: 38ba5743e5f21f724ef51ab453d888b7db70c0a3
+  LP_COMMIT: 8786de4cc9eb8b5e55aada4c93f1d3137f98299c
   STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
 
 jobs:
@@ -39,6 +39,7 @@ jobs:
           allowed={
             'public/index.html',
             'public/assets/landing.css',
+            'public/assets/landing-narrow.css',
             'SOURCE_SHA256SUMS.override.txt',
             '.github/workflows/landing-manifest-repair.yml',
             '.github/workflows/audit-staging-runtime-once.yml',
@@ -49,7 +50,7 @@ jobs:
           unexpected=changed-allowed
           if unexpected:
             raise SystemExit('LP revision changes application runtime files: '+', '.join(sorted(unexpected)))
-          required={'public/index.html','public/assets/landing.css'}
+          required={'public/index.html','public/assets/landing.css','public/assets/landing-narrow.css'}
           if not required.issubset(changed):
             raise SystemExit('Expected LP files are missing from diff')
           if any(p.startswith('src/') or p.startswith('migrations') for p in changed):
@@ -138,6 +139,7 @@ jobs:
           node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee landing-evidence/04-smoke.txt
           curl --fail-with-body --silent --show-error -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/?lp=$LP_COMMIT" > landing-evidence/live-home.html
           grep -F '/assets/landing.css?v=0.8.10-lp6' landing-evidence/live-home.html >/dev/null
+          grep -F '/assets/landing-narrow.css?v=0.8.10-lp6a' landing-evidence/live-home.html >/dev/null
           grep -F 'hero-line-main' landing-evidence/live-home.html >/dev/null
           grep -F 'projection-demo' landing-evidence/live-home.html >/dev/null
           grep -F 'homePublicCode' landing-evidence/live-home.html >/dev/null
@@ -207,6 +209,7 @@ jobs:
                   projection:rect(document.querySelector('.projection-screen')),
                   ids:Object.fromEntries(ids.map(id=>[id,Boolean(document.getElementById(id))])),
                   landingCss:[...document.styleSheets].some(x=>String(x.href||'').includes('/assets/landing.css')),
+                  narrowCss:[...document.styleSheets].some(x=>String(x.href||'').includes('/assets/landing-narrow.css')),
                   headings,
                   headingBlocks
                 };
@@ -214,7 +217,7 @@ jobs:
 
               if data['overflow']>1:
                 raise RuntimeError(f'horizontal overflow {width}: {data["overflow"]}')
-              if not data['landingCss']:
+              if not data['landingCss'] or not data['narrowCss']:
                 raise RuntimeError(f'landing css missing {width}')
               if not all(data['ids'].values()):
                 raise RuntimeError(f'join IDs missing {width}: {data["ids"]}')
