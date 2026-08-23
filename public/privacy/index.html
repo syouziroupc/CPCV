@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="CPCVが送信する情報、送信しない情報、保持期間を説明します。">
   <title>情報の扱い | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav1">
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav3">
 </head>
 <body class="site-page clear-public-page">
   <header class="site-header clear-site-header public-site-header">
@@ -24,38 +24,37 @@
     <section class="clear-page-heading">
       <p class="eyebrow">情報の扱い</p>
       <h1>送る情報と送らない情報</h1>
-      <p>PDF本体は先生のブラウザ内で処理します。授業運営に必要な情報だけをサーバーへ送信します。</p>
+      <p>PDF本体は先生のブラウザ内で処理します。授業に必要な情報だけを送信します。</p>
     </section>
 
     <section class="clear-section">
       <div class="data-summary-grid">
-        <article class="safe-data"><p class="role-label">送信しない</p><h2>PDFの内容</h2><ul><li>PDF本体</li><li>ファイル名</li><li>ページ本文と画像</li><li>注釈や埋込内容</li></ul></article>
-        <article><p class="role-label">授業運営に送信</p><h2>必要な情報</h2><ul><li>匿名コメント</li><li>授業と参加状態</li><li>現在のページ番号</li><li>文書識別情報、ページ数、サイズ</li></ul></article>
-        <article><p class="role-label">機能を有効にした場合</p><h2>追加情報</h2><ul><li>匿名の参加度回答</li><li>ページ移動イベント</li><li>AI判定・翻訳対象のコメント本文</li></ul></article>
+        <article class="safe-data"><p class="role-label">送信しない</p><h2>PDFの内容</h2><ul><li>PDF本体</li><li>ファイル名</li><li>ページ本文と画像</li></ul></article>
+        <article><p class="role-label">授業運営に送信</p><h2>必要な情報</h2><ul><li>匿名コメント</li><li>授業の状態</li><li>表示中のページ番号</li></ul></article>
+        <article><p class="role-label">機能を有効にした場合</p><h2>追加情報</h2><ul><li>匿名の参加度回答</li><li>ページ移動</li><li>AI判定・翻訳対象のコメント</li></ul></article>
       </div>
     </section>
 
     <section class="clear-section">
       <div class="clear-section-heading"><p class="section-kicker">AI</p><h2>AI判定と翻訳</h2></div>
-      <p class="plain-note">AI機能は授業ごとにON・OFFできます。有効な場合だけコメント本文をCloudflare Workers AIへ送ります。PDFの内容は送りません。辞書判定だけで運用することもできます。</p>
+      <p>AI機能を有効にした授業では、コメント本文を判定や翻訳に使用します。PDF本体は送信しません。</p>
     </section>
 
     <section class="clear-section">
       <div class="clear-section-heading"><p class="section-kicker">保持期間</p><h2>標準の保持期間</h2></div>
-      <p class="plain-note">コメントの標準保持期間は30日です。参加度・ページ分析は180日、端末内の受信ログは最大2,000件まで保持します。</p>
       <div class="retention-table" role="table" aria-label="保持期間">
-        <div role="row"><strong role="cell">コメント</strong><span role="cell">30日</span><p role="cell">期限後は通常の一覧と投影対象から除外します。</p></div>
-        <div role="row"><strong role="cell">参加度・ページ分析</strong><span role="cell">180日</span><p role="cell">個人を特定する一覧は作成しません。</p></div>
-        <div role="row"><strong role="cell">端末内受信ログ</strong><span role="cell">最大2,000件</span><p role="cell">共用端末では授業後に消去してください。</p></div>
+        <div role="row"><strong role="cell">コメント</strong><span role="cell">30日</span><p role="cell">期限後は一覧と投影対象から除外します。</p></div>
+        <div role="row"><strong role="cell">参加度・ページ分析</strong><span role="cell">180日</span><p role="cell">個人別のランキングは作成しません。</p></div>
+        <div role="row"><strong role="cell">端末内受信ログ</strong><span role="cell">最大2,000件</span><p role="cell">共用端末では授業後に消去できます。</p></div>
       </div>
     </section>
 
     <section class="clear-bottom-cta">
-      <div><h2>操作方法を確認する</h2><p>先生と学生の手順を利用者別に確認できます。</p></div>
+      <div><h2>操作方法を確認する</h2><p>先生と学生の手順を確認できます。</p></div>
       <a class="button primary" href="/guide">使い方を見る</a>
     </section>
   </main>
 
-  <footer class="site-footer clear-footer"><span>CPCV</span><nav aria-label="フッター"><a href="/">ホーム</a><a href="/guide">使い方</a><a href="/about">機能概要</a></nav></footer>
+  <footer class="site-footer clear-footer"><span>CPCV</span><nav aria-label="フッター"><a href="/">ホーム</a><a href="/guide">使い方</a><a href="/about">機能概要</a><a href="/#desktop">Windows版</a><a href="/admin">先生ログイン</a></nav></footer>
 </body>
 </html>
