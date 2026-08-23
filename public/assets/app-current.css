@@ -495,3 +495,68 @@ p, li, dd, dt, label, small, strong, span, a, button, th, td, summary {
     flex: 0 1 auto;
   }
 }
+
+
+/* Unified public/private navigation boundary. */
+.public-site-header {
+  width: 100%;
+  max-width: 100%;
+}
+.public-auth-layout {
+  padding: 0;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  place-items: start stretch;
+}
+.public-auth-layout > .public-site-header { align-self: start; }
+.public-auth-layout > .auth-shell {
+  width: min(960px, calc(100% - 32px));
+  max-width: 960px;
+  margin: clamp(24px, 6vh, 64px) auto;
+  justify-self: center;
+}
+.app-nav-divider {
+  flex: 0 0 1px;
+  width: 1px;
+  height: 1.5rem;
+  margin-inline: 4px;
+  background: #d9d9d9;
+  align-self: center;
+}
+.app-nav-public { font-weight: 650; }
+.admin-page > .public-auth-header { display: none; }
+.admin-page:not([data-view]) .app-topbar { display: none; }
+.admin-page[data-view="auth"] > .public-auth-header { display: flex; }
+.admin-page[data-view="auth"] .app-topbar { display: none; }
+.admin-page[data-view="application"] > .public-auth-header { display: none; }
+.admin-page[data-view="application"] .app-topbar { display: flex; }
+.admin-page.auth-view {
+  padding: 0;
+  place-items: start stretch;
+  align-content: start;
+}
+.admin-page.auth-view .admin-shell {
+  width: min(1040px, calc(100% - 32px));
+  margin: clamp(24px, 6vh, 64px) auto;
+}
+.stateful-auth-page > .public-auth-header,
+.stateful-auth-page .app-topbar { display: none; }
+.stateful-auth-page:has(#loginRequired:not(.hidden)) > .public-auth-header,
+.stateful-auth-page:has(#masterLoginSection:not(.hidden)) > .public-auth-header { display: flex; }
+.stateful-auth-page:has(#accountSection:not(.hidden)) .app-topbar,
+.stateful-auth-page:has(#masterPanel:not(.hidden)) .app-topbar { display: flex; }
+@media (max-width: 720px) {
+  .public-auth-layout > .auth-shell,
+  .admin-page.auth-view .admin-shell {
+    width: calc(100% - 24px);
+    margin-block: 20px 28px;
+  }
+  .app-nav-divider { height: 1.25rem; }
+}
+@media (max-width: 420px) {
+  .public-auth-layout > .auth-shell,
+  .admin-page.auth-view .admin-shell {
+    width: calc(100% - 16px);
+    margin-block: 12px 20px;
+  }
+}
