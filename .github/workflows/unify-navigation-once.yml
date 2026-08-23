@@ -222,8 +222,6 @@ jobs:
               WORKFLOW,
           ]
 
-          # User-facing validation: one public header family before login,
-          # no direct desktop-download link in authenticated navigation.
           for path in list(public_pages) + auth_pages:
               text = (ROOT / path).read_text(encoding='utf-8')
               assert 'compact-public-header' not in text, path
@@ -235,7 +233,6 @@ jobs:
               assert 'class="app-nav-public" href="/">公開サイト</a>' in text, path
               assert text.count('public-auth-header') == 1, path
 
-          # Update only override entries for modified/tracked files.
           override_path = ROOT / 'SOURCE_SHA256SUMS.override.txt'
           lines = override_path.read_text(encoding='utf-8').splitlines()
           order = []
