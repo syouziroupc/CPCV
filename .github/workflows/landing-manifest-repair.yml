@@ -1,0 +1,71 @@
+name: Repair landing source manifest
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "public/index.html"
+      - "public/assets/landing.css"
+      - ".github/workflows/landing-manifest-repair.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: landing-manifest-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Refresh landing source hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+
+          targets = [
+              'public/index.html',
+              'public/assets/landing.css',
+              '.github/workflows/landing-manifest-repair.yml',
+          ]
+          manifest = Path('SOURCE_SHA256SUMS.override.txt')
+          order = []
+          values = {}
+          for line in manifest.read_text(encoding='utf-8').splitlines():
+              if not line:
+                  continue
+              digest, path = line.split('  ', 1)
+              if path not in order:
+                  order.append(path)
+              values[path] = digest
+          for item in targets:
+              path = Path(item)
+              if not path.exists():
+                  continue
+              values[item] = hashlib.sha256(path.read_bytes()).hexdigest()
+              if item not in order:
+                  order.append(item)
+          manifest.write_text(
+              ''.join(f'{values[path]}  {path}\n' for path in order),
+              encoding='utf-8',
+              newline='\n',
+          )
+          PY
+          git diff --check
+          if git diff --quiet -- SOURCE_SHA256SUMS.override.txt; then
+            echo "Landing manifest already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add SOURCE_SHA256SUMS.override.txt
+          git commit -m "Refresh landing source manifest"
+          git push origin HEAD:master
