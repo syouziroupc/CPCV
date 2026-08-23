@@ -83,7 +83,7 @@ masterLoginButton.addEventListener('click', async () => {
     const data = await api('/api/auth/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     if (!['owner', 'admin'].includes(data.organization?.role)) {
       await logoutSilently(data.csrfToken);
-      return setLoginStatus('この画面はOwnerまたはAdmin専用です。', true);
+      return setLoginStatus('この画面は所有者または管理者専用です。', true);
     }
     masterPassword.value = '';
     show(masterOrganizationGroup, false);
@@ -98,7 +98,7 @@ masterLoginButton.addEventListener('click', async () => {
       if (!masterOrganization.options.length) return setLoginStatus('管理可能な組織がありません。', true);
       show(masterOrganizationGroup, true); return setLoginStatus('組織を選択してもう一度ログインしてください。');
     }
-    setLoginStatus(`ログインできません: ${error.code || error.message}`, true);
+    setLoginStatus('ログインできません。メールアドレスとパスワードを確認してください。', true);
   } finally { masterLoginButton.disabled = false; masterLoginButton.textContent = 'ログイン'; }
 });
 masterPassword.addEventListener('keydown', (event) => { if (event.key === 'Enter') masterLoginButton.click(); });
@@ -120,7 +120,7 @@ inviteMemberButton.addEventListener('click', async () => {
     memberEmail.value = '';
     setStatus('招待メールを送信しました。');
     await Promise.all([loadInvitations(), loadMembers()]);
-  } catch (error) { setStatus(`招待できません: ${error.code || error.message}`, true); }
+  } catch (error) { setStatus('招待できませんでした。入力内容を確認して、もう一度お試しください。', true); }
   finally { inviteMemberButton.disabled = false; inviteMemberButton.textContent = '招待メールを送る'; }
 });
 
@@ -183,7 +183,7 @@ function renderMember(member) {
       for (const role of ['teacher', 'admin', 'owner']) { const option = document.createElement('option'); option.value = role; option.textContent = roleLabel(role); option.selected = role === member.role; select.appendChild(option); }
       select.addEventListener('change', async () => {
         try { await updateMember(member.userId, { role: select.value }); setStatus('権限を変更しました。'); await loadMembers(); }
-        catch (error) { select.value = member.role; setStatus(`権限を変更できません: ${error.code}`, true); }
+        catch (error) { select.value = member.role; setStatus('権限を変更できませんでした。', true); }
       }); actions.appendChild(select);
     }
     actions.append(
@@ -203,12 +203,12 @@ async function issueReset(member) {
   try {
     await api(`/api/org/members/${encodeURIComponent(member.userId)}/password-reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     setStatus('パスワード再設定メールを送信しました。');
-  } catch (error) { setStatus(`再設定メールを送信できません: ${error.code}`, true); }
+  } catch (error) { setStatus('再設定メールを送信できませんでした。', true); }
 }
 async function removeMember(member) {
   if (!confirm(`${member.displayName} の組織所属を解除しますか。`)) return;
   try { await api(`/api/org/members/${encodeURIComponent(member.userId)}`, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: '{}' }); setStatus('組織所属を解除しました。'); await loadMembers(); }
-  catch (error) { setStatus(`解除できません: ${error.code}`, true); }
+  catch (error) { setStatus('組織所属を解除できませんでした。', true); }
 }
 
 async function loadSessions() {
@@ -219,7 +219,7 @@ async function loadSessions() {
 function renderSession(session) {
   const item = document.createElement('div'); item.className = 'teacher-item';
   const summary = document.createElement('div'); const title = document.createElement('strong'); title.textContent = session.title;
-  const detail = document.createElement('div'); detail.className = 'muted'; detail.textContent = `作成者: ${session.createdByUserId} / ${new Date(session.createdAt).toLocaleString('ja-JP')}`;
+  const detail = document.createElement('div'); detail.className = 'muted'; detail.textContent = `作成: ${new Date(session.createdAt).toLocaleString('ja-JP')}`;
   summary.append(title, document.createElement('br'), detail);
   const actions = document.createElement('div'); actions.className = 'row wrap'; actions.append(
     actionButton('開く', 'button primary', () => { location.href = `/admin/${encodeURIComponent(session.id)}`; }),
@@ -231,11 +231,11 @@ async function deleteSession(session) { if (!confirm(`「${session.title}」を�
 
 async function loadAuditLogs() {
   const data = await api('/api/org/audit-logs?limit=50'); auditList.textContent = '';
-  if (!data.logs.length) return auditList.appendChild(mutedText('監査ログはありません。'));
+  if (!data.logs.length) return auditList.appendChild(mutedText('操作履歴はありません。'));
   for (const log of data.logs) {
     const item = document.createElement('div'); item.className = 'teacher-item'; const summary = document.createElement('div');
-    const title = document.createElement('strong'); title.textContent = log.action;
-    const detail = document.createElement('div'); detail.className = 'muted'; detail.textContent = `${new Date(log.createdAt).toLocaleString('ja-JP')} / ${log.actorRole || log.actorType}${log.targetId ? ` / ${log.targetId}` : ''}`;
+    const title = document.createElement('strong'); title.textContent = auditActionLabel(log.action);
+    const detail = document.createElement('div'); detail.className = 'muted'; detail.textContent = `${new Date(log.createdAt).toLocaleString('ja-JP')} / ${roleLabel(log.actorRole)}`;
     summary.append(title, document.createElement('br'), detail); item.appendChild(summary); auditList.appendChild(item);
   }
 }
@@ -251,15 +251,26 @@ function actionButton(label, className, handler, disabled = false) {
   return button;
 }
 function mutedText(text) { const element = document.createElement('p'); element.className = 'muted'; element.textContent = text; return element; }
-function roleLabel(role) { return { owner: 'Owner', admin: 'Admin', teacher: 'Teacher' }[role] || role || ''; }
-function statusLabel(status) { return { active: '有効', suspended: '停止', removed: '解除済み' }[status] || status; }
-function updateTimeLeft() { const ms = Date.parse(expiresAt || '') - Date.now(); if (!Number.isFinite(ms) || ms <= 0) return masterTimeLeft.textContent = 'Session期限切れ'; const hours = Math.floor(ms / 3600000); const minutes = Math.ceil((ms % 3600000) / 60000); masterTimeLeft.textContent = `Session残り ${hours}時間${minutes}分`; }
+function roleLabel(role) { return { owner: '所有者', admin: '管理者', teacher: '先生', user: '利用者', system: 'システム' }[role] || '利用者'; }
+function statusLabel(status) { return { active: '有効', suspended: '停止', removed: '解除済み' }[status] || '状態不明'; }
+function auditActionLabel(action) {
+  return ({
+    'member.created': 'メンバーを追加',
+    'member.updated': 'メンバー設定を変更',
+    'member.removed': 'メンバーを解除',
+    'invitation.created': '招待を作成',
+    'invitation.resent': '招待を再送',
+    'invitation.revoked': '招待を取消',
+    'password_reset.issued': '再設定メールを送信'
+  })[action] || '管理設定を変更';
+}
+function updateTimeLeft() { const ms = Date.parse(expiresAt || '') - Date.now(); if (!Number.isFinite(ms) || ms <= 0) return masterTimeLeft.textContent = 'ログイン期限切れ'; const hours = Math.floor(ms / 3600000); const minutes = Math.ceil((ms % 3600000) / 60000); masterTimeLeft.textContent = `ログイン残り ${hours}時間${minutes}分`; }
 function showApiError(error) {
-  if (error?.status === 401) return showLogin('Sessionが切れました。もう一度ログインしてください。', true);
+  if (error?.status === 401) return showLogin('ログインの有効期限が切れました。もう一度ログインしてください。', true);
   const code = error?.code || error?.message || 'API_ERROR';
   const message = code === 'REQUEST_TIMEOUT' ? '通信がタイムアウトしました。もう一度試してください。'
     : code === 'NETWORK_ERROR' ? 'ネットワークに接続できません。接続を確認してください。'
-      : `操作できません: ${code}`;
+      : '操作できませんでした。時間をおいてもう一度お試しください。';
   setStatus(message, true);
 }
 
@@ -267,7 +278,7 @@ async function boot() {
   show(masterBootSection, true);
   try {
     const data = await api('/api/auth/session');
-    if (!['owner', 'admin'].includes(data.organization?.role)) return showLogin('この画面はOwnerまたはAdmin専用です。', true);
+    if (!['owner', 'admin'].includes(data.organization?.role)) return showLogin('この画面は所有者または管理者専用です。', true);
     applyIdentity(data);
     showPanel();
     await loadPanel(data);
@@ -275,7 +286,7 @@ async function boot() {
     if (error.status === 401) showLogin();
     else {
       show(masterBootSection, true);
-      if (masterBootStatus) masterBootStatus.textContent = `読み込みに失敗しました: ${error.code || error.message || 'API_ERROR'}。再読み込みしてください。`;
+      if (masterBootStatus) masterBootStatus.textContent = '読み込みに失敗しました。再読み込みしてください。';
     }
   }
 }
