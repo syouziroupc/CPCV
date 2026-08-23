@@ -44,7 +44,7 @@ function errorText(code) {
     RATE_LIMITED: "要求回数が上限に達しました。時間を置いて再試行してください。",
     REQUEST_TIMEOUT: "通信がタイムアウトしました。もう一度試してください。",
     NETWORK_ERROR: "ネットワークに接続できません。接続を確認してください。"
-  })[code] || `処理できませんでした。${code ? ` (${code})` : ""}`;
+  })[code] || "処理できませんでした。時間をおいてもう一度お試しください。";
 }
 async function load() {
   try {
@@ -141,9 +141,9 @@ $("deleteAccountForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const button = $("deleteAccountButton");
   const deleteStatus = $("deleteStatus");
-  if (!confirm("\u30a2\u30ab\u30a6\u30f3\u30c8\u3092\u524a\u9664\u3057\u307e\u3059\u3002\u3053\u306e\u64cd\u4f5c\u306f\u53d6\u308a\u6d88\u305b\u307e\u305b\u3093\u3002")) return;
+  if (!confirm("アカウントを削除します。この操作は取り消せません。")) return;
   button.disabled = true;
-  deleteStatus.textContent = "\u524a\u9664\u3057\u3066\u3044\u307e\u3059...";
+  deleteStatus.textContent = "削除しています...";
   try {
     await api("/api/auth/account", {
       method: "DELETE",
@@ -156,15 +156,15 @@ $("deleteAccountForm").addEventListener("submit", async (event) => {
     location.href = "/?accountDeleted=1";
   } catch (error) {
     deleteStatus.textContent = ({
-      CURRENT_PASSWORD_INVALID: "\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u6b63\u3057\u304f\u3042\u308a\u307e\u305b\u3093\u3002",
-      ACCOUNT_DELETE_CONFIRMATION_INVALID: "DELETE \u3068\u6b63\u78ba\u306b\u5165\u529b\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
-      ACCOUNT_DELETE_OWNERSHIP_TRANSFER_REQUIRED: "\u5171\u6709\u7d44\u7e54\u306e\u6240\u6709\u6a29\u3092\u5225\u306eOwner\u3078\u79fb\u7ba1\u3057\u3066\u304f\u3060\u3055\u3044\u3002",
-      ACCOUNT_DELETE_ORGANIZATION_MEMBERS_REMAIN: "\u500b\u4eba\u7528\u30ef\u30fc\u30af\u30b9\u30da\u30fc\u30b9\u306b\u4ed6\u306e\u30e1\u30f3\u30d0\u30fc\u304c\u6b8b\u3063\u3066\u3044\u307e\u3059\u3002"
+      CURRENT_PASSWORD_INVALID: "パスワードが正しくありません。",
+      ACCOUNT_DELETE_CONFIRMATION_INVALID: "DELETE と正確に入力してください。",
+      ACCOUNT_DELETE_OWNERSHIP_TRANSFER_REQUIRED: "共有組織の所有権を別の所有者へ移管してください。",
+      ACCOUNT_DELETE_ORGANIZATION_MEMBERS_REMAIN: "個人用ワークスペースに他のメンバーが残っています。"
     })[error.code] || errorText(error.code);
     button.disabled = false;
   }
 });
 
-function roleLabel(role) { return ({ owner: "Owner", admin: "Admin", teacher: "Teacher" })[role] || role; }
-function statusLabel(status) { return ({ active: "有効", suspended: "停止", removed: "解除" })[status] || status; }
+function roleLabel(role) { return ({ owner: "所有者", admin: "管理者", teacher: "先生" })[role] || "権限不明"; }
+function statusLabel(status) { return ({ active: "有効", suspended: "停止", removed: "解除" })[status] || "状態不明"; }
 await load();
