@@ -76,6 +76,30 @@
   background: #fff;
 }
 
+.clear-auth-page > .public-site-header .brand,
+.admin-page.auth-view > .public-auth-header .brand {
+  flex: 0 0 auto !important;
+  min-width: 118px;
+  max-width: none;
+  white-space: nowrap;
+}
+
+.clear-auth-page > .public-site-header .brand > span:last-child,
+.admin-page.auth-view > .public-auth-header .brand > span:last-child {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.clear-auth-page > .public-site-header .brand strong,
+.clear-auth-page > .public-site-header .brand small,
+.admin-page.auth-view > .public-auth-header .brand strong,
+.admin-page.auth-view > .public-auth-header .brand small {
+  display: block;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  white-space: nowrap;
+}
+
 .clear-auth-page > .public-site-header .site-nav,
 .admin-page.auth-view > .public-auth-header .site-nav {
   margin-left: auto;
@@ -84,11 +108,6 @@
 .public-auth-layout > .public-site-header .site-nav > a:not(:first-child):not(.nav-cta),
 .admin-page.auth-view > .public-auth-header .site-nav > a:not(:first-child):not(.nav-cta) {
   display: none !important;
-}
-
-.public-auth-layout > .public-site-header .site-nav > a:first-child::after,
-.admin-page.auth-view > .public-auth-header .site-nav > a:first-child::after {
-  content: "へ戻る";
 }
 
 .public-auth-layout > .public-site-header .site-nav > a:first-child,
@@ -413,6 +432,16 @@
     font-size: .72rem !important;
   }
 
+  .clear-auth-page > .public-site-header .brand,
+  .admin-page.auth-view > .public-auth-header .brand {
+    min-width: 92px;
+  }
+
+  .clear-auth-page > .public-site-header .brand small,
+  .admin-page.auth-view > .public-auth-header .brand small {
+    display: none;
+  }
+
   .clear-auth-page > .auth-shell,
   .admin-page.auth-view .admin-login-shell {
     width: calc(100% - 24px) !important;
@@ -464,9 +493,9 @@
     width: calc(100% - 16px) !important;
   }
 
-  .clear-auth-page > .public-site-header .brand small,
-  .admin-page.auth-view > .public-auth-header .brand small {
-    display: none;
+  .clear-auth-page > .public-site-header .brand,
+  .admin-page.auth-view > .public-auth-header .brand {
+    min-width: 82px;
   }
 
   .clear-public-page .clear-public-main:not(.landing-main),
