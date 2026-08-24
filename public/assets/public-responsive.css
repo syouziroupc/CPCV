@@ -112,13 +112,13 @@
 
 .public-auth-layout > .public-site-header .site-nav > a:first-child,
 .admin-page.auth-view > .public-auth-header .site-nav > a:first-child {
-  font-size: 0;
+  font-size: 0 !important;
 }
 
 .public-auth-layout > .public-site-header .site-nav > a:first-child::before,
 .admin-page.auth-view > .public-auth-header .site-nav > a:first-child::before {
   content: "公開サイト";
-  font-size: .82rem;
+  font-size: .82rem !important;
 }
 
 /* Signed-out auth shell aligns with the compact header. */
@@ -429,6 +429,16 @@
     min-height: 34px;
     border: 0;
     padding: 5px 8px !important;
+    font-size: .72rem !important;
+  }
+
+  .public-auth-layout > .public-site-header .site-nav > a:first-child,
+  .admin-page.auth-view > .public-auth-header .site-nav > a:first-child {
+    font-size: 0 !important;
+  }
+
+  .public-auth-layout > .public-site-header .site-nav > a:first-child::before,
+  .admin-page.auth-view > .public-auth-header .site-nav > a:first-child::before {
     font-size: .72rem !important;
   }
 
