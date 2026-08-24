@@ -3,63 +3,61 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="CPCVの目的、基本機能、追加機能を簡潔に説明します。">
-  <title>機能概要 | CPCV</title>
-  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-nav3">
-  <link rel="stylesheet" href="/assets/public-responsive.css?v=0.8.10-public1">
+  <meta name="description" content="CPCVの画面構成、授業機能、設定場所を説明します。">
+  <title>機能 | CPCV</title>
+  <link rel="stylesheet" href="/assets/app.css?v=0.8.10-lp4">
+  <link rel="stylesheet" href="/assets/public-responsive.css?v=0.8.10-public2">
 </head>
 <body class="site-page clear-public-page">
   <header class="site-header clear-site-header public-site-header">
     <a class="brand" href="/"><span class="brand-mark">C</span><span><strong>CPCV</strong><small>授業コメント</small></span></a>
     <nav class="site-nav" aria-label="メインメニュー">
-      <a href="/">ホーム</a>
-      <a href="/guide">使い方</a>
-      <a aria-current="page" href="/about">機能概要</a>
-      <a href="/privacy">情報の扱い</a>
-      <a href="/#desktop">Windows版</a>
-      <a class="nav-cta" href="/admin">先生ログイン</a>
+      <a href="/#how">使い方</a><a aria-current="page" href="/#features">機能</a><a href="/#desktop">Windows版</a><a href="/privacy">情報の扱い</a><a href="/admin">先生ログイン</a><a class="nav-cta" href="/#start">今すぐはじめる</a>
     </nav>
   </header>
 
   <main class="clear-public-main">
     <section class="clear-page-heading">
-      <p class="eyebrow">機能概要</p>
-      <h1>CPCVは何をするものか</h1>
-      <p>CPCVは、授業中のPDF投影と匿名コメントをつなぐシステムです。学生の質問や反応をその場で受け取り、先生が説明へ反映できます。</p>
+      <p class="eyebrow">機能</p>
+      <h1>CPCVの画面構成と機能</h1>
+      <p>学生画面、授業管理、投影画面の3画面で構成します。授業ごとにコメント表示、承認、フィルター、翻訳などを設定できます。</p>
     </section>
 
-    <section class="clear-section overview-grid" aria-labelledby="overviewHeading">
-      <div class="clear-section-heading"><p class="section-kicker">基本構成</p><h2 id="overviewHeading">3つの画面で動く</h2></div>
+    <section class="clear-section" aria-labelledby="screensHeading">
+      <div class="clear-section-heading"><p class="section-kicker">画面構成</p><h2 id="screensHeading">3つの画面</h2></div>
       <div class="clear-feature-grid three">
-        <article><p class="role-label">学生画面</p><h3>コメントを送る</h3><p>登録不要。合言葉またはQRコードで参加します。</p></article>
-        <article><p class="role-label">授業管理</p><h3>授業を操作する</h3><p>受付、表示、承認、翻訳、分析を授業単位で管理します。</p></article>
-        <article><p class="role-label">投影画面</p><h3>PDFと反応を映す</h3><p>先生のブラウザでPDFを開き、コメントを重ねて表示します。</p></article>
+        <article><p class="role-label">学生画面</p><h3>コメントを送信</h3><p>QRコードまたは6文字コードで参加します。学生アカウントは不要です。</p></article>
+        <article><p class="role-label">授業管理</p><h3>授業を設定・操作</h3><p>投稿受付、表示方法、承認、フィルター、翻訳を授業単位で設定します。</p></article>
+        <article><p class="role-label">投影画面</p><h3>PDFとコメントを表示</h3><p>PDFをブラウザ内で開き、コメントを右下の積み上げ表示または横流れで重ねます。</p></article>
       </div>
     </section>
 
-    <section class="clear-section" aria-labelledby="modeHeading">
-      <div class="clear-section-heading"><p class="section-kicker">機能の分け方</p><h2 id="modeHeading">基本機能と追加機能</h2></div>
-      <div class="plain-comparison">
-        <article><h3>基本機能</h3><ul><li>匿名コメント</li><li>投稿受付の切替</li><li>コメント投影</li><li>表示中コメントの消去</li></ul></article>
-        <article><h3>必要な場合だけ追加</h3><ul><li>表示前承認</li><li>辞書フィルター</li><li>AI判定と翻訳</li><li>PDFページ別分析</li></ul></article>
-      </div>
-    </section>
-
-    <section class="clear-section" aria-labelledby="boundaryHeading">
-      <div class="clear-section-heading"><p class="section-kicker">設定場所</p><h2 id="boundaryHeading">設定は目的別に分ける</h2></div>
+    <section class="clear-section" aria-labelledby="functionsHeading">
+      <div class="clear-section-heading"><p class="section-kicker">授業機能</p><h2 id="functionsHeading">機能一覧</h2></div>
       <dl class="clear-definition-list">
-        <div><dt>授業管理</dt><dd>その授業の表示方法、承認、フィルター、AI翻訳を設定します。</dd></div>
-        <div><dt>アカウント設定</dt><dd>メール、パスワード、組織共通の辞書とAI上限を管理します。</dd></div>
+        <div><dt>コメント表示</dt><dd>右下の積み上げ表示と横流れ表示を選択できます。</dd></div>
+        <div><dt>表示前承認</dt><dd>自動表示または先生の承認後に表示する方式を選択できます。</dd></div>
+        <div><dt>コメントフィルター</dt><dd>辞書フィルターとAI判定を授業ごとに有効化できます。</dd></div>
+        <div><dt>翻訳</dt><dd>AI翻訳を有効にした授業では、コメントを指定言語へ翻訳できます。</dd></div>
+        <div><dt>ページ分析</dt><dd>PDFの表示ページと投稿の発生箇所を授業分析に利用できます。</dd></div>
+      </dl>
+    </section>
+
+    <section class="clear-section" aria-labelledby="settingsHeading">
+      <div class="clear-section-heading"><p class="section-kicker">設定場所</p><h2 id="settingsHeading">設定場所の分担</h2></div>
+      <dl class="clear-definition-list">
+        <div><dt>授業管理</dt><dd>その授業の表示方法、承認、フィルター、翻訳を設定します。</dd></div>
+        <div><dt>アカウント設定</dt><dd>メール、パスワード、組織共通辞書、AI利用上限を管理します。</dd></div>
         <div><dt>組織管理</dt><dd>メンバー、権限、招待、組織内の授業を管理します。</dd></div>
       </dl>
     </section>
 
     <section class="clear-bottom-cta">
-      <div><h2>操作手順を確認する</h2><p>先生と学生の手順を画面別に説明しています。</p></div>
+      <div><h2>操作手順</h2><p>先生と学生の操作を手順ごとに確認できます。</p></div>
       <div class="clear-actions"><a class="button primary" href="/guide">使い方を見る</a><a class="button" href="/admin">先生ログイン</a></div>
     </section>
   </main>
 
-  <footer class="site-footer clear-footer"><span>CPCV</span><nav aria-label="フッター"><a href="/">ホーム</a><a href="/guide">使い方</a><a href="/privacy">情報の扱い</a><a href="/#desktop">Windows版</a><a href="/admin">先生ログイン</a></nav></footer>
+  <footer class="site-footer clear-footer"><span>CPCV</span><nav aria-label="フッター"><a href="/#how">使い方</a><a href="/#features">機能</a><a href="/privacy">情報の扱い</a><a href="/#desktop">Windows版</a><a href="/admin">先生ログイン</a></nav></footer>
 </body>
 </html>
