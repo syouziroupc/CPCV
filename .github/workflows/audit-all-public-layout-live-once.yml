@@ -1,0 +1,129 @@
+name: Audit all public layouts on live staging once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/audit-all-public-layout-live-once.yml"
+
+permissions:
+  contents: read
+
+env:
+  ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12.12"
+      - name: Install browser
+        run: |
+          python -m pip install --disable-pip-version-check playwright==1.57.0
+          python -m playwright install --with-deps chromium
+      - name: Capture all user-facing pages and measure layout
+        shell: bash
+        run: |
+          mkdir -p all-layout-evidence/screenshots
+          python - <<'PY'
+          from pathlib import Path
+          import json, re
+          from playwright.sync_api import sync_playwright
+
+          origin='https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
+          pages=[
+            ('home','/'),
+            ('about','/about'),
+            ('guide','/guide'),
+            ('privacy','/privacy'),
+            ('admin','/admin'),
+            ('signup','/signup'),
+            ('forgot-password','/forgot-password'),
+            ('check-email','/check-email'),
+            ('verify-email','/verify-email'),
+            ('reset-password','/reset-password'),
+            ('accept-invitation','/accept-invitation'),
+            ('confirm-email-change','/confirm-email-change'),
+            ('account','/account'),
+            ('master','/master'),
+          ]
+          viewports=[(390,844),(768,1024),(1024,900),(1440,1000)]
+          out=Path('all-layout-evidence/screenshots')
+          records=[]
+          hard=[]
+          warnings=[]
+
+          with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+            for name,path in pages:
+              for width,height in viewports:
+                page=browser.new_page(viewport={'width':width,'height':height},device_scale_factor=1)
+                response=page.goto(origin+path+f'?layout_audit={width}',wait_until='networkidle',timeout=60000)
+                page.wait_for_timeout(350)
+                shot=out/f'{name}-{width}.png'
+                page.screenshot(path=str(shot),full_page=True)
+                status=response.status if response else 0
+                data=page.evaluate('''() => {
+                  const W=window.innerWidth;
+                  const root=document.documentElement;
+                  const visible=e=>{
+                    const s=getComputedStyle(e), r=e.getBoundingClientRect();
+                    return s.display!=='none' && s.visibility!=='hidden' && parseFloat(s.opacity||'1')>0 && r.width>0 && r.height>0;
+                  };
+                  const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,right:r.right,y:r.y,width:r.width,height:r.height}};
+                  const lineData=(el)=>{
+                    if(!el) return [];
+                    const lines=[]; const walker=document.createTreeWalker(el,NodeFilter.SHOW_TEXT); let node;
+                    while((node=walker.nextNode())) for(let i=0;i<node.data.length;i++){
+                      const ch=node.data[i]; if(/\\s/.test(ch)) continue;
+                      const range=document.createRange(); range.setStart(node,i); range.setEnd(node,i+1);
+                      const rs=[...range.getClientRects()].filter(r=>r.width>0&&r.height>0); if(!rs.length) continue;
+                      const top=Math.round(rs[0].top*2)/2; let line=lines.find(x=>Math.abs(x.top-top)<1.5);
+                      if(!line){line={top,count:0,text:''};lines.push(line)} line.count++; line.text+=ch;
+                    }
+                    return lines.sort((a,b)=>a.top-b.top);
+                  };
+                  const headings=[...document.querySelectorAll('h1,h2,h3')].filter(visible).map((e,i)=>({tag:e.tagName,index:i,text:(e.textContent||'').trim().replace(/\\s+/g,' '),rect:rect(e),lines:lineData(e)}));
+                  const outside=[...document.querySelectorAll('a,button,input,select,textarea,[role="button"]')].filter(visible).map(e=>({tag:e.tagName,text:(e.textContent||e.getAttribute('aria-label')||e.getAttribute('placeholder')||'').trim().slice(0,80),rect:rect(e)})).filter(x=>x.rect.x < -1 || x.rect.right > W+1);
+                  const vertical=[...document.querySelectorAll('body *')].filter(visible).map(e=>({tag:e.tagName,text:(e.textContent||'').trim().replace(/\\s+/g,' ').slice(0,80),writing:getComputedStyle(e).writingMode,rect:rect(e)})).filter(x=>x.writing && !x.writing.startsWith('horizontal'));
+                  const navs=[...document.querySelectorAll('nav')].filter(visible).map(e=>({rect:rect(e),scrollWidth:e.scrollWidth,clientWidth:e.clientWidth,text:(e.textContent||'').trim().replace(/\\s+/g,' ').slice(0,140)}));
+                  return {title:document.title,scrollWidth:root.scrollWidth,clientWidth:root.clientWidth,bodyWidth:document.body.getBoundingClientRect().width,headings,outside,vertical,navs};
+                }''')
+                rec={'page':name,'path':path,'width':width,'status':status,**data}
+                records.append(rec)
+                if status>=400: hard.append(f'{name} {width}: HTTP {status}')
+                overflow=data['scrollWidth']-data['clientWidth']
+                if overflow>1: hard.append(f'{name} {width}: horizontal overflow {overflow}px')
+                if data['outside']: hard.append(f'{name} {width}: controls outside viewport {data["outside"]}')
+                if data['vertical']: warnings.append(f'{name} {width}: non-horizontal writing {data["vertical"][:4]}')
+                for h in data['headings']:
+                  lines=h['lines']
+                  if len(lines)>1 and any(x['count']<=1 for x in lines):
+                    hard.append(f'{name} {width}: orphan heading glyph {h["text"]} -> {lines}')
+                  elif len(lines)>1 and any(x['count']<=2 for x in lines):
+                    warnings.append(f'{name} {width}: short heading line {h["text"]} -> {lines}')
+                for nav in data['navs']:
+                  if nav['scrollWidth']>nav['clientWidth']+1:
+                    warnings.append(f'{name} {width}: nav internal overflow {nav}')
+                page.close()
+            browser.close()
+
+          Path('all-layout-evidence/records.json').write_text(json.dumps(records,ensure_ascii=False,indent=2),encoding='utf-8')
+          Path('all-layout-evidence/hard-failures.json').write_text(json.dumps(hard,ensure_ascii=False,indent=2),encoding='utf-8')
+          Path('all-layout-evidence/warnings.json').write_text(json.dumps(warnings,ensure_ascii=False,indent=2),encoding='utf-8')
+          print('hard failures:',json.dumps(hard,ensure_ascii=False,indent=2))
+          print('warnings:',json.dumps(warnings,ensure_ascii=False,indent=2))
+          if hard:
+            raise SystemExit('layout hard failures detected')
+          PY
+      - name: Upload complete visual audit
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-all-public-layout-live
+          path: all-layout-evidence/
+          retention-days: 30
