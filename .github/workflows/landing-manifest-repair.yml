@@ -1,4 +1,4 @@
-name: Repair landing source manifest
+name: Finalize redesigned public pages
 
 on:
   push:
@@ -6,41 +6,98 @@ on:
     paths:
       - "public/index.html"
       - "public/assets/landing.css"
-      - "public/assets/landing-narrow.css"
+      - "public/assets/public-responsive.css"
       - ".github/workflows/landing-manifest-repair.yml"
 
 permissions:
   contents: write
 
 concurrency:
-  group: landing-manifest-repair
+  group: public-layout-finalizer
   cancel-in-progress: false
 
 jobs:
-  repair:
+  finalize:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: master
           fetch-depth: 0
-      - name: Refresh landing source hashes
+      - name: Apply canonical navigation and refresh source hashes
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           from pathlib import Path
           import hashlib
+          import re
+
+          info_targets = [
+              'public/about/index.html',
+              'public/guide/index.html',
+              'public/privacy/index.html',
+          ]
+          auth_targets = [
+              'public/signup/index.html',
+              'public/forgot-password/index.html',
+              'public/reset-password/index.html',
+              'public/accept-invitation/index.html',
+              'public/check-email/index.html',
+              'public/confirm-email-change/index.html',
+              'public/verify-email/index.html',
+              'public/_admin_spa.html',
+              'public/admin/index.html',
+          ]
+
+          public_nav = '''<nav class="site-nav" aria-label="メインメニュー">
+      <a href="/#how">使い方</a>
+      <a href="/#features">機能</a>
+      <a href="/#desktop">Windows版</a>
+      <a href="/privacy">情報の扱い</a>
+      <a href="/admin">先生ログイン</a>
+      <a class="nav-cta" href="/#start">今すぐはじめる</a>
+    </nav>'''
+          auth_nav = '''<nav class="site-nav" aria-label="メインメニュー">
+      <a href="/">公開サイト</a>
+      <a class="nav-cta" href="/admin">先生ログイン</a>
+    </nav>'''
+
+          for item in info_targets + auth_targets:
+              path = Path(item)
+              text = path.read_text(encoding='utf-8')
+              nav = auth_nav if item in auth_targets else public_nav
+              text, count = re.subn(
+                  r'<nav class="site-nav" aria-label="メインメニュー">.*?</nav>',
+                  nav,
+                  text,
+                  count=1,
+                  flags=re.S,
+              )
+              if count != 1:
+                  raise SystemExit(f'navigation not found exactly once: {item}')
+              text = re.sub(r'/assets/app\.css\?v=[^"\s]+', '/assets/app.css?v=0.8.10-lp4', text, count=1)
+              text = re.sub(r'/assets/public-responsive\.css\?v=[^"\s]+', '/assets/public-responsive.css?v=0.8.10-public2', text, count=1)
+              path.write_text(text, encoding='utf-8', newline='\n')
 
           targets = [
               'public/index.html',
               'public/assets/landing.css',
               'public/assets/landing-narrow.css',
+              'public/assets/public-responsive.css',
+              'public/assets/app.css',
+              *info_targets,
+              *auth_targets,
+              'scripts/test-v0810-security-ui.mjs',
+              '.github/workflows/deploy-master-now.yml',
               '.github/workflows/landing-manifest-repair.yml',
+              '.github/workflows/unify-navigation-once.yml',
+              '.github/workflows/verify-all-responsive-staging-once.yml',
               '.github/workflows/audit-staging-runtime-once.yml',
               '.github/workflows/sync-staging-system-once.yml',
               '.github/workflows/deploy-refined-landing-staging-once.yml',
           ]
+
           manifest = Path('SOURCE_SHA256SUMS.override.txt')
           order = []
           values = {}
@@ -65,12 +122,12 @@ jobs:
           )
           PY
           git diff --check
-          if git diff --quiet -- SOURCE_SHA256SUMS.override.txt; then
-            echo "Landing manifest already current."
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add SOURCE_SHA256SUMS.override.txt
-          git commit -m "Refresh landing source manifest"
+          git add public/about/index.html public/guide/index.html public/privacy/index.html public/signup/index.html public/forgot-password/index.html public/reset-password/index.html public/accept-invitation/index.html public/check-email/index.html public/confirm-email-change/index.html public/verify-email/index.html public/_admin_spa.html public/admin/index.html SOURCE_SHA256SUMS.override.txt
+          if git diff --cached --quiet; then
+            echo "Public pages and manifest already current."
+            exit 0
+          fi
+          git commit -m "Finalize redesigned public pages"
           git push origin HEAD:master
