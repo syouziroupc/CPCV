@@ -1,0 +1,52 @@
+name: Refresh manifest after visual audit fixes
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/refresh-manifest-after-visual-fixes.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Refresh affected source hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          targets = [
+              'public/reset-password/index.html',
+              'public/accept-invitation/index.html',
+              'public/check-email/index.html',
+              'public/confirm-email-change/index.html',
+              'public/verify-email/index.html',
+          ]
+          manifest = Path('SOURCE_SHA256SUMS.override.txt')
+          order=[]; values={}
+          for line in manifest.read_text(encoding='utf-8').splitlines():
+              if not line: continue
+              digest, path = line.split('  ',1)
+              if path not in order: order.append(path)
+              values[path]=digest
+          for item in targets:
+              values[item]=hashlib.sha256(Path(item).read_bytes()).hexdigest()
+              if item not in order: order.append(item)
+          manifest.write_text(''.join(f'{values[p]}  {p}\n' for p in order),encoding='utf-8',newline='\n')
+          PY
+          git diff --check
+          if git diff --quiet -- SOURCE_SHA256SUMS.override.txt; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add SOURCE_SHA256SUMS.override.txt
+          git commit -m "Refresh visual fix source hashes"
+          git push origin HEAD:master
