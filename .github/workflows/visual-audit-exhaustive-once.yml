@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 env:
-  SOURCE_COMMIT: 350a6211031e97d7722f10dec077f7c7db679661
+  SOURCE_COMMIT: e4aeb690417c2219c5163ead43a79a079da815bb
 
 jobs:
   audit:
@@ -45,7 +45,7 @@ jobs:
           from pathlib import Path
           import json, math
           from playwright.sync_api import sync_playwright
-          from PIL import Image, ImageDraw, ImageFont
+          from PIL import Image, ImageDraw
 
           origin = 'http://127.0.0.1:8787'
           pages = [
@@ -81,7 +81,7 @@ jobs:
                           }""")
                           page.wait_for_timeout(100)
                       data = page.evaluate("""() => {
-                        const root=document.documentElement, W=innerWidth, H=innerHeight;
+                        const root=document.documentElement, W=innerWidth;
                         const visible=e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity)!==0&&r.width>0&&r.height>0};
                         const elems=[...document.querySelectorAll('a,button,input,select,textarea,h1,h2,h3,figure,img,section,header,nav')].filter(visible);
                         const bad=elems.map(e=>{const r=e.getBoundingClientRect();return {tag:e.tagName,cls:e.className||'',text:(e.textContent||e.getAttribute('placeholder')||e.getAttribute('alt')||'').trim().replace(/\\s+/g,' ').slice(0,80),left:r.left,right:r.right,width:r.width}}).filter(x=>x.left<-1||x.right>W+1);
@@ -96,18 +96,16 @@ jobs:
                           if(area>8 && !important[i].contains(important[j]) && !important[j].contains(important[i])) overlaps.push({a:important[i].className,b:important[j].className,area});
                         }
                         const brand=document.querySelector('.public-site-header .brand strong');
-                        const nav=document.querySelector('.public-site-header .site-nav');
-                        const navr=nav?nav.getBoundingClientRect():null;
                         const demo=document.querySelector('.viewer-demo-stage');
                         const comments=document.querySelector('.viewer-demo-comments');
                         const d=demo?demo.getBoundingClientRect():null,c=comments?comments.getBoundingClientRect():null;
                         return {
                           scrollWidth:root.scrollWidth,clientWidth:root.clientWidth,scrollHeight:root.scrollHeight,
                           bad,tiny,overlaps,brandLines:brand?brand.getClientRects().length:0,
-                          nav:navr&&{left:navr.left,right:navr.right,width:navr.width},
+                          brandText:brand?(brand.innerText||'').trim():'',
+                          brandWidth:brand?brand.getBoundingClientRect().width:0,
                           demo:d&&{x:d.x,y:d.y,width:d.width,height:d.height,right:d.right,bottom:d.bottom},
-                          comments:c&&{x:c.x,y:c.y,width:c.width,height:c.height,right:c.right,bottom:c.bottom},
-                          bodyText:(document.body.innerText||'').replace(/\\s+/g,' ').slice(0,500)
+                          comments:c&&{x:c.x,y:c.y,width:c.width,height:c.height,right:c.right,bottom:c.bottom}
                         };
                       }""")
                       label=f'{name} {width}px'
@@ -119,6 +117,8 @@ jobs:
                           failures.append(f'{label}: important block overlap {data["overlaps"][:4]}')
                       if name in ('signup','forgot','reset','accept','checkmail','confirmmail','verify','admin') and data['brandLines'] not in (0,1):
                           failures.append(f'{label}: CPCV brand wraps to {data["brandLines"]} lines')
+                      if data['brandText']=='CPCV' and data['brandWidth'] < 34:
+                          failures.append(f'{label}: CPCV brand visually compressed ({data["brandWidth"]:.1f}px)')
                       if data['tiny']:
                           warnings.append(f'{label}: small controls {data["tiny"][:4]}')
                       if name=='home' and data['demo'] and data['comments']:
@@ -148,7 +148,6 @@ jobs:
               card.paste(im,((card_w-nw)//2,28))
               return card
 
-          # One sheet per page: scan all 11 widths side by side in a grid.
           for name,_ in pages:
               cards=[]
               for width,_ in viewports:
@@ -160,7 +159,6 @@ jobs:
               for i,c in enumerate(cards): sheet.paste(c,((i%cols)*300,(i//cols)*520))
               sheet.save(sheets_dir/f'page-{name}.jpg',quality=91)
 
-          # One sheet per width: scan every route at that width.
           for width,_ in viewports:
               cards=[]
               for name,_ in pages:
@@ -172,7 +170,6 @@ jobs:
               for i,c in enumerate(cards): sheet.paste(c,((i%cols)*300,(i//cols)*520))
               sheet.save(sheets_dir/f'width-{width}.jpg',quality=91)
 
-          # Full-page overview sheets for representative widths.
           for width in (320,390,768,1024,1440,1920):
               cards=[]
               for name,_ in pages:
