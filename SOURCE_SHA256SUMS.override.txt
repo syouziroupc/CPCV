@@ -79,4 +79,4 @@ cc141bad82799f85b2c7747fca6b9594956ff520594a5b7e0bfd485914cbc24c  .github/workfl
 5a312f01bee70e0fbacd7c92add8db87f2c46555211989a526d98899209fc973  .github/workflows/audit-staging-runtime-once.yml
 aff070d7836f87f84c09ef18632a17f7bb07f660afdac967c7fafe9916881d3a  .github/workflows/sync-staging-system-once.yml
 0a70342c62354d77be5330ad319de3b1cdc7edd47c20a45a86f401fb3b9d4b2a  .github/workflows/deploy-refined-landing-staging-once.yml
-03aa9ebc5de7f359ba053f6ca4a270d45566a9ffcafcecbf644a119f27569222  public/assets/landing-narrow.css
+f1d05a2abd5cfd23cd879f7a6bde876e0d4f900c2bfb07786f05560e93dabfb7  public/assets/landing-narrow.css
