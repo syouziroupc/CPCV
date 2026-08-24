@@ -25,6 +25,7 @@ jobs:
           from pathlib import Path
           import hashlib
           targets = [
+              'public/assets/auth-simple.css',
               'public/reset-password/index.html',
               'public/accept-invitation/index.html',
               'public/check-email/index.html',
@@ -48,5 +49,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add SOURCE_SHA256SUMS.override.txt
-          git commit -m "Refresh visual fix source hashes"
+          git commit -m "Refresh simple auth source hashes"
           git push origin HEAD:master
