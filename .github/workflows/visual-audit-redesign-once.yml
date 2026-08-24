@@ -11,7 +11,7 @@ permissions:
   issues: write
 
 env:
-  SOURCE_COMMIT: 31b626f86390b52e703d286e729d3fcf35aab2f5
+  SOURCE_COMMIT: bf316f8a59d66e5d9a9ec1c5378159159a8d3dd0
 
 jobs:
   audit:
@@ -73,11 +73,13 @@ jobs:
                   const bad=[...document.querySelectorAll('a,button,input,select,textarea,h1,h2,h3,figure')].filter(visible).map(e=>{const r=e.getBoundingClientRect();return {tag:e.tagName,text:(e.textContent||e.getAttribute('placeholder')||'').trim().replace(/\\s+/g,' ').slice(0,90),left:r.left,right:r.right,width:r.width}}).filter(x=>x.left<-1||x.right>W+1);
                   const demo=document.querySelector('.viewer-demo-stage');
                   const comments=document.querySelector('.viewer-demo-comments');
+                  const brand=document.querySelector('.public-site-header .brand strong');
                   const d=demo?demo.getBoundingClientRect():null,c=comments?comments.getBoundingClientRect():null;
-                  return {scrollWidth:root.scrollWidth,clientWidth:root.clientWidth,bad,demo:d&&{x:d.x,y:d.y,width:d.width,height:d.height,right:d.right,bottom:d.bottom},comments:c&&{x:c.x,y:c.y,width:c.width,height:c.height,right:c.right,bottom:c.bottom}};
+                  return {scrollWidth:root.scrollWidth,clientWidth:root.clientWidth,bad,brandLines:brand?brand.getClientRects().length:0,demo:d&&{x:d.x,y:d.y,width:d.width,height:d.height,right:d.right,bottom:d.bottom},comments:c&&{x:c.x,y:c.y,width:c.width,height:c.height,right:c.right,bottom:c.bottom}};
                 }''')
                 if data['scrollWidth']>data['clientWidth']+1: failures.append(f'{name} {width}: horizontal overflow {data["scrollWidth"]-data["clientWidth"]}px')
                 if data['bad']: failures.append(f'{name} {width}: outside viewport {data["bad"]}')
+                if name in ('signup','forgot') and data['brandLines'] != 1: failures.append(f'{name} {width}: CPCV brand wraps')
                 if name=='home' and data['demo'] and data['comments']:
                   d=data['demo']; c=data['comments']
                   ratio=d['width']/d['height']
