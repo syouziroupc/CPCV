@@ -1,8 +1,6 @@
 /* Responsive landing polish loaded after landing.css. */
 
-/* A 768px tablet has enough horizontal room for the three hero facts. Keeping
-   them in one row preserves the visual rhythm instead of leaving a loose,
-   vertical list under the CTA. */
+/* A 768px tablet has enough horizontal room for the three hero facts. */
 @media (min-width: 621px) and (max-width: 860px) {
   .refined-hero .hero-facts {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -19,41 +17,7 @@
   }
 }
 
-/* Phones need an intentional compact header. app.css has stronger display
-   declarations in a few responsive rules, so the hidden desktop-only links are
-   explicitly overridden here rather than being allowed to collapse into tiny
-   unreadable text. */
 @media (max-width: 620px) {
-  .public-site-header {
-    gap: 10px;
-    padding-inline: 12px;
-  }
-
-  .public-site-header .brand {
-    flex: 0 0 auto;
-  }
-
-  .public-site-header .site-nav {
-    min-width: 0;
-    margin-left: auto;
-    gap: 6px !important;
-    justify-content: flex-end;
-  }
-
-  .public-site-header .site-nav > a:nth-child(-n + 4) {
-    display: none !important;
-  }
-
-  .public-site-header .site-nav > a {
-    min-width: 0;
-    font-size: .74rem !important;
-    white-space: nowrap;
-  }
-
-  .public-site-header .site-nav > .nav-cta {
-    padding: 9px 11px !important;
-  }
-
   .refined-hero .hero-facts {
     gap: 0;
     padding-top: 10px;
@@ -161,17 +125,5 @@
   .refined-hero h1 {
     font-size: clamp(1.72rem, 9.6vw, 2rem);
     letter-spacing: -0.035em;
-  }
-
-  .public-site-header .site-nav {
-    gap: 4px !important;
-  }
-
-  .public-site-header .site-nav > a {
-    font-size: .68rem !important;
-  }
-
-  .public-site-header .site-nav > .nav-cta {
-    padding-inline: 8px !important;
   }
 }
