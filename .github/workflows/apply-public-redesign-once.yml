@@ -45,18 +45,22 @@ jobs:
               'public/admin/index.html',
           ]
 
-          public_nav = '''<nav class="site-nav" aria-label="メインメニュー">
-      <a href="/#how">使い方</a>
-      <a href="/#features">機能</a>
-      <a href="/#desktop">Windows版</a>
-      <a href="/privacy">情報の扱い</a>
-      <a href="/admin">先生ログイン</a>
-      <a class="nav-cta" href="/#start">今すぐはじめる</a>
-    </nav>'''
-          auth_nav = '''<nav class="site-nav" aria-label="メインメニュー">
-      <a href="/">公開サイト</a>
-      <a class="nav-cta" href="/admin">先生ログイン</a>
-    </nav>'''
+          public_nav = '\n'.join([
+              '<nav class="site-nav" aria-label="メインメニュー">',
+              '  <a href="/#how">使い方</a>',
+              '  <a href="/#features">機能</a>',
+              '  <a href="/#desktop">Windows版</a>',
+              '  <a href="/privacy">情報の扱い</a>',
+              '  <a href="/admin">先生ログイン</a>',
+              '  <a class="nav-cta" href="/#start">今すぐはじめる</a>',
+              '</nav>',
+          ])
+          auth_nav = '\n'.join([
+              '<nav class="site-nav" aria-label="メインメニュー">',
+              '  <a href="/">公開サイト</a>',
+              '  <a class="nav-cta" href="/admin">先生ログイン</a>',
+              '</nav>',
+          ])
 
           for item in info_targets + auth_targets:
               path = Path(item)
@@ -96,18 +100,27 @@ jobs:
           ]
 
           manifest = Path('SOURCE_SHA256SUMS.override.txt')
-          order=[]; values={}
+          order = []
+          values = {}
           for line in manifest.read_text(encoding='utf-8').splitlines():
-              if not line: continue
-              digest, item = line.split('  ',1)
-              if item not in order: order.append(item)
-              values[item]=digest
+              if not line:
+                  continue
+              digest, item = line.split('  ', 1)
+              if item not in order:
+                  order.append(item)
+              values[item] = digest
           for item in tracked:
-              p=Path(item)
-              if not p.exists(): continue
-              values[item]=hashlib.sha256(p.read_bytes()).hexdigest()
-              if item not in order: order.append(item)
-          manifest.write_text(''.join(f'{values[item]}  {item}\n' for item in order),encoding='utf-8',newline='\n')
+              p = Path(item)
+              if not p.exists():
+                  continue
+              values[item] = hashlib.sha256(p.read_bytes()).hexdigest()
+              if item not in order:
+                  order.append(item)
+          manifest.write_text(
+              ''.join(f'{values[item]}  {item}\n' for item in order),
+              encoding='utf-8',
+              newline='\n',
+          )
           PY
           git diff --check
           git config user.name "github-actions[bot]"
