@@ -127,3 +127,14 @@
     letter-spacing: -0.035em;
   }
 }
+
+/* 280/320px are also exercised by the repository's precision layout gate.
+   Keep the phrase intact and reduce only the hero scale instead of falling
+   back to arbitrary per-character wrapping. */
+@media (max-width: 320px) {
+  .refined-hero h1 {
+    font-size: clamp(1.48rem, 8.7vw, 1.62rem);
+    line-height: 1.08;
+    letter-spacing: -0.04em;
+  }
+}
