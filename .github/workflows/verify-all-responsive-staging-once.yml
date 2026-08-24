@@ -1,0 +1,194 @@
+name: Verify all responsive public layouts on staging once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/verify-all-responsive-staging-once.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  SOURCE_COMMIT: ded8a6c4822d6f56f62cc6a250b1e041cb70cc42
+  STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact responsive source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12.12"
+      - name: Install frozen dependencies and Chromium
+        env:
+          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
+        run: |
+          npm install --global npm@11.18.0
+          npm ci
+          npm install-scripts ls
+          python -m pip install --disable-pip-version-check playwright==1.57.0 pillow
+          python -m playwright install --with-deps chromium
+      - name: Validate source and static responsive contracts
+        run: |
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          npm run verify:source-manifest
+          npm run check:v0810
+          python scripts/audit-responsive-layout.py
+      - name: Materialize separated staging configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          source=Path('wrangler.toml').read_text(encoding='utf-8')
+          replacements={
+            'name = "class-pdf-comment-viewer-v01"':'name = "class-pdf-comment-viewer-v01-staging"',
+            'database_name = "class_comment_db"':'database_name = "class_comment_db_staging"',
+            'database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"':'database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"',
+            'database_name = "class_comment_db_v2"':'database_name = "class_comment_db_v2_staging"',
+            'database_id = "8315a076-67ad-44e6-8286-11887af52ad3"':'database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"',
+            'queue = "cpcv-ai-jobs"':'queue = "cpcv-ai-jobs-staging"',
+            'queue = "cpcv-ai-translation-jobs"':'queue = "cpcv-ai-translation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-translation-dlq"':'dead_letter_queue = "cpcv-ai-translation-dlq-staging"',
+            'queue = "cpcv-ai-moderation-jobs"':'queue = "cpcv-ai-moderation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-moderation-dlq"':'dead_letter_queue = "cpcv-ai-moderation-dlq-staging"',
+            '826071901':'826071801','826071902':'826071802','826071903':'826071803','826071904':'826071804',
+            '826071905':'826071805','826071906':'826071806',
+            'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev':'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev',
+            'TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"':'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"',
+          }
+          for old,new in replacements.items():
+            if old not in source: raise SystemExit(f'missing staging replacement: {old}')
+            source=source.replace(old,new)
+          Path('.cpcv-staging.wrangler.toml').write_text(source,encoding='utf-8')
+          PY
+          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .cpcv-staging.wrangler.toml
+      - name: Verify staging DB, deploy, and smoke
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p responsive-evidence/screenshots
+          node scripts/verify-remote-d1.mjs --config .cpcv-staging.wrangler.toml --database class_comment_db_v2_staging 2>&1 | tee responsive-evidence/01-db-health.txt
+          npx wrangler deploy --config .cpcv-staging.wrangler.toml --keep-vars 2>&1 | tee responsive-evidence/02-deploy.txt
+          node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN" 2>&1 | tee responsive-evidence/03-smoke.txt
+          curl --fail-with-body --silent --show-error -H 'Cache-Control: no-cache' "$STAGING_ORIGIN/?responsive=$SOURCE_COMMIT" > responsive-evidence/live-home.html
+          grep -F '/assets/public-responsive.css?v=0.8.10-public1' responsive-evidence/live-home.html >/dev/null
+      - name: Render every public and signed-out page at four widths
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+          from PIL import Image, ImageDraw
+
+          origin='https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'
+          pages=[
+            ('home','/'),('about','/about'),('guide','/guide'),('privacy','/privacy'),
+            ('admin','/admin'),('signup','/signup'),('forgot','/forgot-password'),
+            ('check-email','/check-email'),('verify-email','/verify-email'),
+            ('reset-password','/reset-password'),('accept-invitation','/accept-invitation'),
+            ('confirm-email-change','/confirm-email-change'),('account','/account'),('master','/master')
+          ]
+          viewports=[(390,844),(768,1024),(1024,900),(1440,1000)]
+          out=Path('responsive-evidence/screenshots'); out.mkdir(parents=True,exist_ok=True)
+          records=[]; failures=[]; warnings=[]
+
+          with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
+            for name,path in pages:
+              for width,height in viewports:
+                page=browser.new_page(viewport={'width':width,'height':height},device_scale_factor=1)
+                response=None
+                try:
+                  response=page.goto(origin+path+f'?responsive_audit={width}',wait_until='domcontentloaded',timeout=30000)
+                except PlaywrightTimeoutError:
+                  warnings.append(f'{name} {width}: DOMContentLoaded timeout; inspecting rendered DOM anyway')
+                page.wait_for_timeout(900)
+                page.screenshot(path=str(out/f'{name}-{width}.png'),full_page=True)
+                status=response.status if response else 0
+                data=page.evaluate('''() => {
+                  const W=innerWidth, root=document.documentElement;
+                  const visible=e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&parseFloat(s.opacity||'1')>0&&r.width>0&&r.height>0};
+                  const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,right:r.right,y:r.y,width:r.width,height:r.height,bottom:r.bottom}};
+                  const lineData=el=>{const a=[];if(!el)return a;const w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT);let n;while(n=w.nextNode())for(let i=0;i<n.data.length;i++){const c=n.data[i];if(/\\s/.test(c))continue;const q=document.createRange();q.setStart(n,i);q.setEnd(n,i+1);const rs=[...q.getClientRects()].filter(r=>r.width>0&&r.height>0);if(!rs.length)continue;const t=Math.round(rs[0].top*2)/2;let z=a.find(v=>Math.abs(v.top-t)<1.5);if(!z){z={top:t,count:0,text:''};a.push(z)}z.count++;z.text+=c}return a.sort((a,b)=>a.top-b.top)};
+                  const headings=[...document.querySelectorAll('h1,h2,h3')].filter(visible).map(e=>({tag:e.tagName,text:(e.textContent||'').trim().replace(/\\s+/g,' '),rect:rect(e),lines:lineData(e)}));
+                  const controls=[...document.querySelectorAll('a,button,input,select,textarea,[role="button"]')].filter(visible).map(e=>({tag:e.tagName,text:(e.textContent||e.getAttribute('aria-label')||e.getAttribute('placeholder')||'').trim().slice(0,80),rect:rect(e),font:parseFloat(getComputedStyle(e).fontSize||'0')}));
+                  const outside=controls.filter(x=>x.rect.x<-1||x.rect.right>W+1);
+                  const headers=[...document.querySelectorAll('.public-site-header,.clear-site-header')].filter(visible).map(e=>({rect:rect(e),links:[...e.querySelectorAll('nav a')].filter(visible).map(a=>({text:(a.textContent||'').trim(),rect:rect(a),font:parseFloat(getComputedStyle(a).fontSize||'0')}))}));
+                  return {title:document.title,scrollWidth:root.scrollWidth,clientWidth:root.clientWidth,headings,controls,outside,headers};
+                }''')
+                rec={'page':name,'path':path,'width':width,'status':status,**data}; records.append(rec)
+                if status and status>=400: failures.append(f'{name} {width}: HTTP {status}')
+                if data['scrollWidth']-data['clientWidth']>1: failures.append(f'{name} {width}: horizontal overflow {data["scrollWidth"]-data["clientWidth"]}px')
+                if data['outside']: failures.append(f'{name} {width}: visible control outside viewport {data["outside"]}')
+                for h in data['headings']:
+                  if len(h['lines'])>1 and any(x['count']<=1 for x in h['lines']): failures.append(f'{name} {width}: orphan heading glyph {h["text"]} -> {h["lines"]}')
+                  if len(h['lines'])>1 and any(x['count']==2 for x in h['lines']): warnings.append(f'{name} {width}: short heading line {h["text"]} -> {h["lines"]}')
+                for header in data['headers']:
+                  if width<=560:
+                    if header['rect']['height']>190: warnings.append(f'{name} {width}: public header unusually tall {header["rect"]}')
+                    for link in header['links']:
+                      if link['rect']['x']<-1 or link['rect']['right']>width+1: failures.append(f'{name} {width}: header link clipped {link}')
+                      if link['font']<11: failures.append(f'{name} {width}: header link too small {link}')
+                page.close()
+            browser.close()
+
+          Path('responsive-evidence/04-records.json').write_text(json.dumps(records,ensure_ascii=False,indent=2),encoding='utf-8')
+          Path('responsive-evidence/05-failures.json').write_text(json.dumps(failures,ensure_ascii=False,indent=2),encoding='utf-8')
+          Path('responsive-evidence/06-warnings.json').write_text(json.dumps(warnings,ensure_ascii=False,indent=2),encoding='utf-8')
+
+          # Compact contact sheets make manual review practical instead of
+          # pretending 56 screenshots were reviewed by staring at filenames.
+          for width,_ in viewports:
+            cards=[]
+            for name,_path in pages:
+              im=Image.open(out/f'{name}-{width}.png').convert('RGB')
+              target=360 if width<=390 else 520
+              scale=target/im.width
+              im=im.resize((target,int(im.height*scale)))
+              if im.height>1300: im=im.crop((0,0,target,1300))
+              card=Image.new('RGB',(target,im.height+28),'white')
+              ImageDraw.Draw(card).text((8,6),name,fill='black')
+              card.paste(im,(0,28)); cards.append(card)
+            sheet=Image.new('RGB',(max(x.width for x in cards),sum(x.height for x in cards)),'white')
+            y=0
+            for card in cards: sheet.paste(card,(0,y)); y+=card.height
+            sheet.save(Path('responsive-evidence')/f'contact-{width}.jpg',quality=88)
+          print('failures=',json.dumps(failures,ensure_ascii=False))
+          print('warnings=',json.dumps(warnings,ensure_ascii=False))
+          if failures: raise SystemExit('responsive visual failures detected')
+          PY
+      - name: Report staging verification
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          status="${{ job.status }}"
+          version="$(grep -oE 'Current Version ID: [0-9a-f-]+' responsive-evidence/02-deploy.txt 2>/dev/null | tail -1 | cut -d' ' -f4 || true)"
+          gh issue comment 70 --repo "$GITHUB_REPOSITORY" --body "CPCV all-responsive staging verification: source=${SOURCE_COMMIT} status=${status} version=${version:-unknown} run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      - name: Upload responsive evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-all-responsive-${{ env.SOURCE_COMMIT }}
+          path: responsive-evidence/
+          retention-days: 30
