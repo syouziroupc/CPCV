@@ -1,0 +1,127 @@
+name: Visual audit redesigned public pages once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/visual-audit-redesign-once.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  SOURCE_COMMIT: 31b626f86390b52e703d286e729d3fcf35aab2f5
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12.12"
+      - name: Install browser tools
+        run: |
+          python -m pip install --disable-pip-version-check playwright==1.57.0 pillow
+          python -m playwright install --with-deps chromium
+      - name: Start local public server
+        run: |
+          python -m http.server 8787 -d public > /tmp/cpcv-http.log 2>&1 &
+          echo $! > /tmp/cpcv-http.pid
+          for i in $(seq 1 20); do curl -fsS http://127.0.0.1:8787/ >/dev/null && exit 0; sleep 0.5; done
+          cat /tmp/cpcv-http.log
+          exit 1
+      - name: Render pages and validate geometry
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          from playwright.sync_api import sync_playwright
+          from PIL import Image, ImageDraw
+
+          origin='http://127.0.0.1:8787'
+          pages=[('home','/'),('about','/about/'),('guide','/guide/'),('privacy','/privacy/'),('signup','/signup/'),('forgot','/forgot-password/'),('admin','/admin/')]
+          viewports=[(390,844),(768,1024),(1024,900),(1440,1000)]
+          out=Path('visual-evidence'); out.mkdir(exist_ok=True)
+          failures=[]; records=[]
+
+          with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,args=['--no-sandbox'])
+            for name,path in pages:
+              for width,height in viewports:
+                page=browser.new_page(viewport={'width':width,'height':height}, device_scale_factor=1)
+                page.goto(origin+path,wait_until='domcontentloaded',timeout=20000)
+                page.wait_for_timeout(1200)
+                if name=='admin':
+                  page.evaluate('''() => {
+                    document.body.classList.add('auth-view');
+                    const boot=document.getElementById('adminBootSection'); if(boot) boot.classList.add('hidden');
+                    const login=document.getElementById('loginSection'); if(login) login.classList.remove('hidden');
+                    const home=document.getElementById('adminHome'); if(home) home.classList.add('hidden');
+                    const app=document.querySelector('.app-header'); if(app) app.style.display='none';
+                  }''')
+                  page.wait_for_timeout(100)
+                data=page.evaluate('''() => {
+                  const root=document.documentElement, W=innerWidth;
+                  const visible=e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&r.width>0&&r.height>0};
+                  const bad=[...document.querySelectorAll('a,button,input,select,textarea,h1,h2,h3,figure')].filter(visible).map(e=>{const r=e.getBoundingClientRect();return {tag:e.tagName,text:(e.textContent||e.getAttribute('placeholder')||'').trim().replace(/\\s+/g,' ').slice(0,90),left:r.left,right:r.right,width:r.width}}).filter(x=>x.left<-1||x.right>W+1);
+                  const demo=document.querySelector('.viewer-demo-stage');
+                  const comments=document.querySelector('.viewer-demo-comments');
+                  const d=demo?demo.getBoundingClientRect():null,c=comments?comments.getBoundingClientRect():null;
+                  return {scrollWidth:root.scrollWidth,clientWidth:root.clientWidth,bad,demo:d&&{x:d.x,y:d.y,width:d.width,height:d.height,right:d.right,bottom:d.bottom},comments:c&&{x:c.x,y:c.y,width:c.width,height:c.height,right:c.right,bottom:c.bottom}};
+                }''')
+                if data['scrollWidth']>data['clientWidth']+1: failures.append(f'{name} {width}: horizontal overflow {data["scrollWidth"]-data["clientWidth"]}px')
+                if data['bad']: failures.append(f'{name} {width}: outside viewport {data["bad"]}')
+                if name=='home' and data['demo'] and data['comments']:
+                  d=data['demo']; c=data['comments']
+                  ratio=d['width']/d['height']
+                  if abs(ratio-(16/9))>0.03: failures.append(f'home {width}: demo ratio {ratio:.3f}')
+                  if c['right']>d['right']+1 or c['bottom']>d['bottom']+1 or c['x']<d['x']-1 or c['y']<d['y']-1: failures.append(f'home {width}: comments outside demo')
+                  if c['x'] < d['x'] + d['width']*0.52: failures.append(f'home {width}: comments not in right side')
+                shot=out/f'{name}-{width}.png'
+                page.screenshot(path=str(shot),full_page=True)
+                records.append({'page':name,'width':width,**data})
+                page.close()
+            browser.close()
+
+          Path('visual-evidence/records.json').write_text(json.dumps(records,ensure_ascii=False,indent=2),encoding='utf-8')
+          Path('visual-evidence/failures.json').write_text(json.dumps(failures,ensure_ascii=False,indent=2),encoding='utf-8')
+
+          for width,_ in viewports:
+            cards=[]
+            for name,_ in pages:
+              im=Image.open(out/f'{name}-{width}.png').convert('RGB')
+              target=390 if width<=390 else 520
+              scale=target/im.width
+              im=im.resize((target,max(1,int(im.height*scale))))
+              im=im.crop((0,0,target,min(im.height,1400)))
+              card=Image.new('RGB',(target,im.height+30),'white')
+              ImageDraw.Draw(card).text((8,8),name,fill='black')
+              card.paste(im,(0,30)); cards.append(card)
+            sheet=Image.new('RGB',(max(c.width for c in cards),sum(c.height for c in cards)),'white')
+            y=0
+            for card in cards: sheet.paste(card,(0,y)); y+=card.height
+            sheet.save(out/f'contact-{width}.jpg',quality=90)
+
+          print(json.dumps({'failures':failures},ensure_ascii=False))
+          if failures: raise SystemExit(1)
+          PY
+      - name: Report visual audit
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 70 --repo "$GITHUB_REPOSITORY" --body "CPCV redesigned public visual audit: source=${SOURCE_COMMIT} status=${{ job.status }} run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-redesign-visual-${{ env.SOURCE_COMMIT }}
+          path: visual-evidence/
+          retention-days: 7
