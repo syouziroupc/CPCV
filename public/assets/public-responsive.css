@@ -1,0 +1,123 @@
+/* Shared responsive layer for every signed-out/public CPCV page.
+   Loaded after app.css so historical overflow/navigation rules cannot force
+   Japanese headings into orphan glyphs or clip the public menu. */
+
+.public-site-header,
+.clear-site-header {
+  min-width: 0;
+}
+
+.public-site-header .site-nav,
+.clear-site-header .site-nav {
+  min-width: 0;
+}
+
+/* Public information headings should follow Japanese line-breaking rules.
+   The application stylesheet intentionally uses aggressive anywhere wrapping
+   for IDs and data tables; that behavior is not appropriate for prose titles. */
+.clear-public-page .clear-public-main h1,
+.clear-public-page .clear-public-main h2,
+.public-auth-layout h1,
+.admin-page.auth-view h1 {
+  overflow-wrap: normal;
+  word-break: normal;
+  line-break: strict;
+  text-wrap: balance;
+}
+
+.clear-public-page .clear-public-main h3,
+.public-auth-layout h2,
+.public-auth-layout h3,
+.admin-page.auth-view h2,
+.admin-page.auth-view h3 {
+  overflow-wrap: normal;
+  word-break: normal;
+  line-break: strict;
+  text-wrap: pretty;
+}
+
+/* At phone widths the old single-line horizontal scroller hides the last
+   actions and makes every label unnecessarily small. Use a readable two-row
+   menu instead. The six canonical links fit as a 3 x 2 grid at 390px. */
+@media (max-width: 560px) {
+  .public-site-header,
+  .clear-site-header {
+    align-items: stretch !important;
+    flex-direction: column !important;
+    gap: 8px !important;
+    padding-inline: 12px !important;
+    padding-bottom: 10px !important;
+  }
+
+  .public-site-header .brand,
+  .clear-site-header .brand {
+    align-self: flex-start;
+  }
+
+  .public-site-header .site-nav,
+  .clear-site-header .site-nav {
+    width: 100% !important;
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px !important;
+    justify-content: stretch !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    scrollbar-width: none;
+  }
+
+  .public-site-header .site-nav > a,
+  .clear-site-header .site-nav > a {
+    width: 100%;
+    min-width: 0;
+    min-height: 38px;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    padding: 7px 4px !important;
+    border: 1px solid #deded9;
+    background: #fff;
+    color: inherit;
+    font-size: .75rem !important;
+    line-height: 1.25;
+    text-align: center;
+    white-space: normal !important;
+    overflow-wrap: normal !important;
+    word-break: keep-all;
+  }
+
+  .public-site-header .site-nav > a[aria-current="page"],
+  .clear-site-header .site-nav > a[aria-current="page"] {
+    border-color: #176b5b;
+    box-shadow: inset 0 -2px 0 #176b5b;
+  }
+
+  .public-site-header .site-nav > .nav-cta,
+  .clear-site-header .site-nav > .nav-cta {
+    border-color: #173a32;
+    background: #173a32;
+    color: #fff;
+  }
+
+  .clear-public-page .clear-public-main h1 {
+    font-size: clamp(2rem, 9.5vw, 2.55rem);
+    line-height: 1.08;
+    letter-spacing: -.035em;
+  }
+
+  .clear-public-page .clear-public-main h2 {
+    text-wrap: balance;
+  }
+}
+
+@media (max-width: 340px) {
+  .public-site-header .site-nav,
+  .clear-site-header .site-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .public-site-header .site-nav > a,
+  .clear-site-header .site-nav > a {
+    font-size: .73rem !important;
+  }
+}
