@@ -19,20 +19,39 @@
   }
 }
 
-/* On phones the full six-link desktop navigation becomes a row of microscopic
-   text. Keep only the two actions that actually matter at this width. */
+/* Phones need an intentional compact header. app.css has stronger display
+   declarations in a few responsive rules, so the hidden desktop-only links are
+   explicitly overridden here rather than being allowed to collapse into tiny
+   unreadable text. */
 @media (max-width: 620px) {
-  .public-site-header .site-nav > a:nth-child(-n + 4) {
-    display: none;
+  .public-site-header {
+    gap: 10px;
+    padding-inline: 12px;
+  }
+
+  .public-site-header .brand {
+    flex: 0 0 auto;
   }
 
   .public-site-header .site-nav {
-    gap: 8px;
+    min-width: 0;
+    margin-left: auto;
+    gap: 6px !important;
+    justify-content: flex-end;
+  }
+
+  .public-site-header .site-nav > a:nth-child(-n + 4) {
+    display: none !important;
   }
 
   .public-site-header .site-nav > a {
-    font-size: .72rem;
+    min-width: 0;
+    font-size: .74rem !important;
     white-space: nowrap;
+  }
+
+  .public-site-header .site-nav > .nav-cta {
+    padding: 9px 11px !important;
   }
 
   .refined-hero .hero-facts {
@@ -62,6 +81,78 @@
   .refined-hero .hero-facts span {
     line-height: 1.45;
   }
+
+  .start-heading h2,
+  .landing-heading h2,
+  .trust-strip h2,
+  .landing-final-cta h2 {
+    font-size: clamp(1.7rem, 7.8vw, 2rem);
+    line-height: 1.15;
+    letter-spacing: -.03em;
+  }
+
+  .desktop-copy h2 {
+    font-size: clamp(1.62rem, 7.3vw, 1.9rem);
+    line-height: 1.14;
+    letter-spacing: -.025em;
+  }
+
+  .desktop-section {
+    padding: 30px 20px;
+  }
+
+  .desktop-action,
+  .desktop-action .button,
+  .landing-final-cta > .button {
+    width: 100%;
+  }
+
+  .desktop-action .button,
+  .landing-final-cta > .button {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 440px) {
+  .start-section,
+  .landing-section,
+  .trust-strip,
+  .landing-final-cta {
+    padding-block: 48px;
+  }
+
+  .refined-hero .eyebrow,
+  .section-kicker,
+  .role-label {
+    letter-spacing: .055em;
+  }
+
+  .start-heading,
+  .landing-heading {
+    margin-bottom: 28px !important;
+  }
+
+  .landing-steps li {
+    padding-top: 17px;
+  }
+
+  .landing-steps li > span {
+    margin-bottom: 16px;
+  }
+
+  .clear-public-page .landing-feature-grid article {
+    grid-template-columns: 38px minmax(0, 1fr);
+    padding-block: 20px 22px;
+  }
+
+  .landing-feature-grid h3 {
+    font-size: 1.18rem;
+  }
+
+  .trust-strip,
+  .landing-final-cta {
+    gap: 20px;
+  }
 }
 
 /* Preserve the phrase 「わからない」を、 even on the smallest supported
@@ -73,10 +164,14 @@
   }
 
   .public-site-header .site-nav {
-    gap: 5px;
+    gap: 4px !important;
   }
 
   .public-site-header .site-nav > a {
-    font-size: .66rem;
+    font-size: .68rem !important;
+  }
+
+  .public-site-header .site-nav > .nav-cta {
+    padding-inline: 8px !important;
   }
 }
