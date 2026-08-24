@@ -1,4 +1,4 @@
-name: Repair CPCV source manifest once
+name: Finalize public layout and source manifest once
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
         with:
           ref: master
           fetch-depth: 0
-      - name: Integrate public navigation and update source manifest
+      - name: Unify signed-out navigation and refresh source manifest
         shell: bash
         run: |
           set -euo pipefail
@@ -41,8 +41,8 @@ jobs:
           ]
 
           nav = '''<nav class="site-nav" aria-label="メインメニュー">
-      <a href="/#features">できること</a>
       <a href="/#how">使い方</a>
+      <a href="/#features">機能</a>
       <a href="/#desktop">Windows版</a>
       <a href="/privacy">情報の扱い</a>
       <a href="/admin">先生ログイン</a>
@@ -61,19 +61,18 @@ jobs:
               )
               if count != 1:
                   raise SystemExit(f'public nav not found exactly once: {item}')
-              text = re.sub(
-                  r'/assets/app\.css\?v=[^"\s]+',
-                  '/assets/app.css?v=0.8.10-lp4',
-                  text,
-                  count=1,
-              )
+              text = re.sub(r'/assets/app\.css\?v=[^"\s]+', '/assets/app.css?v=0.8.10-lp4', text, count=1)
+              text = re.sub(r'/assets/public-responsive\.css\?v=[^"\s]+', '/assets/public-responsive.css?v=0.8.10-public2', text, count=1)
               path.write_text(text, encoding='utf-8', newline='\n')
 
           manifest_paths = [
               '.github/workflows/deploy-master-now.yml',
               '.github/workflows/unify-navigation-once.yml',
+              '.github/workflows/verify-all-responsive-staging-once.yml',
               'scripts/test-v0810-security-ui.mjs',
               'public/assets/app.css',
+              'public/assets/public-responsive.css',
+              'public/assets/landing.css',
               'public/index.html',
               *targets,
           ]
@@ -88,31 +87,21 @@ jobs:
                   order.append(path)
               values[path] = digest
           for item in manifest_paths:
-              values[item] = hashlib.sha256(Path(item).read_bytes()).hexdigest()
+              path = Path(item)
+              if not path.exists():
+                  continue
+              values[item] = hashlib.sha256(path.read_bytes()).hexdigest()
               if item not in order:
                   order.append(item)
-          manifest.write_text(
-              ''.join(f'{values[path]}  {path}\n' for path in order),
-              encoding='utf-8',
-              newline='\n',
-          )
+          manifest.write_text(''.join(f'{values[path]}  {path}\n' for path in order), encoding='utf-8', newline='\n')
           PY
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            public/about/index.html \
-            public/guide/index.html \
-            public/privacy/index.html \
-            public/signup/index.html \
-            public/forgot-password/index.html \
-            public/reset-password/index.html \
-            public/accept-invitation/index.html \
-            public/check-email/index.html \
-            public/confirm-email-change/index.html \
-            public/verify-email/index.html \
-            public/_admin_spa.html \
-            public/admin/index.html \
-            SOURCE_SHA256SUMS.override.txt
-          git commit -m "Integrate public navigation into landing page"
+          git add public/about/index.html public/guide/index.html public/privacy/index.html public/signup/index.html public/forgot-password/index.html public/reset-password/index.html public/accept-invitation/index.html public/check-email/index.html public/confirm-email-change/index.html public/verify-email/index.html public/_admin_spa.html public/admin/index.html SOURCE_SHA256SUMS.override.txt
+          if git diff --cached --quiet; then
+            echo "Public layout already current."
+            exit 0
+          fi
+          git commit -m "Unify public navigation and responsive entry screens"
           git push origin HEAD:master
