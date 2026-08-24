@@ -1,0 +1,109 @@
+name: Apply shared public responsive layer once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/apply-public-responsive-once.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-public-responsive-once
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: master
+          fetch-depth: 0
+      - name: Apply stylesheet to every public and signed-out entry page
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, re
+
+          pages = [
+              'public/index.html',
+              'public/about/index.html',
+              'public/guide/index.html',
+              'public/privacy/index.html',
+              'public/admin/index.html',
+              'public/_admin_spa.html',
+              'public/signup/index.html',
+              'public/forgot-password/index.html',
+              'public/check-email/index.html',
+              'public/verify-email/index.html',
+              'public/reset-password/index.html',
+              'public/accept-invitation/index.html',
+              'public/confirm-email-change/index.html',
+              'public/account/index.html',
+              'public/master/index.html',
+          ]
+          responsive = '  <link rel="stylesheet" href="/assets/public-responsive.css?v=0.8.10-public1">'
+          pattern = re.compile(r'(?m)^(\s*<link\s+rel="stylesheet"\s+href="/assets/app\.css[^"]*"\s*>)\s*$')
+
+          for item in pages:
+              path = Path(item)
+              text = path.read_text(encoding='utf-8')
+              if '/assets/public-responsive.css' in text:
+                  continue
+              match = pattern.search(text)
+              if not match:
+                  raise SystemExit(f'app.css link not found in {item}')
+              replacement = match.group(1) + '\n' + responsive
+              text = text[:match.start()] + replacement + text[match.end():]
+              path.write_text(text, encoding='utf-8', newline='\n')
+
+          # Remove one-shot visual-audit/deployment helpers after they have served
+          # their purpose. They must not become permanent source-manifest noise.
+          deleted = [
+              '.github/workflows/audit-all-public-layout-live-once.yml',
+              '.github/workflows/audit-all-public-layout-live-report-once.yml',
+              '.github/workflows/deploy-landing-polish-staging-once.yml',
+              '.github/workflows/apply-public-responsive-once.yml',
+          ]
+          for item in deleted:
+              p = Path(item)
+              if p.exists():
+                  p.unlink()
+
+          manifest = Path('SOURCE_SHA256SUMS.override.txt')
+          order=[]; values={}
+          for line in manifest.read_text(encoding='utf-8').splitlines():
+              if not line: continue
+              digest, item = line.split('  ', 1)
+              if item in deleted:
+                  continue
+              if item not in order:
+                  order.append(item)
+              values[item]=digest
+
+          hashed = pages + [
+              'public/assets/public-responsive.css',
+              'public/assets/landing-narrow.css',
+          ]
+          for item in hashed:
+              p=Path(item)
+              if not p.exists():
+                  raise SystemExit(f'missing responsive source: {item}')
+              values[item]=hashlib.sha256(p.read_bytes()).hexdigest()
+              if item not in order:
+                  order.append(item)
+
+          manifest.write_text(''.join(f'{values[item]}  {item}\n' for item in order), encoding='utf-8', newline='\n')
+          PY
+
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Apply shared public responsive layout"
+          npm run verify:source-manifest
+          git push origin HEAD:master
