@@ -1,0 +1,87 @@
+/* Simple confirmation / completion authentication screens. */
+.simple-auth-page > .public-site-header,
+.simple-auth-page > .auth-shell {
+  width: min(680px, calc(100% - 32px)) !important;
+  max-width: 680px !important;
+  margin-inline: auto !important;
+}
+
+.simple-auth-page > .public-site-header {
+  margin-top: 24px !important;
+}
+
+.simple-auth-page > .auth-shell {
+  display: block !important;
+  margin-top: 22px !important;
+  margin-bottom: 48px !important;
+  padding: clamp(22px, 4vw, 34px) !important;
+  border: 1px solid #24332f !important;
+  background: #fff !important;
+}
+
+.simple-auth-page > .auth-shell > .auth-header,
+.simple-auth-page > .auth-shell > form,
+.simple-auth-page > .auth-shell > .section,
+.simple-auth-page > .auth-shell > .info-box,
+.simple-auth-page > .auth-shell > p,
+.simple-auth-page > .auth-shell > h1,
+.simple-auth-page > .auth-shell > h2,
+.simple-auth-page > .auth-shell > a {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.simple-auth-page > .auth-shell h1 {
+  margin: 6px 0 20px !important;
+  font-size: clamp(1.8rem, 5vw, 2.45rem) !important;
+  line-height: 1.12 !important;
+  letter-spacing: -.03em !important;
+}
+
+.simple-auth-page > .auth-shell .auth-form {
+  width: 100%;
+  display: block;
+}
+
+.simple-auth-page > .auth-shell .input,
+.simple-auth-page > .auth-shell .select,
+.simple-auth-page > .auth-shell .textarea,
+.simple-auth-page > .auth-shell .auth-submit {
+  width: 100%;
+}
+
+.simple-auth-page > .auth-shell .section {
+  margin-top: 24px;
+  padding-top: 22px;
+}
+
+.simple-auth-page > .auth-shell .info-box {
+  margin: 18px 0;
+}
+
+@media (max-width: 720px) {
+  .simple-auth-page > .public-site-header,
+  .simple-auth-page > .auth-shell {
+    width: calc(100% - 24px) !important;
+  }
+
+  .simple-auth-page > .public-site-header {
+    margin-top: 12px !important;
+  }
+
+  .simple-auth-page > .auth-shell {
+    margin-top: 14px !important;
+    padding: 20px !important;
+  }
+}
+
+@media (max-width: 420px) {
+  .simple-auth-page > .public-site-header,
+  .simple-auth-page > .auth-shell {
+    width: calc(100% - 16px) !important;
+  }
+
+  .simple-auth-page > .auth-shell {
+    padding: 18px 16px !important;
+  }
+}
