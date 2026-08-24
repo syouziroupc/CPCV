@@ -1,0 +1,208 @@
+name: Exhaustive public visual audit
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/visual-audit-exhaustive-once.yml"
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  SOURCE_COMMIT: 350a6211031e97d7722f10dec077f7c7db679661
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          fetch-depth: 0
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12.12"
+      - name: Install Chromium audit tools
+        run: |
+          python -m pip install --disable-pip-version-check playwright==1.57.0 pillow
+          python -m playwright install --with-deps chromium
+      - name: Start local server
+        run: |
+          python -m http.server 8787 -d public >/tmp/cpcv-http.log 2>&1 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8787/ >/dev/null && exit 0
+            sleep 0.4
+          done
+          cat /tmp/cpcv-http.log
+          exit 1
+      - name: Render 132 page-width combinations
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json, math
+          from playwright.sync_api import sync_playwright
+          from PIL import Image, ImageDraw, ImageFont
+
+          origin = 'http://127.0.0.1:8787'
+          pages = [
+              ('home','/'), ('about','/about/'), ('guide','/guide/'), ('privacy','/privacy/'),
+              ('signup','/signup/'), ('forgot','/forgot-password/'), ('reset','/reset-password/?token=test'),
+              ('accept','/accept-invitation/?token=test'), ('checkmail','/check-email/'),
+              ('confirmmail','/confirm-email-change/?token=test'), ('verify','/verify-email/?token=test'),
+              ('admin','/admin/'),
+          ]
+          viewports = [
+              (320,720),(360,800),(390,844),(430,932),(600,900),(768,1024),
+              (820,1180),(1024,900),(1280,900),(1440,1000),(1920,1080),
+          ]
+          out = Path('visual-evidence')
+          full_dir = out/'full'; fold_dir = out/'fold'; sheets_dir = out/'sheets'
+          for d in (full_dir, fold_dir, sheets_dir): d.mkdir(parents=True, exist_ok=True)
+          failures=[]; warnings=[]; records=[]
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True,args=['--no-sandbox'])
+              for name,path in pages:
+                  for width,height in viewports:
+                      page = browser.new_page(viewport={'width':width,'height':height}, device_scale_factor=1)
+                      page.goto(origin+path,wait_until='domcontentloaded',timeout=20000)
+                      page.wait_for_timeout(700)
+                      if name == 'admin':
+                          page.evaluate("""() => {
+                            document.body.classList.add('auth-view');
+                            const boot=document.getElementById('adminBootSection'); if(boot) boot.classList.add('hidden');
+                            const login=document.getElementById('loginSection'); if(login) login.classList.remove('hidden');
+                            const home=document.getElementById('adminHome'); if(home) home.classList.add('hidden');
+                            const app=document.querySelector('.app-header'); if(app) app.style.display='none';
+                          }""")
+                          page.wait_for_timeout(100)
+                      data = page.evaluate("""() => {
+                        const root=document.documentElement, W=innerWidth, H=innerHeight;
+                        const visible=e=>{const s=getComputedStyle(e),r=e.getBoundingClientRect();return s.display!=='none'&&s.visibility!=='hidden'&&Number(s.opacity)!==0&&r.width>0&&r.height>0};
+                        const elems=[...document.querySelectorAll('a,button,input,select,textarea,h1,h2,h3,figure,img,section,header,nav')].filter(visible);
+                        const bad=elems.map(e=>{const r=e.getBoundingClientRect();return {tag:e.tagName,cls:e.className||'',text:(e.textContent||e.getAttribute('placeholder')||e.getAttribute('alt')||'').trim().replace(/\\s+/g,' ').slice(0,80),left:r.left,right:r.right,width:r.width}}).filter(x=>x.left<-1||x.right>W+1);
+                        const tiny=elems.filter(e=>['A','BUTTON','INPUT','SELECT','TEXTAREA'].includes(e.tagName)).map(e=>{const r=e.getBoundingClientRect();return {tag:e.tagName,text:(e.textContent||e.getAttribute('placeholder')||'').trim().slice(0,50),w:r.width,h:r.height}}).filter(x=>x.h<30||x.w<24);
+                        const overlaps=[];
+                        const important=[...document.querySelectorAll('.public-site-header,.landing-hero,.viewer-demo-stage,.viewer-demo-comments,.auth-shell,.clear-page-heading')].filter(visible);
+                        for(let i=0;i<important.length;i++) for(let j=i+1;j<important.length;j++){
+                          const a=important[i].getBoundingClientRect(),b=important[j].getBoundingClientRect();
+                          const ix=Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left));
+                          const iy=Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));
+                          const area=ix*iy;
+                          if(area>8 && !important[i].contains(important[j]) && !important[j].contains(important[i])) overlaps.push({a:important[i].className,b:important[j].className,area});
+                        }
+                        const brand=document.querySelector('.public-site-header .brand strong');
+                        const nav=document.querySelector('.public-site-header .site-nav');
+                        const navr=nav?nav.getBoundingClientRect():null;
+                        const demo=document.querySelector('.viewer-demo-stage');
+                        const comments=document.querySelector('.viewer-demo-comments');
+                        const d=demo?demo.getBoundingClientRect():null,c=comments?comments.getBoundingClientRect():null;
+                        return {
+                          scrollWidth:root.scrollWidth,clientWidth:root.clientWidth,scrollHeight:root.scrollHeight,
+                          bad,tiny,overlaps,brandLines:brand?brand.getClientRects().length:0,
+                          nav:navr&&{left:navr.left,right:navr.right,width:navr.width},
+                          demo:d&&{x:d.x,y:d.y,width:d.width,height:d.height,right:d.right,bottom:d.bottom},
+                          comments:c&&{x:c.x,y:c.y,width:c.width,height:c.height,right:c.right,bottom:c.bottom},
+                          bodyText:(document.body.innerText||'').replace(/\\s+/g,' ').slice(0,500)
+                        };
+                      }""")
+                      label=f'{name} {width}px'
+                      if data['scrollWidth'] > data['clientWidth'] + 1:
+                          failures.append(f'{label}: horizontal overflow {data["scrollWidth"]-data["clientWidth"]}px')
+                      if data['bad']:
+                          failures.append(f'{label}: elements outside viewport {data["bad"][:4]}')
+                      if data['overlaps']:
+                          failures.append(f'{label}: important block overlap {data["overlaps"][:4]}')
+                      if name in ('signup','forgot','reset','accept','checkmail','confirmmail','verify','admin') and data['brandLines'] not in (0,1):
+                          failures.append(f'{label}: CPCV brand wraps to {data["brandLines"]} lines')
+                      if data['tiny']:
+                          warnings.append(f'{label}: small controls {data["tiny"][:4]}')
+                      if name=='home' and data['demo'] and data['comments']:
+                          d,c=data['demo'],data['comments']
+                          ratio=d['width']/d['height']
+                          if abs(ratio-(16/9))>0.035: failures.append(f'{label}: demo aspect ratio {ratio:.3f}')
+                          if c['right']>d['right']+1 or c['bottom']>d['bottom']+1 or c['x']<d['x']-1 or c['y']<d['y']-1:
+                              failures.append(f'{label}: comments outside demo')
+                          if c['x'] < d['x'] + d['width']*0.48:
+                              failures.append(f'{label}: comments too far left')
+                      page.screenshot(path=str(fold_dir/f'{name}-{width}.png'),full_page=False)
+                      page.screenshot(path=str(full_dir/f'{name}-{width}.png'),full_page=True)
+                      records.append({'page':name,'width':width,'height':height,**data})
+                      page.close()
+              browser.close()
+
+          (out/'records.json').write_text(json.dumps(records,ensure_ascii=False,indent=2),encoding='utf-8')
+          (out/'failures.json').write_text(json.dumps(failures,ensure_ascii=False,indent=2),encoding='utf-8')
+          (out/'warnings.json').write_text(json.dumps(warnings,ensure_ascii=False,indent=2),encoding='utf-8')
+
+          def fit_card(path, card_w=300, card_h=520):
+              im=Image.open(path).convert('RGB')
+              scale=min(card_w/im.width,(card_h-28)/im.height)
+              nw=max(1,int(im.width*scale)); nh=max(1,int(im.height*scale))
+              im=im.resize((nw,nh))
+              card=Image.new('RGB',(card_w,card_h),'white')
+              card.paste(im,((card_w-nw)//2,28))
+              return card
+
+          # One sheet per page: scan all 11 widths side by side in a grid.
+          for name,_ in pages:
+              cards=[]
+              for width,_ in viewports:
+                  c=fit_card(fold_dir/f'{name}-{width}.png')
+                  ImageDraw.Draw(c).text((8,7),f'{name} {width}px',fill='black')
+                  cards.append(c)
+              cols=3; rows=math.ceil(len(cards)/cols)
+              sheet=Image.new('RGB',(cols*300,rows*520),(235,235,235))
+              for i,c in enumerate(cards): sheet.paste(c,((i%cols)*300,(i//cols)*520))
+              sheet.save(sheets_dir/f'page-{name}.jpg',quality=91)
+
+          # One sheet per width: scan every route at that width.
+          for width,_ in viewports:
+              cards=[]
+              for name,_ in pages:
+                  c=fit_card(fold_dir/f'{name}-{width}.png')
+                  ImageDraw.Draw(c).text((8,7),f'{name} {width}px',fill='black')
+                  cards.append(c)
+              cols=3; rows=math.ceil(len(cards)/cols)
+              sheet=Image.new('RGB',(cols*300,rows*520),(235,235,235))
+              for i,c in enumerate(cards): sheet.paste(c,((i%cols)*300,(i//cols)*520))
+              sheet.save(sheets_dir/f'width-{width}.jpg',quality=91)
+
+          # Full-page overview sheets for representative widths.
+          for width in (320,390,768,1024,1440,1920):
+              cards=[]
+              for name,_ in pages:
+                  im=Image.open(full_dir/f'{name}-{width}.png').convert('RGB')
+                  target_w=280; scale=target_w/im.width; nh=max(1,int(im.height*scale)); im=im.resize((target_w,nh))
+                  maxh=1100; im=im.crop((0,0,target_w,min(nh,maxh)))
+                  card=Image.new('RGB',(target_w,im.height+28),'white'); ImageDraw.Draw(card).text((7,6),name,fill='black'); card.paste(im,(0,28)); cards.append(card)
+              cols=3; row_heights=[]
+              for r in range(math.ceil(len(cards)/cols)): row_heights.append(max(c.height for c in cards[r*cols:(r+1)*cols]))
+              sheet=Image.new('RGB',(cols*280,sum(row_heights)),(235,235,235)); y=0
+              for r,rh in enumerate(row_heights):
+                  for j,c in enumerate(cards[r*cols:(r+1)*cols]): sheet.paste(c,(j*280,y))
+                  y+=rh
+              sheet.save(sheets_dir/f'full-{width}.jpg',quality=90)
+
+          print(json.dumps({'count':len(records),'failures':len(failures),'warnings':len(warnings)},ensure_ascii=False))
+          if failures:
+              print('\n'.join(failures[:40]))
+              raise SystemExit(1)
+          PY
+      - name: Upload visual evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-exhaustive-visual-${{ env.SOURCE_COMMIT }}
+          path: visual-evidence/
+          retention-days: 7
+      - name: Report result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue comment 70 --repo "$GITHUB_REPOSITORY" --body "CPCV exhaustive visual audit: source=${SOURCE_COMMIT} combinations=132 status=${{ job.status }} run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
