@@ -57,7 +57,7 @@ jobs:
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
           echo "Deployed URL: $WORKER_URL"
 
-      - name: Verify REST and forced finalization capability
+      - name: Verify REST and explicit turn commit capability
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         shell: bash
@@ -66,7 +66,7 @@ jobs:
           code="$(curl --silent --show-error -o /tmp/voice-health.json -w '%{http_code}' "$WORKER_URL/voice-health")"
           echo "voice-health HTTP $code"; cat /tmp/voice-health.json; echo
           test "$code" = 200
-          node -e 'const x=require("/tmp/voice-health.json");if(!x.ok||!x.continuousStt||!x.forcedFinalization)process.exit(1)'
+          node -e 'const x=require("/tmp/voice-health.json");if(!x.ok||!x.continuousStt||!x.forcedFinalization||!x.explicitTurnCommit||!x.localTranscriptFallback)process.exit(1)'
 
           code="$(curl --silent --show-error -o /tmp/chat.json -w '%{http_code}' -X POST "$WORKER_URL/api/chat" -H 'content-type: application/json' --data '{"messages":[{"role":"user","content":"1+1を数字だけで答えて"}]}')"
           echo "chat HTTP $code"; cat /tmp/chat.json; echo
@@ -82,7 +82,7 @@ jobs:
             cat /tmp/voice-output; echo
           fi
 
-      - name: Verify realtime voice WebSocket and STT transport startup
+      - name: Verify realtime voice explicit commit reaches active STT session
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         shell: bash
@@ -95,8 +95,10 @@ jobs:
           let welcomed = false;
           let listening = false;
           let binaryFramesSent = 0;
+          let commitAck = false;
           let finished = false;
-          const timeout = setTimeout(() => finish(new Error(`voice timeout welcomed=${welcomed} listening=${listening} frames=${binaryFramesSent}`)), 20000);
+          const commitId = 'production-smoke-commit';
+          const timeout = setTimeout(() => finish(new Error(`voice timeout welcomed=${welcomed} listening=${listening} frames=${binaryFramesSent} commitAck=${commitAck}`)), 20000);
 
           function finish(error) {
             if (finished) return;
@@ -107,7 +109,7 @@ jobs:
               console.error(error);
               process.exitCode = 1;
             } else {
-              console.log(JSON.stringify({ welcomed, listening, binaryFramesSent }));
+              console.log(JSON.stringify({ welcomed, listening, binaryFramesSent, commitAck }));
             }
           }
 
@@ -120,6 +122,13 @@ jobs:
             if (data.type === 'welcome') {
               welcomed = true;
               ws.send(JSON.stringify({ type: 'start_call', preferred_format: 'mp3' }));
+            }
+            if (data.type === 'utterance_commit_ack' && data.id === commitId) {
+              if (data.accepted !== true) return finish(new Error(`commit rejected: ${JSON.stringify(data)}`));
+              commitAck = true;
+              if (Number(data.diagnostics?.audioFrames || 0) < 1) return finish(new Error(`commit ack has no audio frames: ${JSON.stringify(data)}`));
+              ws.send(JSON.stringify({ type: 'end_call' }));
+              finish();
             }
             if (data.type === 'status' && data.status === 'listening' && !listening) {
               listening = true;
@@ -136,10 +145,7 @@ jobs:
                 sent += 1;
                 if (sent >= 20) {
                   clearInterval(timer);
-                  setTimeout(() => {
-                    ws.send(JSON.stringify({ type: 'end_call' }));
-                    finish();
-                  }, 700);
+                  ws.send(JSON.stringify({ type: 'utterance_commit', id: commitId }));
                 }
               }, 50);
             }
@@ -154,4 +160,4 @@ jobs:
       - name: Production summary
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        run: echo "TalkSys forced utterance finalization verified at $WORKER_URL"
+        run: echo "TalkSys explicit utterance commit verified at $WORKER_URL"
