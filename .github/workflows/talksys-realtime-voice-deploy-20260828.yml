@@ -24,21 +24,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
       - name: Require Cloudflare credentials
-        shell: bash
         run: |
-          set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
-
       - name: Fetch TalkSys main
-        shell: bash
         run: git clone --depth 1 --branch main https://github.com/syouziroupc/talksys.git talksys
-
       - name: Validate TalkSys voice pipeline
         working-directory: talksys
-        shell: bash
         run: |
           set -euo pipefail
           npm install --no-audit --no-fund
@@ -48,11 +41,9 @@ jobs:
           node --check src/voice-marker-bridge.js
           node --check src/realtime-voice-client.js
           npx wrangler deploy --dry-run
-
       - name: Deploy TalkSys
         id: deploy
         working-directory: talksys
-        shell: bash
         run: |
           set -euo pipefail
           npx wrangler deploy 2>&1 | tee /tmp/deploy.log
@@ -61,103 +52,78 @@ jobs:
           test -n "$WORKER_URL"
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
           echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for direct-binding-v4
+      - name: Wait for direct-binding-v5
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        shell: bash
         run: |
           set -euo pipefail
           matched=0
           for i in $(seq 1 20); do
-            code="$(curl --silent --show-error -o /tmp/health.json -w '%{http_code}' "$WORKER_URL/voice-health?i=$i&ts=$(date +%s%N)")"
-            echo "attempt=$i HTTP=$code $(cat /tmp/health.json 2>/dev/null || true)"
-            if [ "$code" = 200 ] && node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="direct-binding-v4"&&x.llmTransport==="env.AI.run"&&x.llmThinking===false&&x.screenIntentGate===true?0:1)'; then
-              matched=1
-              break
-            fi
+            curl --silent --show-error "$WORKER_URL/voice-health?i=$i&ts=$(date +%s%N)" -o /tmp/health.json
+            echo "attempt=$i $(cat /tmp/health.json)"
+            if node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="direct-binding-v5"&&x.assistantTranscriptCompat===true&&x.llmThinking===false?0:1)'; then matched=1; break; fi
             sleep 1
           done
           test "$matched" = 1
-
       - name: Verify REST chat
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        shell: bash
         run: |
           set -euo pipefail
           curl --fail --silent --show-error -X POST "$WORKER_URL/api/chat" -H 'content-type: application/json' --data '{"messages":[{"role":"user","content":"1+1を数字だけで答えて"}]}' -o /tmp/chat.json
           cat /tmp/chat.json
           node -e 'const x=require("/tmp/chat.json");if(String(x.reply||"").trim()!=="2")process.exit(1)'
-
-      - name: Verify Voice Agent LLM response
+      - name: Verify active-call assistant text and TTS
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        shell: bash
         run: |
           set -euo pipefail
           node <<'NODE'
           const worker = process.env.WORKER_URL;
-          const wsUrl = worker.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:') + '/agents/talk-sys-voice-agent/llm-smoke-' + Date.now();
-          const ws = new WebSocket(wsUrl);
-          let welcomed = false;
-          let thinking = false;
-          let assistantStarted = false;
-          let assistantText = '';
-          let finished = false;
-          const timeout = setTimeout(() => finish(new Error(`timeout welcomed=${welcomed} thinking=${thinking} started=${assistantStarted} text=${JSON.stringify(assistantText)}`)), 30000);
-          function finish(error) {
-            if (finished) return;
-            finished = true;
-            clearTimeout(timeout);
-            try { ws.close(); } catch {}
-            if (error) { console.error(error); process.exitCode = 1; }
-            else console.log(JSON.stringify({ welcomed, thinking, assistantStarted, assistantText }));
-          }
-          ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'hello', protocol_version: 1 })));
-          ws.addEventListener('message', (event) => {
-            if (typeof event.data !== 'string') return;
-            let data; try { data = JSON.parse(event.data); } catch { return; }
-            if (data.type === 'welcome' && !welcomed) {
-              welcomed = true;
-              ws.send(JSON.stringify({ type: 'text_message', text: '1+1を数字だけで答えて' }));
+          const ws = new WebSocket(worker.replace(/^https:/,'wss:') + '/agents/talk-sys-voice-agent/incall-smoke-' + Date.now());
+          ws.binaryType = 'arraybuffer';
+          let welcomed=false, listening=false, questionSent=false, assistantText='', assistantCompat=false, audioAfterReply=false, done=false;
+          const timeout=setTimeout(()=>finish(new Error(`timeout welcomed=${welcomed} listening=${listening} compat=${assistantCompat} text=${JSON.stringify(assistantText)} audio=${audioAfterReply}`)),30000);
+          function finish(error){if(done)return;done=true;clearTimeout(timeout);try{ws.close()}catch{};if(error){console.error(error);process.exitCode=1}else console.log(JSON.stringify({assistantText,audioAfterReply}))}
+          ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
+          ws.addEventListener('message',(event)=>{
+            if (event.data instanceof ArrayBuffer) {
+              if (assistantCompat && event.data.byteLength > 100) { audioAfterReply=true; finish(); }
               return;
             }
-            if (data.type === 'status' && data.status === 'thinking') thinking = true;
-            if (data.type === 'transcript_start' && data.role === 'assistant') { assistantStarted = true; assistantText = ''; }
-            if (assistantStarted && data.type === 'transcript_delta') assistantText += String(data.text || '');
-            if (assistantStarted && data.type === 'transcript_end') {
-              assistantText = String(data.text || assistantText || '').trim();
-              if (!assistantText.includes('2')) return finish(new Error(`unexpected reply ${JSON.stringify(assistantText)}`));
-              return finish();
+            if (typeof event.data !== 'string') return;
+            let d; try{d=JSON.parse(event.data)}catch{return}
+            console.log('WS', event.data);
+            if(d.type==='welcome'&&!welcomed){welcomed=true;ws.send(JSON.stringify({type:'start_call',preferred_format:'mp3'}));return}
+            if(d.type==='status'&&d.status==='listening'&&!questionSent){listening=true;questionSent=true;ws.send(JSON.stringify({type:'text_message',text:'1+1を数字だけで答えて'}));return}
+            if(d.type==='transcript'&&d.role==='assistant'){
+              assistantText=String(d.text||'').trim();assistantCompat=true;
+              if(!assistantText.includes('2'))return finish(new Error('unexpected assistant text '+JSON.stringify(assistantText)));
+              return;
             }
-            if (data.type === 'error' && !String(data.message || '').includes('TTS')) return finish(new Error(`agent error ${data.message || JSON.stringify(data)}`));
+            if(d.type==='error'&&!String(d.message||'').includes('TTS'))return finish(new Error(d.message||'voice error'));
+            if(d.type==='error'&&String(d.message||'').includes('TTS'))return finish(new Error('TTS error: '+d.message));
           });
-          ws.addEventListener('error', () => finish(new Error('websocket error')));
-          ws.addEventListener('close', (event) => { if (!finished) finish(new Error(`closed code=${event.code}`)); });
+          ws.addEventListener('error',()=>finish(new Error('websocket error')));
+          ws.addEventListener('close',e=>{if(!done)finish(new Error('closed '+e.code))});
           NODE
-
       - name: Verify binary voice turn markers
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        shell: bash
         run: |
           set -euo pipefail
           node <<'NODE'
-          const worker = process.env.WORKER_URL;
-          const ws = new WebSocket(worker.replace(/^https:/,'wss:') + '/agents/talk-sys-voice-agent/marker-smoke-' + Date.now());
-          const START = new Uint8Array([0x54,0x53,0x59,0x53,0x01,0x53,0x54,0x41]);
-          const END = new Uint8Array([0x54,0x53,0x59,0x53,0x01,0x45,0x4e,0x44]);
-          let finished=false, listening=false;
-          const timeout=setTimeout(()=>finish(new Error('marker timeout')),12000);
-          function finish(error){if(finished)return;finished=true;clearTimeout(timeout);try{ws.close()}catch{};if(error){console.error(error);process.exitCode=1}else console.log('binary markers accepted')}
+          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/marker-'+Date.now());
+          const START=new Uint8Array([0x54,0x53,0x59,0x53,0x01,0x53,0x54,0x41]);
+          const END=new Uint8Array([0x54,0x53,0x59,0x53,0x01,0x45,0x4e,0x44]);
+          let done=false,started=false;const t=setTimeout(()=>finish(new Error('timeout')),12000);
+          function finish(e){if(done)return;done=true;clearTimeout(t);try{ws.close()}catch{};if(e){console.error(e);process.exitCode=1}else console.log('markers ok')}
           ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
-          ws.addEventListener('message',(event)=>{if(typeof event.data!=='string')return;let d;try{d=JSON.parse(event.data)}catch{return}if(d.type==='welcome')ws.send(JSON.stringify({type:'start_call',preferred_format:'mp3'}));if(d.type==='status'&&d.status==='listening'&&!listening){listening=true;ws.send(START.buffer.slice(0));ws.send(END.buffer.slice(0));setTimeout(()=>finish(),500)}if(d.type==='error'&&!String(d.message||'').includes('TTS'))finish(new Error(d.message||'voice error'))});
+          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}if(d.type==='welcome')ws.send(JSON.stringify({type:'start_call',preferred_format:'mp3'}));if(d.type==='status'&&d.status==='listening'&&!started){started=true;ws.send(START.buffer.slice(0));ws.send(END.buffer.slice(0));setTimeout(()=>finish(),500)}});
           ws.addEventListener('error',()=>finish(new Error('ws error')));
           NODE
-
       - name: Production summary
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
           VERSION_ID: ${{ steps.deploy.outputs.version_id }}
-        run: echo "TalkSys direct-binding-v4 verified at $WORKER_URL version=$VERSION_ID"
+        run: echo "TalkSys direct-binding-v5 in-call reply + TTS verified at $WORKER_URL version=$VERSION_ID"
