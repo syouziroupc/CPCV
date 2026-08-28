@@ -30,7 +30,7 @@ jobs:
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
       - name: Fetch TalkSys main
         run: git clone --depth 1 --branch main https://github.com/syouziroupc/talksys.git talksys
-      - name: Validate GPT-OSS grounded voice
+      - name: Validate unified live voice
         working-directory: talksys
         run: |
           set -euo pipefail
@@ -41,7 +41,29 @@ jobs:
           node --check src/finalizable-nova3.js
           node --check src/realtime-voice-client.js
           node --check src/voice-fallback-client.js
+          node --check src/streaming-workers-ai.js
           npx wrangler deploy --dry-run
+      - name: Preflight GLM 5.3 Flash
+        run: |
+          set -euo pipefail
+          START=$(date +%s%3N)
+          curl --fail-with-body --silent --show-error \
+            -X POST "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/zai-org/glm-5.3-flash" \
+            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            -H 'content-type: application/json' \
+            --data '{"messages":[{"role":"system","content":"日本語で短く答える。"},{"role":"user","content":"1+1は？"}],"max_completion_tokens":64,"reasoning_effort":"low","chat_template_kwargs":{"enable_thinking":false,"clear_thinking":true}}' \
+            -o /tmp/glm.json
+          END=$(date +%s%3N)
+          cat /tmp/glm.json
+          echo "glm_preflight_ms=$((END-START))"
+          node - <<'NODE'
+          const x=require('/tmp/glm.json');
+          if(x.success===false) process.exit(1);
+          const r=x.result||x;
+          const text=String(r.response||r.choices?.[0]?.message?.content||r.output_text||'').trim();
+          if(!text) process.exit(1);
+          console.log('glm_text='+text.slice(0,120));
+          NODE
       - name: Deploy TalkSys
         id: deploy
         working-directory: talksys
@@ -53,7 +75,7 @@ jobs:
           test -n "$WORKER_URL"
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
           echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
-      - name: Wait for grounded-gptoss-v10
+      - name: Wait for live-stream-v11
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
@@ -62,10 +84,78 @@ jobs:
           for i in $(seq 1 25); do
             curl --silent --show-error "$WORKER_URL/voice-health?i=$i&ts=$(date +%s%N)" -o /tmp/health.json
             echo "attempt=$i $(cat /tmp/health.json)"
-            if node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="grounded-gptoss-v10"&&x.casualLlmModel==="@cf/openai/gpt-oss-20b"&&x.groundedLlmModel==="@cf/openai/gpt-oss-120b"&&x.webSearchPolicy==="knowledge-questions-default-search"&&x.selfSpeechGuard===true?0:1)'; then matched=1; break; fi
+            if node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="live-stream-v11"&&x.llmStreaming===true&&x.incrementalSpeechChunks===true&&x.webSearchPolicy==="knowledge-questions-default-search"&&x.bargeIn===true?0:1)'; then matched=1; break; fi
             sleep 1
           done
           test "$matched" = 1
+      - name: Verify served 40ms streaming client and shared text bridge
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          curl --fail --silent "$WORKER_URL/realtime-voice.js?ts=$(date +%s%N)" -o /tmp/realtime.js
+          curl --fail --silent "$WORKER_URL/voice-fallback.js?ts=$(date +%s%N)" -o /tmp/fallback.js
+          grep -q "CHUNK_SAMPLES = 640" /tmp/realtime.js
+          grep -q "SILENCE_MS = 520" /tmp/realtime.js
+          grep -q "processBargeIn" /tmp/realtime.js
+          grep -q "assistant-speech-chunk" /tmp/fallback.js
+          grep -q "talk-sys-voice-agent/default" /tmp/fallback.js
+          grep -q "text_message" /tmp/fallback.js
+      - name: Verify first speech chunk arrives before final reply
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const name='v11-stream-'+Date.now();
+          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/'+name);
+          let start=0,firstChunk=0,finalAt=0,reply='',chunk='',done=false;
+          const timer=setTimeout(()=>finish(new Error('timeout')),16000);
+          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};const m={firstChunkMs:firstChunk?firstChunk-start:0,finalMs:finalAt?finalAt-start:0,chunk,reply,replyLength:reply.length};console.log(JSON.stringify(m));if(error){console.error(error);process.exitCode=1;return}if(!firstChunk||!finalAt)process.exitCode=1;if(firstChunk>=finalAt)process.exitCode=1;if(m.firstChunkMs>4000)process.exitCode=1;if(reply.length<24)process.exitCode=1}
+          ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
+          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
+            if(d.type==='welcome'&&!start){start=Date.now();ws.send(JSON.stringify({type:'text_message',text:'最近ちょっと忙しいんだけど、気分転換の案をいくつか話して'}));return}
+            if(d.type==='assistant_speech_chunk'&&!firstChunk){firstChunk=Date.now();chunk=String(d.text||'');return}
+            if(d.type==='transcript'&&d.role==='assistant'){finalAt=Date.now();reply=String(d.text||'').trim();return finish()}
+            if(d.type==='error')finish(new Error(d.message||'agent error'));
+          });
+          ws.addEventListener('error',()=>finish(new Error('ws error')));
+          NODE
+      - name: Verify search-grounded live reply
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const name='v11-search-'+Date.now();
+          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/'+name);
+          let start=0,searched=false,count=0,firstChunk=0,reply='',done=false;
+          const timer=setTimeout(()=>finish(new Error('timeout')),18000);
+          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};console.log(JSON.stringify({searched,count,firstChunkMs:firstChunk?firstChunk-start:0,reply}));if(error){console.error(error);process.exitCode=1;return}if(!searched||count<1||!firstChunk||!reply)process.exitCode=1}
+          ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
+          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
+            if(d.type==='welcome'&&!start){start=Date.now();ws.send(JSON.stringify({type:'text_message',text:'現在の日本の総理大臣は誰？'}));return}
+            if(d.type==='search_status'&&d.phase==='done'){searched=true;count=Number(d.resultCount||0);return}
+            if(d.type==='assistant_speech_chunk'&&!firstChunk){firstChunk=Date.now();return}
+            if(d.type==='transcript'&&d.role==='assistant'){reply=String(d.text||'').trim();return finish()}
+            if(d.type==='error')finish(new Error(d.message||'agent error'));
+          });
+          ws.addEventListener('error',()=>finish(new Error('ws error')));
+          NODE
+      - name: Verify conversation history survives reconnect
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const instance='v11-history-'+Date.now();
+          const url=process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/'+instance;
+          function ask(text){return new Promise((resolve,reject)=>{const ws=new WebSocket(url);const timer=setTimeout(()=>{try{ws.close()}catch{};reject(new Error('timeout'))},12000);ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return};if(d.type==='welcome'){ws.send(JSON.stringify({type:'text_message',text}));return}if(d.type==='transcript'&&d.role==='assistant'){clearTimeout(timer);const reply=String(d.text||'');try{ws.close()}catch{};resolve(reply)}if(d.type==='error'){clearTimeout(timer);reject(new Error(d.message||'agent error'))}});ws.addEventListener('error',()=>{clearTimeout(timer);reject(new Error('ws error'))})})}
+          const first=await ask('私の合言葉は青い狸です。覚えておいて。');
+          const second=await ask('さっき言った合言葉をそのまま答えて。');
+          console.log(JSON.stringify({first,second}));
+          if(!/青い狸/.test(second)) process.exit(1);
+          NODE
       - name: Verify broad search endpoint
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
@@ -79,65 +169,8 @@ jobs:
           echo "search_ms=$((END-START))"
           node -e 'const x=require("/tmp/search.json");const r=x.results||[];if(!x.ok||r.length<1)process.exit(1);const text=r.map(v=>(v.title||"")+" "+(v.snippet||"")).join(" ");if(!/(総理|首相|内閣)/.test(text))process.exit(1)'
           test $((END-START)) -lt 4500
-      - name: Verify GPT-OSS 20B casual reply
-        env:
-          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/v10-casual-'+Date.now());
-          let startCallAt=0,questionAt=0,sent=false,done=false,reply='',searched=false;
-          const timer=setTimeout(()=>finish(new Error('timeout')),16000);
-          function finish(error){if(done)return;done=true;clearTimeout(timer);const now=Date.now();try{ws.close()}catch{};const metrics={reply,replyLength:reply.length,searched,connectToListeningMs:questionAt-startCallAt,replyMs:questionAt?now-questionAt:0};console.log(JSON.stringify(metrics));if(error){console.error(error);process.exitCode=1;return}if(searched)process.exitCode=1;if(metrics.connectToListeningMs>1200)process.exitCode=1;if(metrics.replyMs>9000)process.exitCode=1;if(metrics.replyLength<28)process.exitCode=1}
-          ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
-          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
-            if(d.type==='welcome'){startCallAt=Date.now();ws.send(JSON.stringify({type:'start_call',preferred_format:'mp3'}));return}
-            if(d.type==='status'&&d.status==='listening'&&!sent){questionAt=Date.now();sent=true;ws.send(JSON.stringify({type:'text_message',text:'最近仕事ばかりで疲れてる。どうしたらいいと思う？'}));return}
-            if(d.type==='search_status')searched=true;
-            if(d.type==='transcript'&&d.role==='assistant'&&sent){reply=String(d.text||'').trim();if(!reply)return finish(new Error('empty reply'));return finish()}
-            if(d.type==='error')finish(new Error(d.message||'agent error'));
-          });
-          ws.addEventListener('error',()=>finish(new Error('ws error')));
-          NODE
-      - name: Verify knowledge question is searched and answered by 120B
-        env:
-          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/v10-grounded-'+Date.now());
-          let sent=false,searched=false,count=0,reply='',done=false,start=0;
-          const timer=setTimeout(()=>finish(new Error('timeout')),22000);
-          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};console.log(JSON.stringify({searched,count,reply,replyMs:start?Date.now()-start:0}));if(error){console.error(error);process.exitCode=1}}
-          ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
-          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
-            if(d.type==='welcome'&&!sent){sent=true;start=Date.now();ws.send(JSON.stringify({type:'text_message',text:'現在の日本の総理大臣は誰？'}));return}
-            if(d.type==='search_status'&&d.phase==='done'){searched=true;count=Number(d.resultCount||0);return}
-            if(d.type==='transcript'&&d.role==='assistant'){reply=String(d.text||'').trim();if(!searched||count<1)return finish(new Error('reply without search'));if(!reply)return finish(new Error('empty reply'));return finish()}
-            if(d.type==='error')finish(new Error(d.message||'agent error'));
-          });
-          ws.addEventListener('error',()=>finish(new Error('ws error')));
-          NODE
-      - name: Verify ordinary knowledge phrase triggers search
-        env:
-          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/v10-knowledge-'+Date.now());
-          let sent=false,searched=false,done=false;const timer=setTimeout(()=>finish(new Error('timeout')),12000);
-          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};console.log(JSON.stringify({searched}));if(error){console.error(error);process.exitCode=1}}
-          ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
-          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
-            if(d.type==='welcome'&&!sent){sent=true;ws.send(JSON.stringify({type:'text_message',text:'HIFUってどういうもの？'}));return}
-            if(d.type==='search_status'&&d.phase==='searching'){searched=true;return finish()}
-            if(d.type==='transcript'&&d.role==='assistant'&&!searched)return finish(new Error('knowledge reply bypassed search'));
-            if(d.type==='error')finish(new Error(d.message||'agent error'));
-          });
-          ws.addEventListener('error',()=>finish(new Error('ws error')));
-          NODE
       - name: Production summary
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
           VERSION_ID: ${{ steps.deploy.outputs.version_id }}
-        run: echo "TalkSys grounded-gptoss-v10 verified at $WORKER_URL version=$VERSION_ID"
+        run: echo "TalkSys live-stream-v11 verified at $WORKER_URL version=$VERSION_ID"
