@@ -43,11 +43,13 @@ jobs:
           npm install --no-audit --no-fund
           npm test
           node --check src/worker-v13.js
-          node --check src/gemini-live-client.js
+          node --check src/gemini-live-primary.js
           node --check src/worker.js
           node --check src/realtime-voice-client.js
           node --check src/voice-fallback-client.js
           grep -F '"main": "src/worker-v13.js"' wrangler.jsonc
+          grep -F "realtimeInput: { text }" src/gemini-live-primary.js
+          grep -F "audioStreamEnd: true" src/gemini-live-primary.js
           npx wrangler deploy --dry-run
 
       - name: Deploy v13 canary
@@ -70,7 +72,7 @@ jobs:
           for i in $(seq 1 25); do
             curl --fail --silent "$WORKER_URL/voice-health?i=$i&ts=$(date +%s%N)" -o /tmp/health.json || true
             cat /tmp/health.json || true
-            if node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="gemini-live-v13"&&x.primary==="gemini-live"&&x.geminiLiveConfigured===true&&x.googleSearchGrounding===true&&x.sessionResumption===true&&x.typedChatSharesLiveSession===true?0:1)' 2>/dev/null; then matched=1; break; fi
+            if node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="gemini-live-v13"&&x.primary==="gemini-live"&&x.geminiLiveConfigured===true&&x.googleSearchGrounding===true&&x.sessionResumption===true&&x.hybridVad===true&&x.typedChatTransport==="realtimeInput.text"?0:1)' 2>/dev/null; then matched=1; break; fi
             sleep 1
           done
           test "$matched" = 1
@@ -94,7 +96,7 @@ jobs:
           ws.addEventListener('open',()=>{
             ws.send(JSON.stringify({setup:{
               model:'models/gemini-3.1-flash-live-preview',
-              generationConfig:{responseModalities:['AUDIO'],speechConfig:{languageCode:'ja-JP'},temperature:0.2},
+              generationConfig:{responseModalities:['AUDIO'],speechConfig:{languageCode:'ja-JP'},thinkingConfig:{thinkingLevel:'MINIMAL'},temperature:0.2},
               systemInstruction:{parts:[{text:'自然な日本語で短く正確に答えてください。'}]},
               tools:[{googleSearch:{}}],
               sessionResumption:{},
@@ -107,20 +109,20 @@ jobs:
             let d;try{d=JSON.parse(ev.data)}catch{return}
             if(d.setupComplete&&!setup){
               setup=true;
-              ws.send(JSON.stringify({clientContent:{turns:[{role:'user',parts:[{text:'日本語で、1足す1はいくつですか。短く答えて。'}]}],turnComplete:true}}));
+              ws.send(JSON.stringify({realtimeInput:{text:'日本語で、1足す1はいくつですか。短く答えて。'}}));
               return;
             }
             const c=d.serverContent;
             if(!c)return;
             if(c.outputTranscription?.text) transcript += c.outputTranscription.text;
             for(const p of c.modelTurn?.parts||[]) if(p.inlineData?.data && /audio\/pcm/i.test(p.inlineData?.mimeType||'audio/pcm')) audio=true;
-            if(c.turnComplete){complete=true;finish();}
+            if(c.turnComplete){complete=true;setTimeout(()=>finish(),350);}
           });
           ws.addEventListener('error',()=>finish(new Error('Gemini Live websocket error')));
           ws.addEventListener('close',ev=>{if(!done)finish(new Error('Gemini Live closed early '+ev.code+' '+ev.reason))});
           NODE
 
-      - name: Verify Google Search on real Gemini Live
+      - name: Verify Google Search and spoken wait on real Gemini Live
         env:
           WORKER_URL: ${{ steps.canary.outputs.url }}
         run: |
@@ -132,20 +134,20 @@ jobs:
           const ws=new WebSocket(token.endpoint+'?access_token='+encodeURIComponent(token.token));
           let setup=false,transcript='',grounded=false,complete=false,done=false;
           const timer=setTimeout(()=>finish(new Error('Google Search Live timeout')),30000);
-          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close(1000,'done')}catch{};console.log(JSON.stringify({setup,grounded,complete,transcript}));if(error){console.error(error);process.exitCode=1;return}if(!setup||!complete||!transcript.trim())process.exitCode=1}
+          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close(1000,'done')}catch{};const wait=/(ちょっと)?(調べ|確認).*ます/.test(transcript);console.log(JSON.stringify({setup,grounded,complete,wait,transcript}));if(error){console.error(error);process.exitCode=1;return}if(!setup||!complete||!grounded||!wait||!transcript.trim())process.exitCode=1}
           ws.addEventListener('open',()=>ws.send(JSON.stringify({setup:{
             model:'models/gemini-3.1-flash-live-preview',
-            generationConfig:{responseModalities:['AUDIO'],speechConfig:{languageCode:'ja-JP'},temperature:0.1},
-            systemInstruction:{parts:[{text:'現在情報や外部事実は必ずGoogle Searchで確認してから日本語で回答してください。検索が必要なら最初に「ちょっと調べますね」と言ってください。'}]},
+            generationConfig:{responseModalities:['AUDIO'],speechConfig:{languageCode:'ja-JP'},thinkingConfig:{thinkingLevel:'MINIMAL'},temperature:0.1},
+            systemInstruction:{parts:[{text:'現在情報や外部事実は必ずGoogle Searchで確認してから日本語で回答してください。検索する時は回答の最初に必ず「ちょっと調べますね。」と言ってください。'}]},
             tools:[{googleSearch:{}}],sessionResumption:{},contextWindowCompression:{slidingWindow:{}},outputAudioTranscription:{}
           }})));
           ws.addEventListener('message',ev=>{
             let d;try{d=JSON.parse(ev.data)}catch{return}
-            if(d.setupComplete&&!setup){setup=true;ws.send(JSON.stringify({clientContent:{turns:[{role:'user',parts:[{text:'現在の日本の内閣総理大臣は誰ですか。Google検索で確認して答えてください。'}]}],turnComplete:true}}));return}
+            if(d.setupComplete&&!setup){setup=true;ws.send(JSON.stringify({realtimeInput:{text:'現在の日本の内閣総理大臣は誰ですか。Google検索で確認して答えてください。'}}));return}
             const c=d.serverContent;if(!c)return;
             if(c.outputTranscription?.text)transcript+=c.outputTranscription.text;
             if(c.groundingMetadata?.groundingChunks?.length)grounded=true;
-            if(c.turnComplete){complete=true;finish();}
+            if(c.turnComplete){complete=true;setTimeout(()=>finish(),350);}
           });
           ws.addEventListener('error',()=>finish(new Error('search websocket error')));
           ws.addEventListener('close',ev=>{if(!done)finish(new Error('search websocket closed '+ev.code+' '+ev.reason))});
@@ -178,7 +180,7 @@ jobs:
           for i in $(seq 1 30); do
             curl --silent --show-error "$WORKER_URL/voice-health?i=$i&ts=$(date +%s%N)" -o /tmp/prod-health.json || true
             echo "attempt=$i $(cat /tmp/prod-health.json 2>/dev/null || true)"
-            if node -e 'const x=require("/tmp/prod-health.json");process.exit(x.ok&&x.voiceRevision==="gemini-live-v13"&&x.primary==="gemini-live"&&x.geminiLiveConfigured===true&&x.googleSearchGrounding===true&&x.sessionResumption===true?0:1)' 2>/dev/null; then matched=1; break; fi
+            if node -e 'const x=require("/tmp/prod-health.json");process.exit(x.ok&&x.voiceRevision==="gemini-live-v13"&&x.primary==="gemini-live"&&x.geminiLiveConfigured===true&&x.googleSearchGrounding===true&&x.sessionResumption===true&&x.hybridVad===true&&x.typedChatTransport==="realtimeInput.text"?0:1)' 2>/dev/null; then matched=1; break; fi
             sleep 1
           done
           test "$matched" = 1
@@ -186,12 +188,17 @@ jobs:
           grep -q 'gemini-3.1-flash-live-preview' /tmp/live.js
           grep -q 'googleSearch' /tmp/live.js
           grep -q "languageCode: 'ja-JP'" /tmp/live.js
+          grep -q "realtimeInput: { text }" /tmp/live.js
+          grep -q "audioStreamEnd: true" /tmp/live.js
           ! grep -q 'SpeechSynthesisUtterance' /tmp/live.js
 
       - name: Cleanup canary
         if: always()
-        working-directory: talksys
-        run: npx wrangler delete --name talksys-v13-canary --force || true
+        run: |
+          if [ -d talksys ]; then
+            cd talksys
+            npx wrangler delete --name talksys-v13-canary --force || true
+          fi
 
       - name: Production summary
         env:
