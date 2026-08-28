@@ -1,0 +1,151 @@
+name: TalkSys realtime voice deploy 20260828
+
+on:
+  push:
+    branches: [talksys-realtime-voice-20260828]
+    paths: ['.github/workflows/talksys-realtime-voice-deploy-20260828.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Require Cloudflare credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+
+      - name: Fetch TalkSys main
+        shell: bash
+        run: git clone --depth 1 --branch main https://github.com/syouziroupc/talksys.git talksys
+
+      - name: Validate TalkSys realtime voice
+        working-directory: talksys
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm test
+          node --check src/worker.js
+          node --check src/realtime-voice-client.js
+          node --check desktop/realtime-voice.js
+          npx wrangler deploy --dry-run
+
+      - name: Deploy TalkSys with voice Durable Object
+        id: deploy
+        working-directory: talksys
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler deploy 2>&1 | tee /tmp/talksys-voice-deploy.log
+          WORKER_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/talksys-voice-deploy.log | tail -1 | sed -E 's/[).,;]+$//' || true)"
+          test -n "$WORKER_URL"
+          echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
+          echo "Deployed URL: $WORKER_URL"
+
+      - name: Verify REST and Japanese TTS
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 18); do
+            if curl --fail --silent --show-error "$WORKER_URL/voice-health" -o /tmp/voice-health.json; then break; fi
+            sleep 4
+          done
+          cat /tmp/voice-health.json
+          node -e 'const x=require("/tmp/voice-health.json");if(!x.ok||!x.realtime||!x.continuousStt||!x.bargeIn||!x.aiScreenDecision||!x.japaneseTts)process.exit(1)'
+          curl --fail --silent --show-error "$WORKER_URL/health" -o /tmp/health.json
+          curl --fail --silent --show-error -X POST "$WORKER_URL/api/chat" -H 'content-type: application/json' --data '{"messages":[{"role":"user","content":"1+1を数字だけで答えて"}]}' -o /tmp/chat.json
+          node -e 'const x=require("/tmp/chat.json");if(typeof x.reply!=="string"||!x.reply.trim())process.exit(1)'
+          curl --fail --silent --show-error "$WORKER_URL/api/voice-smoke" -o /tmp/voice.mp3
+          test "$(wc -c < /tmp/voice.mp3)" -gt 1000
+          file /tmp/voice.mp3
+          echo "Japanese TTS bytes: $(wc -c < /tmp/voice.mp3)"
+
+      - name: Verify realtime voice WebSocket, STT startup, and greeting audio
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const worker = process.env.WORKER_URL;
+          const wsUrl = worker.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:') + '/agents/talk-sys-voice-agent/default';
+          const ws = new WebSocket(wsUrl);
+          let welcomed = false;
+          let listening = false;
+          let audioBytes = 0;
+          let finished = false;
+          const timeout = setTimeout(() => finish(new Error(`voice websocket timeout welcomed=${welcomed} listening=${listening} audioBytes=${audioBytes}`)), 20000);
+
+          function finish(error) {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timeout);
+            try { ws.close(); } catch {}
+            if (error) {
+              console.error(error);
+              process.exitCode = 1;
+            } else {
+              console.log(JSON.stringify({ welcomed, listening, audioBytes }));
+            }
+          }
+
+          ws.binaryType = 'arraybuffer';
+          ws.addEventListener('open', () => {
+            ws.send(JSON.stringify({ type: 'hello', protocol_version: 1 }));
+          });
+          ws.addEventListener('message', async (event) => {
+            if (event.data instanceof ArrayBuffer) {
+              audioBytes += event.data.byteLength;
+              if (welcomed && listening && audioBytes > 1000) {
+                ws.send(JSON.stringify({ type: 'end_call' }));
+                finish();
+              }
+              return;
+            }
+            if (event.data instanceof Blob) {
+              audioBytes += event.data.size;
+              if (welcomed && listening && audioBytes > 1000) {
+                ws.send(JSON.stringify({ type: 'end_call' }));
+                finish();
+              }
+              return;
+            }
+            let data;
+            try { data = JSON.parse(String(event.data)); } catch { return; }
+            if (data.type === 'welcome') {
+              welcomed = true;
+              ws.send(JSON.stringify({ type: 'start_call', preferred_format: 'mp3' }));
+            }
+            if (data.type === 'status' && data.status === 'listening') listening = true;
+            if (data.type === 'error') finish(new Error(`voice error: ${data.message || JSON.stringify(data)}`));
+            if (welcomed && listening && audioBytes > 1000) {
+              ws.send(JSON.stringify({ type: 'end_call' }));
+              finish();
+            }
+          });
+          ws.addEventListener('error', () => finish(new Error('voice websocket connection error')));
+          ws.addEventListener('close', (event) => {
+            if (!finished) finish(new Error(`voice websocket closed early code=${event.code} reason=${event.reason}`));
+          });
+          NODE
+
+      - name: Production summary
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: echo "TalkSys realtime voice production verified at $WORKER_URL"
