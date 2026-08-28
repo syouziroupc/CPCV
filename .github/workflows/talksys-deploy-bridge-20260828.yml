@@ -1,0 +1,101 @@
+name: TalkSys deploy bridge 20260828
+
+on:
+  push:
+    branches: [talksys-deploy-bridge-20260828]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Require Cloudflare credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}" || { echo 'CLOUDFLARE_API_TOKEN missing'; exit 2; }
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}" || { echo 'CLOUDFLARE_ACCOUNT_ID missing'; exit 2; }
+
+      - name: Fetch TalkSys main
+        shell: bash
+        run: git clone --depth 1 --branch main https://github.com/syouziroupc/talksys.git talksys
+
+      - name: Validate TalkSys
+        working-directory: talksys
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-audit --no-fund
+          npm test
+          node --check src/index.js
+          node --check desktop/main.cjs
+          node --check desktop/preload.cjs
+          node --check desktop/renderer.js
+          npx wrangler deploy --dry-run
+
+      - name: Deploy TalkSys
+        id: deploy
+        working-directory: talksys
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler deploy 2>&1 | tee /tmp/talksys-deploy.log
+          WORKER_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/talksys-deploy.log | tail -1 | sed -E 's/[).,;]+$//' || true)"
+          if [ -z "$WORKER_URL" ]; then
+            echo 'workers.dev URL not found in deploy output'
+            cat /tmp/talksys-deploy.log
+            exit 3
+          fi
+          echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
+          echo "Deployed URL: $WORKER_URL"
+
+      - name: Verify live health and chat
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 15); do
+            if curl --fail --silent --show-error "$WORKER_URL/health" -o /tmp/health.json; then ok=1; break; fi
+            sleep 4
+          done
+          test "$ok" = 1
+          cat /tmp/health.json
+          node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/health.json","utf8"));if(x.ok!==true||x.screenCapture!==true||x.overlay!==true)process.exit(1)'
+          curl --fail --silent --show-error -X POST "$WORKER_URL/api/chat" -H 'content-type: application/json' --data '{"messages":[{"role":"user","content":"1+1を数字だけで答えて"}]}' -o /tmp/chat.json
+          cat /tmp/chat.json
+          node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/chat.json","utf8"));if(typeof x.reply!=="string"||!x.reply.trim())process.exit(1)'
+
+      - name: Verify live locate endpoint
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node <<'NODE'
+          const fs=require('fs');
+          const image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII=';
+          fs.writeFileSync('/tmp/locate-body.json', JSON.stringify({query:'この画面で押せるものを探して',image}));
+          NODE
+          code="$(curl --silent --show-error -o /tmp/locate.json -w '%{http_code}' -X POST "$WORKER_URL/api/locate" -H 'content-type: application/json' --data-binary @/tmp/locate-body.json)"
+          cat /tmp/locate.json
+          test "$code" = 200
+          node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/locate.json","utf8"));if(typeof x.found!=="boolean")process.exit(1)'
+
+      - name: Deployment summary
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        shell: bash
+        run: echo "TalkSys production verified at $WORKER_URL"
