@@ -1,0 +1,170 @@
+name: U22 genuine staging capture v4
+
+on:
+  push:
+    branches: [u22-real-capture-20260828]
+    paths:
+      - ".github/workflows/u22-real-capture-v4.yml"
+
+permissions:
+  contents: read
+
+env:
+  STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12.12"
+
+      - name: Install capture tools
+        env:
+          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
+        run: |
+          npm install --global npm@11.18.0
+          npm ci
+          python -m pip install --disable-pip-version-check playwright==1.57.0 pillow
+          python -m playwright install --with-deps chromium
+          if ! command -v ffmpeg >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; fi
+
+      - name: Harden capture sequencing and server-persistence verification
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('scripts/u22-real-capture.py')
+          s=p.read_text(encoding='utf-8')
+
+          patches=[]
+          patches.append(('''        "public_code": page.locator("#publicCode").inner_text().strip(),''','''        "public_code": page.locator("#publicCode").inner_text().strip()[-6:],'''))
+          patches.append(('''def load_pdf_on_viewer(page, viewer_url: str, pdf_path: Path) -> None:\n    page.goto(viewer_url, wait_until="domcontentloaded", timeout=30000)\n    page.locator("input[type=file][accept='application/pdf']").set_input_files(str(pdf_path))''','''def load_pdf_on_viewer(page, viewer_url: str, pdf_path: Path) -> None:\n    page.goto(viewer_url, wait_until="domcontentloaded", timeout=30000)\n    page.locator("#emptyDocument").wait_for(state="visible", timeout=30000)\n    page.locator("#topBar").wait_for(state="visible", timeout=30000)\n    page.locator("input[type=file][accept='application/pdf']").set_input_files(str(pdf_path))'''))
+          patches.append(('''    page.goto(session["viewer_url"], wait_until="domcontentloaded", timeout=30000)\n    page.wait_for_timeout(1000)\n    page.locator("input[type=file][accept='application/pdf']").set_input_files(str(pdf_path))''','''    page.goto(session["viewer_url"], wait_until="domcontentloaded", timeout=30000)\n    page.locator("#emptyDocument").wait_for(state="visible", timeout=30000)\n    page.locator("#topBar").wait_for(state="visible", timeout=30000)\n    page.wait_for_timeout(1000)\n    page.locator("input[type=file][accept='application/pdf']").set_input_files(str(pdf_path))'''))
+          patches.append(('''    page.locator("#homePublicCode").fill(code)\n    page.locator("#homeJoinButton").click()\n    page.locator("#message").wait_for(state="visible", timeout=30000)''','''    code_input = page.locator("#homePublicCode")\n    code_input.click()\n    code_input.press_sequentially(code, delay=180)\n    page.wait_for_function("() => document.querySelector('#homePublicCode')?.value.length === 6", timeout=10000)\n    code_input.press("Enter")\n    page.wait_for_url(f"{ORIGIN}/j/{code}", timeout=30000)\n    page.locator("#message").wait_for(state="visible", timeout=30000)'''))
+          for old,new in patches:
+              if old not in s: raise SystemExit('capture patch target missing: '+old[:80])
+              s=s.replace(old,new,1)
+
+          helper='''\n\ndef persist_private_settings(page, path: str, payload: dict) -> dict:\n    result = page.evaluate(\"\"\"async ({path, payload}) => {\n      const sr = await fetch('/api/auth/session', {cache:'no-store', credentials:'same-origin'});\n      const session = await sr.json();\n      if (!sr.ok || !session.csrfToken) return {ok:false, status:sr.status, text:JSON.stringify(session)};\n      const r = await fetch(path, {\n        method:'PATCH', cache:'no-store', credentials:'same-origin',\n        headers:{'content-type':'application/json','x-csrf-token':session.csrfToken},\n        body:JSON.stringify(payload)\n      });\n      return {ok:r.ok, status:r.status, text:await r.text()};\n    }\"\"\", {\"path\": path, \"payload\": payload})\n    if not result.get('ok'):\n        raise RuntimeError(f\"Real settings API failed: {path} status={result.get('status')} body={result.get('text')}\")\n    return result\n'''
+          marker='''\ndef configure_translation_record(browser, storage_state, session: dict):\n'''
+          if marker not in s: raise SystemExit('translation function marker missing')
+          s=s.replace(marker,helper+marker,1)
+
+          old_translation='''    page.locator("#sessionAiTranslationEnabled").check()\n    page.locator("#sessionAiTargetLanguage").select_option("ja")\n    page.locator("#sessionAiTranslationQuality").select_option("fast")\n    page.locator("#saveSessionSettingsButton").click()\n    page.wait_for_timeout(2600)\n    if not page.locator("#sessionAiTranslationEnabled").is_checked():\n        raise RuntimeError("Translation setting did not remain enabled")\n    finish_recording(context, page, "11_translation_settings_real", "Teacher enables actual Workers AI translation for this session", started)'''
+          new_translation='''    page.locator("#sessionAiTranslationEnabled").check()\n    page.locator("#sessionAiTargetLanguage").select_option("ja")\n    page.locator("#sessionAiTranslationQuality").select_option("fast")\n    persist_private_settings(page, f"/api/private/sessions/{session['id']}/ai-settings", {\n        "moderationEnabled": page.locator("#sessionAiModerationEnabled").is_checked(),\n        "translationEnabled": True,\n        "targetLanguage": "ja",\n        "translationQuality": "fast"\n    })\n    page.reload(wait_until="domcontentloaded", timeout=30000)\n    page.locator("#sessionAiTranslationEnabled").wait_for(state="visible", timeout=30000)\n    page.locator("#sessionAiTranslationEnabled").scroll_into_view_if_needed()\n    page.wait_for_timeout(1400)\n    if not page.locator("#sessionAiTranslationEnabled").is_checked():\n        raise RuntimeError("Translation setting was not persisted by the real backend")\n    if page.locator("#sessionAiTargetLanguage").input_value() != "ja":\n        raise RuntimeError("Translation target language was not persisted")\n    if page.locator("#sessionAiTranslationQuality").input_value() != "fast":\n        raise RuntimeError("Translation quality was not persisted")\n    finish_recording(context, page, "11_translation_settings_real", "Real backend confirms Workers AI translation enabled for this session", started)'''
+          if old_translation not in s: raise SystemExit('translation persistence patch target missing')
+          s=s.replace(old_translation,new_translation,1)
+
+          old_filter='''    page.locator("#sessionFilterSimpleMode").select_option("dictionary")\n    page.locator("#saveSessionSettingsButton").click()\n    page.wait_for_timeout(2600)\n    if page.locator("#sessionFilterSimpleMode").input_value() != "dictionary":\n        raise RuntimeError("Dictionary-only session filter setting was not retained")\n    finish_recording(context, page, "15_filter_settings_real", "Teacher enables the real dictionary filter for this session", started)'''
+          new_filter='''    page.locator("#sessionFilterSimpleMode").select_option("dictionary")\n    persist_private_settings(page, f"/api/private/sessions/{session['id']}/filter-settings", {\n        "enabled": True,\n        "aiRoutingMode": "off",\n        "maskCharacter": "＊",\n        "translationFilterEnabled": True,\n        "unsupportedLanguageMode": "review_only"\n    })\n    page.reload(wait_until="domcontentloaded", timeout=30000)\n    page.locator("#sessionFilterSimpleMode").wait_for(state="visible", timeout=30000)\n    page.locator("#sessionFilterSimpleMode").scroll_into_view_if_needed()\n    page.wait_for_timeout(1400)\n    if page.locator("#sessionFilterSimpleMode").input_value() != "dictionary":\n        raise RuntimeError("Dictionary-only session filter setting was not persisted by the real backend")\n    finish_recording(context, page, "15_filter_settings_real", "Real backend confirms dictionary filter enabled for this session", started)'''
+          if old_filter not in s: raise SystemExit('filter persistence patch target missing')
+          s=s.replace(old_filter,new_filter,1)
+          p.write_text(s,encoding='utf-8')
+          PY
+
+      - name: Build isolated staging configuration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('wrangler.toml').read_text(encoding='utf-8')
+          repl={
+            'name = "class-pdf-comment-viewer-v01"':'name = "class-pdf-comment-viewer-v01-staging"',
+            'database_name = "class_comment_db"':'database_name = "class_comment_db_staging"',
+            'database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"':'database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"',
+            'database_name = "class_comment_db_v2"':'database_name = "class_comment_db_v2_staging"',
+            'database_id = "8315a076-67ad-44e6-8286-11887af52ad3"':'database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"',
+            'queue = "cpcv-ai-jobs"':'queue = "cpcv-ai-jobs-staging"',
+            'queue = "cpcv-ai-translation-jobs"':'queue = "cpcv-ai-translation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-translation-dlq"':'dead_letter_queue = "cpcv-ai-translation-dlq-staging"',
+            'queue = "cpcv-ai-moderation-jobs"':'queue = "cpcv-ai-moderation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-moderation-dlq"':'dead_letter_queue = "cpcv-ai-moderation-dlq-staging"',
+            '826071901':'826071801','826071902':'826071802','826071903':'826071803','826071904':'826071804','826071905':'826071805','826071906':'826071806',
+            'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev':'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev',
+            'TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"':'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"'
+          }
+          for old,new in repl.items():
+            if old not in s: raise SystemExit('missing staging replacement: '+old)
+            s=s.replace(old,new)
+          Path('.cpcv-staging.wrangler.toml').write_text(s,encoding='utf-8')
+          PY
+          node scripts/verify-deployment-config.mjs .cpcv-staging.wrangler.toml
+          node scripts/verify-environment-separation.mjs --mode production-gate --production wrangler.toml --staging .cpcv-staging.wrangler.toml
+
+      - name: Migrate and deploy real staging system
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler d1 migrations apply class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml
+          npx wrangler deploy --config .cpcv-staging.wrangler.toml --keep-vars
+          node scripts/smoke-production.mjs --config .cpcv-staging.wrangler.toml --origin "$STAGING_ORIGIN"
+
+      - name: Seed temporary staging teacher account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync, appendFileSync } from 'node:fs';
+          import { randomUUID } from 'node:crypto';
+          import { createSalt, hashPassword, PASSWORD_SCHEME } from './src/auth/passwords.js';
+          const suffix=`${process.env.GITHUB_RUN_ID}_${process.env.GITHUB_RUN_ATTEMPT}`;
+          const loginId=`u22cap_${suffix}`.slice(0,60), password='CPCV-U22-Capture-2026!';
+          const orgId=`org_${randomUUID().replaceAll('-','')}`, userId=`usr_${randomUUID().replaceAll('-','')}`, now=new Date().toISOString();
+          const salt=createSalt(), hash=await hashPassword(password,salt), q=(v)=>`'${String(v).replaceAll("'","''")}'`;
+          const sql=[
+            `INSERT INTO organizations (id,name,status,created_at,updated_at,deleted_at) VALUES (${q(orgId)},${q('U22 Capture Workspace')},'active',${q(now)},${q(now)},NULL);`,
+            `INSERT INTO users (id,login_id,display_name,password_scheme,password_hash,password_salt,password_changed_at,status,created_at,updated_at,deleted_at) VALUES (${q(userId)},${q(loginId)},${q('U22 Capture Teacher')},${q(PASSWORD_SCHEME)},${q(hash)},${q(salt)},${q(now)},'active',${q(now)},${q(now)},NULL);`,
+            `INSERT INTO organization_members (organization_id,user_id,role,status,created_at,updated_at,removed_at) VALUES (${q(orgId)},${q(userId)},'owner','active',${q(now)},${q(now)},NULL);`
+          ].join('\n');
+          writeFileSync('.u22-seed.sql',sql,{encoding:'utf8',mode:0o600});
+          appendFileSync(process.env.GITHUB_ENV,`CAPTURE_LOGIN_ID=${loginId}\nCAPTURE_PASSWORD=${password}\nCAPTURE_ORG_ID=${orgId}\nCAPTURE_USER_ID=${userId}\n`);
+          NODE
+          npx wrangler d1 execute class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml --file .u22-seed.sql
+          rm -f .u22-seed.sql
+
+      - name: Record genuine UI and real AI/filter results
+        run: |
+          python scripts/u22-real-capture.py 2>&1 | tee u22-real-capture.log
+          test -f u22-real-evidence/manifest.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          m=json.loads(Path('u22-real-evidence/manifest.json').read_text(encoding='utf-8'))
+          if not m.get('translation_verified',{}).get('translated'): raise SystemExit('real translation was not verified')
+          if '＊' not in m.get('mask_verified',{}).get('visible',''): raise SystemExit('real mask was not verified')
+          if len(m.get('clips',[])) < 18: raise SystemExit('capture set is incomplete')
+          print(json.dumps({'translation_verified':m['translation_verified'],'mask_verified':m['mask_verified'],'clips':len(m['clips'])},ensure_ascii=False,indent=2))
+          PY
+
+      - name: Verify persisted staging state in D1
+        if: success()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler d1 execute class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml --json --command "SELECT ls.title, sas.translation_enabled, sas.target_language, sas.translation_quality FROM live_sessions ls JOIN session_ai_settings sas ON sas.live_session_id=ls.id WHERE ls.title='U22 AI翻訳 実機デモ' ORDER BY ls.created_at DESC LIMIT 1;"
+
+      - name: Upload genuine capture evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-u22-genuine-capture-v4-${{ github.run_id }}
+          path: |
+            u22-real-evidence/
+            u22-real-capture.log
+          if-no-files-found: warn
+          retention-days: 30
