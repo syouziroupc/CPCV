@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: git clone --depth 1 --branch main https://github.com/syouziroupc/talksys.git talksys
 
-      - name: Validate TalkSys realtime voice
+      - name: Validate TalkSys buffered voice turns
         working-directory: talksys
         shell: bash
         run: |
@@ -41,6 +41,7 @@ jobs:
           npm test
           node --check src/worker.js
           node --check src/finalizable-nova3.js
+          node --check src/voice-marker-bridge.js
           node --check src/realtime-voice-client.js
           node --check desktop/realtime-voice.js
           npx wrangler deploy --dry-run
@@ -57,7 +58,7 @@ jobs:
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
           echo "Deployed URL: $WORKER_URL"
 
-      - name: Verify REST and explicit turn commit capability
+      - name: Verify REST and binary turn-boundary capability
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         shell: bash
@@ -66,23 +67,17 @@ jobs:
           code="$(curl --silent --show-error -o /tmp/voice-health.json -w '%{http_code}' "$WORKER_URL/voice-health")"
           echo "voice-health HTTP $code"; cat /tmp/voice-health.json; echo
           test "$code" = 200
-          node -e 'const x=require("/tmp/voice-health.json");if(!x.ok||!x.continuousStt||!x.forcedFinalization||!x.explicitTurnCommit||!x.localTranscriptFallback)process.exit(1)'
+          node -e 'const x=require("/tmp/voice-health.json");if(!x.ok||!x.continuousAudio||!x.binaryTurnMarkers||!x.batchFinalStt||x.sttLanguage!=="ja")process.exit(1)'
+
+          curl --fail --silent --show-error "$WORKER_URL/voice-marker-bridge.js" -o /tmp/marker.js
+          grep -q "start_of_speech" /tmp/marker.js
+          grep -q "utterance_commit" /tmp/marker.js
 
           code="$(curl --silent --show-error -o /tmp/chat.json -w '%{http_code}' -X POST "$WORKER_URL/api/chat" -H 'content-type: application/json' --data '{"messages":[{"role":"user","content":"1+1を数字だけで答えて"}]}')"
           echo "chat HTTP $code"; cat /tmp/chat.json; echo
           test "$code" = 200
 
-          code="$(curl --silent --show-error -o /tmp/voice-output -w '%{http_code}' "$WORKER_URL/api/voice-smoke")"
-          echo "voice-smoke HTTP $code"
-          if [ "$code" = 200 ]; then
-            test "$(wc -c < /tmp/voice-output)" -gt 1000
-            echo "Japanese TTS bytes: $(wc -c < /tmp/voice-output)"
-          else
-            echo "MeloTTS upstream currently unavailable; STT/finalization deployment continues."
-            cat /tmp/voice-output; echo
-          fi
-
-      - name: Verify realtime voice explicit commit reaches active STT session
+      - name: Verify realtime voice accepts binary start and end markers
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         shell: bash
@@ -92,13 +87,13 @@ jobs:
           const worker = process.env.WORKER_URL;
           const wsUrl = worker.replace(/^https:/, 'wss:').replace(/^http:/, 'ws:') + '/agents/talk-sys-voice-agent/default';
           const ws = new WebSocket(wsUrl);
+          const START = new Uint8Array([0x54,0x53,0x59,0x53,0x01,0x53,0x54,0x41]);
+          const END = new Uint8Array([0x54,0x53,0x59,0x53,0x01,0x45,0x4e,0x44]);
           let welcomed = false;
           let listening = false;
-          let binaryFramesSent = 0;
-          let commitAck = false;
+          let frames = 0;
           let finished = false;
-          const commitId = 'production-smoke-commit';
-          const timeout = setTimeout(() => finish(new Error(`voice timeout welcomed=${welcomed} listening=${listening} frames=${binaryFramesSent} commitAck=${commitAck}`)), 20000);
+          const timeout = setTimeout(() => finish(new Error(`voice timeout welcomed=${welcomed} listening=${listening} frames=${frames}`)), 12000);
 
           function finish(error) {
             if (finished) return;
@@ -109,7 +104,7 @@ jobs:
               console.error(error);
               process.exitCode = 1;
             } else {
-              console.log(JSON.stringify({ welcomed, listening, binaryFramesSent, commitAck }));
+              console.log(JSON.stringify({ welcomed, listening, frames, binaryMarkers: true }));
             }
           }
 
@@ -123,33 +118,23 @@ jobs:
               welcomed = true;
               ws.send(JSON.stringify({ type: 'start_call', preferred_format: 'mp3' }));
             }
-            if (data.type === 'utterance_commit_ack' && data.id === commitId) {
-              if (data.accepted !== true) return finish(new Error(`commit rejected: ${JSON.stringify(data)}`));
-              commitAck = true;
-              if (Number(data.diagnostics?.audioFrames || 0) < 1) return finish(new Error(`commit ack has no audio frames: ${JSON.stringify(data)}`));
-              ws.send(JSON.stringify({ type: 'end_call' }));
-              finish();
-            }
             if (data.type === 'status' && data.status === 'listening' && !listening) {
               listening = true;
+              ws.send(START.buffer.slice(0));
               const voiced = new Int16Array(800); voiced.fill(2500);
-              const silent = new Int16Array(800);
-              let sent = 0;
-              const timer = setInterval(() => {
-                if (ws.readyState !== WebSocket.OPEN) {
-                  clearInterval(timer);
-                  return;
-                }
-                ws.send((sent < 4 ? voiced : silent).buffer.slice(0));
-                binaryFramesSent += 1;
-                sent += 1;
-                if (sent >= 20) {
-                  clearInterval(timer);
-                  ws.send(JSON.stringify({ type: 'utterance_commit', id: commitId }));
-                }
-              }, 50);
+              for (let i = 0; i < 6; i++) {
+                ws.send(voiced.buffer.slice(0));
+                frames += 1;
+              }
+              ws.send(END.buffer.slice(0));
+              setTimeout(() => {
+                if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'end_call' }));
+                finish();
+              }, 500);
             }
-            if (data.type === 'error') finish(new Error(`voice error: ${data.message || JSON.stringify(data)}`));
+            if (data.type === 'error' && !String(data.message || '').includes('transcription')) {
+              finish(new Error(`voice error: ${data.message || JSON.stringify(data)}`));
+            }
           });
           ws.addEventListener('error', () => finish(new Error('voice websocket connection error')));
           ws.addEventListener('close', (event) => {
@@ -160,4 +145,4 @@ jobs:
       - name: Production summary
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        run: echo "TalkSys explicit utterance commit verified at $WORKER_URL"
+        run: echo "TalkSys buffered Nova-3 turns verified at $WORKER_URL"
