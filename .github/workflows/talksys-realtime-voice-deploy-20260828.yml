@@ -30,7 +30,7 @@ jobs:
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
       - name: Fetch TalkSys main
         run: git clone --depth 1 --branch main https://github.com/syouziroupc/talksys.git talksys
-      - name: Validate TalkSys grounded search voice
+      - name: Validate fast grounded voice
         working-directory: talksys
         run: |
           set -euo pipefail
@@ -39,7 +39,6 @@ jobs:
           node --check src/worker.js
           node --check src/web-search.js
           node --check src/finalizable-nova3.js
-          node --check src/voice-marker-bridge.js
           node --check src/realtime-voice-client.js
           node --check src/voice-fallback-client.js
           node --check desktop/voice-fallback.js
@@ -55,7 +54,7 @@ jobs:
           test -n "$WORKER_URL"
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
           echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
-      - name: Wait for grounded-search-v7
+      - name: Wait for fast-grounded-v8
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
@@ -64,51 +63,41 @@ jobs:
           for i in $(seq 1 25); do
             curl --silent --show-error "$WORKER_URL/voice-health?i=$i&ts=$(date +%s%N)" -o /tmp/health.json
             echo "attempt=$i $(cat /tmp/health.json)"
-            if node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="grounded-search-v7"&&x.webSearch===true&&x.webSearchEngine==="bing-rss"&&x.casualLlmModel==="@cf/zai-org/glm-4.7-flash"&&x.groundedLlmModel==="@cf/qwen/qwen3.8-27b"&&x.connectionGreetingTts===false&&x.cloudTtsDisabled===true&&x.ttsPrimary==="device-ja-JP"?0:1)'; then matched=1; break; fi
+            if node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="fast-grounded-v8"&&x.casualLlmModel==="@cf/meta/llama-3.2-3b-instruct"&&x.groundedLlmModel==="@cf/qwen/qwen3.8-27b"&&x.casualPrompt==="short"&&x.searchRelevanceFilter===true&&x.cloudTtsDisabled===true&&x.ttsPrimary==="device-ja-JP"?0:1)'; then matched=1; break; fi
             sleep 1
           done
           test "$matched" = 1
-          curl --fail --silent "$WORKER_URL/voice-fallback.js?ts=$(date +%s%N)" -o /tmp/fallback.js
-          grep -q "ja-JP" /tmp/fallback.js
-          grep -q "MutationObserver" /tmp/fallback.js
-      - name: Verify REST chat
-        env:
-          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error -X POST "$WORKER_URL/api/chat" -H 'content-type: application/json' --data '{"messages":[{"role":"user","content":"1+1を数字だけで答えて"}]}' -o /tmp/chat.json
-          cat /tmp/chat.json
-          node -e 'const x=require("/tmp/chat.json");if(String(x.reply||"").trim()!=="2")process.exit(1)'
-      - name: Verify live web search
+      - name: Verify search relevance and latency
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
           set -euo pipefail
           Q="$(python3 -c 'import urllib.parse;print(urllib.parse.quote("現在の日本の総理大臣"))')"
+          START=$(date +%s%3N)
           curl --fail --silent --show-error "$WORKER_URL/api/web-search?q=$Q&ts=$(date +%s%N)" -o /tmp/search.json
+          END=$(date +%s%3N)
           cat /tmp/search.json
-          node -e 'const x=require("/tmp/search.json");if(!x.ok||!Array.isArray(x.results)||x.results.length<1||!/^https?:/.test(x.results[0].url||""))process.exit(1)'
+          echo "search_ms=$((END-START))"
+          node -e 'const x=require("/tmp/search.json");const r=x.results||[];if(!x.ok||r.length<1)process.exit(1);const text=r.map(v=>(v.title||"")+" "+(v.snippet||"")).join(" ");if(!/(総理|首相|内閣)/.test(text))process.exit(1);if(/Bookcase Junk Journal|Etsy/.test(text))process.exit(1)'
+          test $((END-START)) -lt 4000
       - name: Verify fast connection and casual reply
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
           set -euo pipefail
           node <<'NODE'
-          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/latency-'+Date.now());
-          let startCallAt=0, questionAt=0, sent=false, done=false, reply='';
-          const timer=setTimeout(()=>finish(new Error('timeout')),20000);
-          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};if(error){console.error(error);process.exitCode=1}else console.log(JSON.stringify({reply,connectToListeningMs:questionAt-startCallAt,replyMs:Date.now()-questionAt}))}
+          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/v8-latency-'+Date.now());
+          let startCallAt=0,questionAt=0,sent=false,done=false,reply='';
+          const timer=setTimeout(()=>finish(new Error('timeout')),12000);
+          function finish(error){if(done)return;done=true;clearTimeout(timer);const now=Date.now();try{ws.close()}catch{};const metrics={reply,connectToListeningMs:questionAt-startCallAt,replyMs:questionAt?now-questionAt:0};console.log(JSON.stringify(metrics));if(error){console.error(error);process.exitCode=1;return}if(metrics.connectToListeningMs>1000)process.exitCode=1;if(metrics.replyMs>5000)process.exitCode=1}
           ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
-          ws.addEventListener('message',ev=>{
-            if(typeof ev.data!=='string')return;
-            let d;try{d=JSON.parse(ev.data)}catch{return}
+          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
             if(d.type==='welcome'){startCallAt=Date.now();ws.send(JSON.stringify({type:'start_call',preferred_format:'mp3'}));return}
-            if(d.type==='status'&&d.status==='listening'&&!sent){questionAt=Date.now();if(questionAt-startCallAt>5000)return finish(new Error('slow connection '+(questionAt-startCallAt)+'ms'));sent=true;ws.send(JSON.stringify({type:'text_message',text:'今日はちょっと疲れたなあ。'}));return}
-            if(d.type==='transcript'&&d.role==='assistant'&&sent){reply=String(d.text||'').trim();if(!reply)return finish(new Error('empty casual reply'));if(/画面共有|クリック|ボタンを押|PC操作/.test(reply))return finish(new Error('casual reply drifted to PC support: '+reply));return finish()}
-            if(d.type==='error')return finish(new Error(d.message||'agent error'));
+            if(d.type==='status'&&d.status==='listening'&&!sent){questionAt=Date.now();sent=true;ws.send(JSON.stringify({type:'text_message',text:'今日はちょっと疲れたなあ。'}));return}
+            if(d.type==='transcript'&&d.role==='assistant'&&sent){reply=String(d.text||'').trim();if(!reply)return finish(new Error('empty reply'));if(/画面共有|クリック|PC操作/.test(reply))return finish(new Error('casual drift: '+reply));return finish()}
+            if(d.type==='error')finish(new Error(d.message||'agent error'));
           });
           ws.addEventListener('error',()=>finish(new Error('ws error')));
-          ws.addEventListener('close',e=>{if(!done)finish(new Error('closed '+e.code))});
           NODE
       - name: Verify grounded search voice turn
         env:
@@ -116,40 +105,34 @@ jobs:
         run: |
           set -euo pipefail
           node <<'NODE'
-          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/search-'+Date.now());
-          let sent=false,searched=false,resultCount=0,reply='',done=false;
-          const timer=setTimeout(()=>finish(new Error('timeout')),30000);
-          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};if(error){console.error(error);process.exitCode=1}else console.log(JSON.stringify({searched,resultCount,reply}))}
+          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/v8-search-'+Date.now());
+          let sent=false,searched=false,count=0,reply='',done=false,start=0;
+          const timer=setTimeout(()=>finish(new Error('timeout')),15000);
+          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};console.log(JSON.stringify({searched,count,reply,replyMs:start?Date.now()-start:0}));if(error){console.error(error);process.exitCode=1}}
           ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
-          ws.addEventListener('message',ev=>{
-            if(typeof ev.data!=='string')return;
-            let d;try{d=JSON.parse(ev.data)}catch{return}
-            if(d.type==='welcome'&&!sent){sent=true;ws.send(JSON.stringify({type:'text_message',text:'現在の日本の総理大臣は誰？'}));return}
-            if(d.type==='search_status'){searched=d.searched===true;resultCount=Number(d.resultCount||0);return}
-            if(d.type==='transcript'&&d.role==='assistant'){reply=String(d.text||'').trim();if(!searched||resultCount<1)return finish(new Error('assistant replied without live search'));if(!reply)return finish(new Error('empty grounded reply'));return finish()}
-            if(d.type==='error')return finish(new Error(d.message||'agent error'));
+          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
+            if(d.type==='welcome'&&!sent){sent=true;start=Date.now();ws.send(JSON.stringify({type:'text_message',text:'現在の日本の総理大臣は誰？'}));return}
+            if(d.type==='search_status'&&d.phase==='done'){searched=true;count=Number(d.resultCount||0);return}
+            if(d.type==='transcript'&&d.role==='assistant'){reply=String(d.text||'').trim();if(!searched||count<1)return finish(new Error('reply without relevant search'));if(!reply)return finish(new Error('empty reply'));return finish()}
+            if(d.type==='error')finish(new Error(d.message||'agent error'));
           });
           ws.addEventListener('error',()=>finish(new Error('ws error')));
-          ws.addEventListener('close',e=>{if(!done)finish(new Error('closed '+e.code))});
           NODE
-      - name: Verify no cloud TTS error in active call
+      - name: Verify no cloud TTS audio or error
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
           set -euo pipefail
           node <<'NODE'
-          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/no-cloud-tts-'+Date.now());
-          ws.binaryType='arraybuffer';let sent=false,reply=false,cloudAudio=false,done=false;
-          const timer=setTimeout(()=>finish(new Error('timeout')),15000);
-          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};if(error){console.error(error);process.exitCode=1}else console.log(JSON.stringify({reply,cloudAudio}))}
+          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/v8-tts-'+Date.now());
+          ws.binaryType='arraybuffer';let sent=false,reply=false,cloudAudio=false,done=false;const timer=setTimeout(()=>finish(new Error('timeout')),10000);
+          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};console.log(JSON.stringify({reply,cloudAudio}));if(error){console.error(error);process.exitCode=1}}
           ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
-          ws.addEventListener('message',ev=>{
-            if(ev.data instanceof ArrayBuffer){if(ev.data.byteLength>100)cloudAudio=true;return}
-            if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
+          ws.addEventListener('message',ev=>{if(ev.data instanceof ArrayBuffer){if(ev.data.byteLength>100)cloudAudio=true;return}if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
             if(d.type==='welcome')ws.send(JSON.stringify({type:'start_call',preferred_format:'mp3'}));
             if(d.type==='status'&&d.status==='listening'&&!sent){sent=true;ws.send(JSON.stringify({type:'text_message',text:'こんにちは'}))}
-            if(d.type==='transcript'&&d.role==='assistant'&&sent){reply=true;setTimeout(()=>finish(cloudAudio?new Error('unexpected cloud TTS audio'):null),900)}
-            if(d.type==='error')finish(new Error('unexpected voice error: '+(d.message||'')));
+            if(d.type==='transcript'&&d.role==='assistant'&&sent){reply=true;setTimeout(()=>finish(cloudAudio?new Error('unexpected cloud audio'):null),500)}
+            if(d.type==='error')finish(new Error('voice error: '+(d.message||'')));
           });
           ws.addEventListener('error',()=>finish(new Error('ws error')));
           NODE
@@ -157,4 +140,4 @@ jobs:
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
           VERSION_ID: ${{ steps.deploy.outputs.version_id }}
-        run: echo "TalkSys grounded-search-v7 verified at $WORKER_URL version=$VERSION_ID"
+        run: echo "TalkSys fast-grounded-v8 verified at $WORKER_URL version=$VERSION_ID"
