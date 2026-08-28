@@ -46,6 +46,10 @@ jobs:
           from pathlib import Path
           p=Path('scripts/u22-real-capture.py')
           s=p.read_text(encoding='utf-8')
+          old0='''        "public_code": page.locator("#publicCode").inner_text().strip(),'''
+          new0='''        "public_code": page.locator("#publicCode").inner_text().strip()[-6:],'''
+          if old0 not in s: raise SystemExit('public code patch target missing')
+          s=s.replace(old0,new0)
           old='''def load_pdf_on_viewer(page, viewer_url: str, pdf_path: Path) -> None:\n    page.goto(viewer_url, wait_until="domcontentloaded", timeout=30000)\n    page.locator("input[type=file][accept=\'application/pdf\']").set_input_files(str(pdf_path))'''
           new='''def load_pdf_on_viewer(page, viewer_url: str, pdf_path: Path) -> None:\n    page.goto(viewer_url, wait_until="domcontentloaded", timeout=30000)\n    page.locator("#emptyDocument").wait_for(state="visible", timeout=30000)\n    page.locator("#topBar").wait_for(state="visible", timeout=30000)\n    page.locator("input[type=file][accept=\'application/pdf\']").set_input_files(str(pdf_path))'''
           if old not in s: raise SystemExit('load_pdf patch target missing')
