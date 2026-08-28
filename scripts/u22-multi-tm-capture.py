@@ -26,6 +26,7 @@ manifest = {
         "Current CPCV source UI only",
         "No DOM replacement or fabricated result text",
         "Three separate real student posts per feature",
+        "CPCV ten-second anti-rapid-post limit is respected",
         "Translation accepted only when three Workers AI translations are visible together",
         "Mask accepted only when three dictionary-filtered posts are visible together",
     ],
@@ -176,13 +177,20 @@ def send_posts(browser, session, messages, name):
     page.goto(session["join_url"], wait_until="domcontentloaded", timeout=30000)
     page.locator("#message").wait_for(state="visible", timeout=30000)
     page.wait_for_timeout(700)
-    for message in messages:
+    accepted = []
+    for index, message in enumerate(messages):
         page.locator("#message").fill(message)
         page.wait_for_timeout(500)
         page.locator("#sendButton").click()
-        page.wait_for_timeout(1400)
-    page.wait_for_timeout(1500)
-    finish(ctx, page, name, "Three separate real student posts from the current mobile UI", started, {"messages": messages})
+        page.wait_for_timeout(1600)
+        status = page.locator("#status").inner_text().strip()
+        if "連投制限" in status:
+            raise RuntimeError(f"CPCV rejected post {index + 1} for rapid posting: {status}")
+        accepted.append({"message": message, "status": status})
+        if index < len(messages) - 1:
+            page.wait_for_timeout(11200)
+    page.wait_for_timeout(1800)
+    finish(ctx, page, name, "Three separate real student posts accepted with CPCV's anti-rapid-post interval respected", started, {"messages": messages, "accepted": accepted})
 
 
 def capture_translation(browser, storage_state, pdf_path):
