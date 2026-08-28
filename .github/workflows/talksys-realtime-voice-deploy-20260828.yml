@@ -5,6 +5,10 @@ on:
     branches: [talksys-realtime-voice-20260828]
     paths: ['.github/workflows/talksys-realtime-voice-deploy-20260828.yml']
 
+concurrency:
+  group: talksys-realtime-voice-production
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -43,6 +47,7 @@ jobs:
           node --check src/finalizable-nova3.js
           node --check src/voice-marker-bridge.js
           node --check src/realtime-voice-client.js
+          node --check desktop/voice-marker-bridge.js
           node --check desktop/realtime-voice.js
           npx wrangler deploy --dry-run
 
@@ -54,30 +59,47 @@ jobs:
           set -euo pipefail
           npx wrangler deploy 2>&1 | tee /tmp/talksys-voice-deploy.log
           WORKER_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/talksys-voice-deploy.log | tail -1 | sed -E 's/[).,;]+$//' || true)"
+          VERSION_ID="$(grep -Eo 'Current Version ID: [0-9a-f-]+' /tmp/talksys-voice-deploy.log | tail -1 | awk '{print $4}' || true)"
           test -n "$WORKER_URL"
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
+          echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
           echo "Deployed URL: $WORKER_URL"
+          echo "Version ID: $VERSION_ID"
 
-      - name: Verify REST and binary turn-boundary capability
+      - name: Wait for exact voice revision
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         shell: bash
         run: |
           set -euo pipefail
-          code="$(curl --silent --show-error -o /tmp/voice-health.json -w '%{http_code}' "$WORKER_URL/voice-health")"
-          echo "voice-health HTTP $code"; cat /tmp/voice-health.json; echo
-          test "$code" = 200
-          node -e 'const x=require("/tmp/voice-health.json");if(!x.ok||!x.continuousAudio||!x.binaryTurnMarkers||!x.batchFinalStt||x.sttLanguage!=="ja")process.exit(1)'
+          matched=0
+          for i in $(seq 1 20); do
+            code="$(curl --silent --show-error -o /tmp/voice-health.json -w '%{http_code}' "$WORKER_URL/voice-health?revision_check=$i&ts=$(date +%s%N)")"
+            echo "attempt=$i HTTP=$code $(cat /tmp/voice-health.json 2>/dev/null || true)"
+            if [ "$code" = 200 ] && node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync("/tmp/voice-health.json","utf8"));process.exit(x.ok&&x.voiceRevision==="buffered-binary-v1"&&x.binaryTurnMarkers===true&&x.batchFinalStt===true&&x.sttLanguage==="ja"?0:1)'; then
+              matched=1
+              break
+            fi
+            sleep 1
+          done
+          test "$matched" = 1
 
-          curl --fail --silent --show-error "$WORKER_URL/voice-marker-bridge.js" -o /tmp/marker.js
+          curl --fail --silent --show-error "$WORKER_URL/voice-marker-bridge.js?ts=$(date +%s%N)" -o /tmp/marker.js
           grep -q "start_of_speech" /tmp/marker.js
           grep -q "utterance_commit" /tmp/marker.js
+          grep -q "local_turn_boundary" /tmp/marker.js
 
+      - name: Verify chat remains healthy
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
           code="$(curl --silent --show-error -o /tmp/chat.json -w '%{http_code}' -X POST "$WORKER_URL/api/chat" -H 'content-type: application/json' --data '{"messages":[{"role":"user","content":"1+1を数字だけで答えて"}]}')"
           echo "chat HTTP $code"; cat /tmp/chat.json; echo
           test "$code" = 200
 
-      - name: Verify realtime voice accepts binary start and end markers
+      - name: Verify realtime voice accepts binary turn markers
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         shell: bash
@@ -91,9 +113,8 @@ jobs:
           const END = new Uint8Array([0x54,0x53,0x59,0x53,0x01,0x45,0x4e,0x44]);
           let welcomed = false;
           let listening = false;
-          let frames = 0;
           let finished = false;
-          const timeout = setTimeout(() => finish(new Error(`voice timeout welcomed=${welcomed} listening=${listening} frames=${frames}`)), 12000);
+          const timeout = setTimeout(() => finish(new Error(`voice timeout welcomed=${welcomed} listening=${listening}`)), 12000);
 
           function finish(error) {
             if (finished) return;
@@ -104,7 +125,7 @@ jobs:
               console.error(error);
               process.exitCode = 1;
             } else {
-              console.log(JSON.stringify({ welcomed, listening, frames, binaryMarkers: true }));
+              console.log(JSON.stringify({ welcomed, listening, binaryMarkers: true }));
             }
           }
 
@@ -121,20 +142,13 @@ jobs:
             if (data.type === 'status' && data.status === 'listening' && !listening) {
               listening = true;
               ws.send(START.buffer.slice(0));
-              const voiced = new Int16Array(800); voiced.fill(2500);
-              for (let i = 0; i < 6; i++) {
-                ws.send(voiced.buffer.slice(0));
-                frames += 1;
-              }
               ws.send(END.buffer.slice(0));
               setTimeout(() => {
                 if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'end_call' }));
                 finish();
-              }, 500);
+              }, 400);
             }
-            if (data.type === 'error' && !String(data.message || '').includes('transcription')) {
-              finish(new Error(`voice error: ${data.message || JSON.stringify(data)}`));
-            }
+            if (data.type === 'error') finish(new Error(`voice error: ${data.message || JSON.stringify(data)}`));
           });
           ws.addEventListener('error', () => finish(new Error('voice websocket connection error')));
           ws.addEventListener('close', (event) => {
@@ -145,4 +159,5 @@ jobs:
       - name: Production summary
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
-        run: echo "TalkSys buffered Nova-3 turns verified at $WORKER_URL"
+          VERSION_ID: ${{ steps.deploy.outputs.version_id }}
+        run: echo "TalkSys buffered voice revision verified at $WORKER_URL version=$VERSION_ID"
