@@ -1,0 +1,116 @@
+name: U22 three-post genuine mask capture
+
+on:
+  push:
+    branches: [u22-real-capture-20260828]
+    paths:
+      - ".github/workflows/u22-mask-three-only.yml"
+      - "scripts/u22-mask-three-only.py"
+
+permissions:
+  contents: read
+
+env:
+  STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+
+jobs:
+  capture:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: npm
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
+        with:
+          python-version: "3.12.12"
+
+      - name: Install capture tools
+        env:
+          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
+        run: |
+          npm ci
+          python -m pip install --disable-pip-version-check playwright==1.57.0 pillow
+          python -m playwright install --with-deps chromium
+          if ! command -v ffmpeg >/dev/null 2>&1; then sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg; fi
+
+      - name: Build isolated staging config
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          s=Path('wrangler.toml').read_text(encoding='utf-8')
+          repl={
+            'name = "class-pdf-comment-viewer-v01"':'name = "class-pdf-comment-viewer-v01-staging"',
+            'database_name = "class_comment_db"':'database_name = "class_comment_db_staging"',
+            'database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"':'database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"',
+            'database_name = "class_comment_db_v2"':'database_name = "class_comment_db_v2_staging"',
+            'database_id = "8315a076-67ad-44e6-8286-11887af52ad3"':'database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"',
+            'queue = "cpcv-ai-jobs"':'queue = "cpcv-ai-jobs-staging"',
+            'queue = "cpcv-ai-translation-jobs"':'queue = "cpcv-ai-translation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-translation-dlq"':'dead_letter_queue = "cpcv-ai-translation-dlq-staging"',
+            'queue = "cpcv-ai-moderation-jobs"':'queue = "cpcv-ai-moderation-jobs-staging"',
+            'dead_letter_queue = "cpcv-ai-moderation-dlq"':'dead_letter_queue = "cpcv-ai-moderation-dlq-staging"',
+            '826071901':'826071801','826071902':'826071802','826071903':'826071803','826071904':'826071804','826071905':'826071805','826071906':'826071806',
+            'https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev':'https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev',
+            'TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"':'TURNSTILE_SITE_KEY = "1x00000000000000000000AA"'
+          }
+          for old,new in repl.items():
+            if old not in s: raise SystemExit('missing staging replacement: '+old)
+            s=s.replace(old,new)
+          Path('.cpcv-staging.wrangler.toml').write_text(s,encoding='utf-8')
+          PY
+
+      - name: Seed temporary teacher
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          node --input-type=module <<'NODE'
+          import { writeFileSync, appendFileSync } from 'node:fs';
+          import { randomUUID } from 'node:crypto';
+          import { createSalt, hashPassword, PASSWORD_SCHEME } from './src/auth/passwords.js';
+          const suffix=`${process.env.GITHUB_RUN_ID}_${process.env.GITHUB_RUN_ATTEMPT}`;
+          const loginId=`u22mask3_${suffix}`.slice(0,60), password='CPCV-U22-Capture-2026!';
+          const orgId=`org_${randomUUID().replaceAll('-','')}`, userId=`usr_${randomUUID().replaceAll('-','')}`, now=new Date().toISOString();
+          const salt=createSalt(), hash=await hashPassword(password,salt), q=(v)=>`'${String(v).replaceAll("'","''")}'`;
+          const sql=[
+            `INSERT INTO organizations (id,name,status,created_at,updated_at,deleted_at) VALUES (${q(orgId)},${q('U22 Three Mask Capture')},'active',${q(now)},${q(now)},NULL);`,
+            `INSERT INTO users (id,login_id,display_name,password_scheme,password_hash,password_salt,password_changed_at,status,created_at,updated_at,deleted_at) VALUES (${q(userId)},${q(loginId)},${q('U22 Capture Teacher')},${q(PASSWORD_SCHEME)},${q(hash)},${q(salt)},${q(now)},'active',${q(now)},${q(now)},NULL);`,
+            `INSERT INTO organization_members (organization_id,user_id,role,status,created_at,updated_at,removed_at) VALUES (${q(orgId)},${q(userId)},'owner','active',${q(now)},${q(now)},NULL);`
+          ].join('\n');
+          writeFileSync('.u22-mask3-seed.sql',sql,{encoding:'utf8',mode:0o600});
+          appendFileSync(process.env.GITHUB_ENV,`CAPTURE_LOGIN_ID=${loginId}\nCAPTURE_PASSWORD=${password}\n`);
+          NODE
+          npx wrangler d1 execute class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml --file .u22-mask3-seed.sql
+          rm -f .u22-mask3-seed.sql
+
+      - name: Capture three real masked posts
+        run: |
+          python scripts/u22-mask-three-only.py 2>&1 | tee u22-mask-three.log
+          test -f u22-mask-three-evidence/manifest.json
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          m=json.loads(Path('u22-mask-three-evidence/manifest.json').read_text(encoding='utf-8'))
+          joined='\n'.join(m.get('visible',[]))
+          if len(m.get('sources',[])) != 3: raise SystemExit('expected three mask source posts')
+          if any(x in joined for x in ('無能','きもい','うざい')): raise SystemExit('unmasked dictionary term remained visible')
+          if len(re.findall(r'[＊*]{2,}',joined)) < 3: raise SystemExit('three masked results were not visible')
+          print(joined)
+          PY
+
+      - name: Upload verified material
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-u22-mask-three-${{ github.run_id }}
+          path: |
+            u22-mask-three-evidence/
+            u22-mask-three.log
+          if-no-files-found: warn
+          retention-days: 30
