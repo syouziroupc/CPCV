@@ -1,0 +1,68 @@
+name: TalkSys voice tail diagnostic 20260828
+
+on:
+  push:
+    branches: [talksys-realtime-voice-20260828]
+    paths: ['.github/workflows/talksys-tail-diagnostic-20260828.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: production
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch TalkSys
+        run: git clone --depth 1 --branch main https://github.com/syouziroupc/talksys.git talksys
+      - name: Install Wrangler
+        working-directory: talksys
+        run: npm install --no-audit --no-fund
+      - name: Capture failing Voice Agent turn
+        working-directory: talksys
+        shell: bash
+        run: |
+          set -u
+          : > /tmp/tail.log
+          timeout 28s npx wrangler tail talksys --format json > /tmp/tail.log 2>&1 &
+          TAIL_PID=$!
+          sleep 5
+          set +e
+          node <<'NODE'
+          const ws = new WebSocket('wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/tail-diag-' + Date.now());
+          let done = false;
+          const timeout = setTimeout(() => finish(new Error('client timeout')), 18000);
+          function finish(error) {
+            if (done) return;
+            done = true;
+            clearTimeout(timeout);
+            try { ws.close(); } catch {}
+            if (error) { console.error(error); process.exitCode = 1; }
+          }
+          ws.addEventListener('open', () => ws.send(JSON.stringify({type:'hello',protocol_version:1})));
+          ws.addEventListener('message', (event) => {
+            if (typeof event.data !== 'string') return;
+            console.log('WS', event.data);
+            let d; try { d = JSON.parse(event.data); } catch { return; }
+            if (d.type === 'welcome') ws.send(JSON.stringify({type:'text_message',text:'1+1を数字だけで答えて'}));
+            if (d.type === 'transcript_end' && d.role !== 'user') finish();
+            if (d.type === 'error') finish(new Error(d.message || 'voice agent error'));
+          });
+          ws.addEventListener('close', e => { console.log('CLOSE', e.code, e.reason); if (!done) finish(new Error('closed '+e.code)); });
+          ws.addEventListener('error', () => finish(new Error('websocket error')));
+          NODE
+          CLIENT_RC=$?
+          sleep 5
+          kill "$TAIL_PID" 2>/dev/null || true
+          wait "$TAIL_PID" 2>/dev/null || true
+          echo '===== WRANGLER TAIL ====='
+          cat /tmp/tail.log
+          echo '===== END TAIL ====='
+          exit "$CLIENT_RC"
