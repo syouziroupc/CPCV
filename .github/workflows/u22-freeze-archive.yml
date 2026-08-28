@@ -1,0 +1,43 @@
+name: U22 freeze archive
+
+on:
+  push:
+    branches:
+      - u22-freeze-build-20260828
+    paths:
+      - ".github/workflows/u22-freeze-archive.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout frozen public commit
+        uses: actions/checkout@v4
+        with:
+          ref: 45dc7ce547b776a54d5611abd0e6e1db0e77079d
+          fetch-depth: 1
+
+      - name: Build exact source archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          git archive --format=zip \
+            --prefix=CPCV-45dc7ce/ \
+            -o CPCV_U22_FROZEN_2026-08-28_45dc7ce.zip \
+            45dc7ce547b776a54d5611abd0e6e1db0e77079d
+          sha256sum CPCV_U22_FROZEN_2026-08-28_45dc7ce.zip > CPCV_U22_FROZEN_2026-08-28_45dc7ce.zip.sha256
+          unzip -t CPCV_U22_FROZEN_2026-08-28_45dc7ce.zip
+
+      - name: Upload frozen archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: CPCV_U22_FROZEN_2026-08-28_45dc7ce
+          path: |
+            CPCV_U22_FROZEN_2026-08-28_45dc7ce.zip
+            CPCV_U22_FROZEN_2026-08-28_45dc7ce.zip.sha256
+          if-no-files-found: error
+          retention-days: 30
