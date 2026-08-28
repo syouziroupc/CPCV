@@ -1,0 +1,80 @@
+name: U22 actual Windows desktop visual
+
+on:
+  push:
+    branches: [u22-real-capture-20260828]
+    paths:
+      - ".github/workflows/u22-windows-app-screenshot.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+          cache: npm
+          cache-dependency-path: desktop-overlay-poc/package-lock.json
+
+      - name: Install desktop toolchain
+        shell: pwsh
+        run: |
+          npm install --global npm@10.9.8
+          rustup toolchain install 1.97.1 --profile minimal
+          cd desktop-overlay-poc
+          npm ci
+
+      - name: Build actual Windows executable
+        shell: pwsh
+        run: |
+          cd desktop-overlay-poc
+          npm run build:release
+          if (-not (Test-Path 'src-tauri/target/release/cpcv-desktop.exe')) { throw 'desktop exe missing' }
+
+      - name: Launch actual app and capture Windows desktop
+        shell: pwsh
+        run: |
+          $exe = Resolve-Path 'desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe'
+          $p = Start-Process -FilePath $exe -ArgumentList '--staging' -PassThru
+          Start-Sleep -Seconds 18
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Win32 {
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+          }
+          '@
+          $p.Refresh()
+          if ($p.HasExited) { throw "desktop app exited: $($p.ExitCode)" }
+          [Win32]::ShowWindowAsync($p.MainWindowHandle, 3) | Out-Null
+          [Win32]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
+          Start-Sleep -Seconds 3
+          Add-Type -AssemblyName System.Drawing
+          Add-Type -AssemblyName System.Windows.Forms
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          New-Item -ItemType Directory -Path 'u22-windows-visual' -Force | Out-Null
+          $bmp.Save((Join-Path (Resolve-Path 'u22-windows-visual') 'cpcv-desktop-windows-actual.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+          $g.Dispose(); $bmp.Dispose()
+          @(
+            "source_sha=$(git rev-parse HEAD)",
+            "exe=$exe",
+            "window_title=$($p.MainWindowTitle)",
+            "runner=windows-2025"
+          ) | Set-Content -Encoding utf8 'u22-windows-visual/manifest.txt'
+          Stop-Process -Id $p.Id -Force
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-u22-actual-windows-${{ github.run_id }}
+          path: u22-windows-visual/
+          if-no-files-found: error
+          retention-days: 30
