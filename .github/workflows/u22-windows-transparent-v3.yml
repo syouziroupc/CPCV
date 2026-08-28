@@ -1,0 +1,75 @@
+name: U22 verified visible transparent Windows overlay v3
+on:
+  push:
+    branches: [u22-real-capture-20260828]
+    paths: [".github/workflows/u22-windows-transparent-v3.yml"]
+permissions:
+  contents: read
+env:
+  STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+jobs:
+  capture:
+    runs-on: windows-2025
+    environment: production
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with: {node-version: 22.23.1}
+      - name: Build actual Desktop
+        shell: pwsh
+        env: {NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"}
+        run: |
+          npm ci
+          rustup toolchain install 1.97.1 --profile minimal
+          Push-Location desktop-overlay-poc
+          npm ci
+          npm run build:release
+          Pop-Location
+          if(-not(Test-Path 'desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe')){throw 'desktop exe missing'}
+      - name: Staging config
+        shell: pwsh
+        run: |
+          $s=Get-Content wrangler.toml -Raw -Encoding UTF8
+          $pairs=@(@('name = "class-pdf-comment-viewer-v01"','name = "class-pdf-comment-viewer-v01-staging"'),@('database_name = "class_comment_db"','database_name = "class_comment_db_staging"'),@('database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"','database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"'),@('database_name = "class_comment_db_v2"','database_name = "class_comment_db_v2_staging"'),@('database_id = "8315a076-67ad-44e6-8286-11887af52ad3"','database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"'),@('queue = "cpcv-ai-jobs"','queue = "cpcv-ai-jobs-staging"'),@('queue = "cpcv-ai-translation-jobs"','queue = "cpcv-ai-translation-jobs-staging"'),@('dead_letter_queue = "cpcv-ai-translation-dlq"','dead_letter_queue = "cpcv-ai-translation-dlq-staging"'),@('queue = "cpcv-ai-moderation-jobs"','queue = "cpcv-ai-moderation-jobs-staging"'),@('dead_letter_queue = "cpcv-ai-moderation-dlq"','dead_letter_queue = "cpcv-ai-moderation-dlq-staging"'),@('826071901','826071801'),@('826071902','826071802'),@('826071903','826071803'),@('826071904','826071804'),@('826071905','826071805'),@('826071906','826071806'),@('https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev','https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'),@('TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"','TURNSTILE_SITE_KEY = "1x00000000000000000000AA"'))
+          foreach($a in $pairs){if(-not $s.Contains($a[0])){throw "missing $($a[0])"};$s=$s.Replace($a[0],$a[1])};Set-Content .cpcv-staging.wrangler.toml $s -Encoding UTF8
+      - name: Seed teacher
+        shell: pwsh
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          @'
+          import {writeFileSync,appendFileSync} from 'node:fs';import {randomUUID} from 'node:crypto';import {createSalt,hashPassword,PASSWORD_SCHEME} from './src/auth/passwords.js';const z=`${process.env.GITHUB_RUN_ID}_${process.env.GITHUB_RUN_ATTEMPT}`,loginId=`u22wintr3_${z}`.slice(0,60),password='CPCV-U22-Capture-2026!',orgId=`org_${randomUUID().replaceAll('-','')}`,userId=`usr_${randomUUID().replaceAll('-','')}`,now=new Date().toISOString(),salt=createSalt(),hash=await hashPassword(password,salt),q=v=>`'${String(v).replaceAll("'","''")}'`;writeFileSync('.seed.sql',[`INSERT INTO organizations (id,name,status,created_at,updated_at,deleted_at) VALUES (${q(orgId)},'U22 Transparent Capture v3','active',${q(now)},${q(now)},NULL);`,`INSERT INTO users (id,login_id,display_name,password_scheme,password_hash,password_salt,password_changed_at,status,created_at,updated_at,deleted_at) VALUES (${q(userId)},${q(loginId)},'U22 Windows Teacher',${q(PASSWORD_SCHEME)},${q(hash)},${q(salt)},${q(now)},'active',${q(now)},${q(now)},NULL);`,`INSERT INTO organization_members (organization_id,user_id,role,status,created_at,updated_at,removed_at) VALUES (${q(orgId)},${q(userId)},'owner','active',${q(now)},${q(now)},NULL);`].join('\n'));appendFileSync(process.env.GITHUB_ENV,`CAPTURE_LOGIN_ID=${loginId}\nCAPTURE_PASSWORD=${password}\n`);
+          '@|Set-Content .seed.mjs -Encoding UTF8
+          node .seed.mjs
+          npx wrangler d1 execute class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml --file .seed.sql
+          Remove-Item .seed.mjs,.seed.sql -Force
+      - name: Verified transparent capture
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms;Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System;using System.Text;using System.Collections.Generic;using System.Runtime.InteropServices;public static class W{public delegate bool E(IntPtr h,IntPtr l);[DllImport("user32.dll")]public static extern bool SetForegroundWindow(IntPtr h);[DllImport("user32.dll")]public static extern bool ShowWindowAsync(IntPtr h,int n);[DllImport("user32.dll")]public static extern bool SetCursorPos(int x,int y);[DllImport("user32.dll")]public static extern void mouse_event(uint f,uint x,uint y,uint d,UIntPtr e);[DllImport("user32.dll")]public static extern bool EnumWindows(E c,IntPtr l);[DllImport("user32.dll")]public static extern uint GetWindowThreadProcessId(IntPtr h,out uint p);[DllImport("user32.dll")]public static extern bool IsWindowVisible(IntPtr h);[DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern int GetWindowText(IntPtr h,StringBuilder s,int n);[DllImport("user32.dll",CharSet=CharSet.Unicode)]public static extern bool SystemParametersInfo(uint a,uint u,string v,uint f);public static void Click(int x,int y){SetCursorPos(x,y);mouse_event(2,0,0,0,UIntPtr.Zero);mouse_event(4,0,0,0,UIntPtr.Zero);}public static string[] List(uint t){var a=new List<string>();EnumWindows((h,l)=>{uint p;GetWindowThreadProcessId(h,out p);if(p==t&&IsWindowVisible(h)){var b=new StringBuilder(256);GetWindowText(h,b,256);a.Add(h+"|"+b);}return true;},IntPtr.Zero);return a.ToArray();}}
+          '@
+          function Shot($f){$b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;$bm=New-Object System.Drawing.Bitmap $b.Width,$b.Height;$g=[System.Drawing.Graphics]::FromImage($bm);$g.CopyFromScreen($b.Location,[System.Drawing.Point]::Empty,$b.Size);$bm.Save($f,[System.Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$bm.Dispose()}
+          New-Item -ItemType Directory -Path u22-windows-transparent-v3 -Force|Out-Null;$out=(Resolve-Path u22-windows-transparent-v3).Path
+          # Create an explicit lesson wallpaper; this is background content, not CPCV UI.
+          $b=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;$wall=New-Object System.Drawing.Bitmap $b.Width,$b.Height;$g=[System.Drawing.Graphics]::FromImage($wall);$g.Clear([System.Drawing.Color]::FromArgb(247,244,236));$brush=New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(22,35,31));$green=New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(15,83,69));$f1=New-Object System.Drawing.Font('Yu Gothic UI',15,[System.Drawing.FontStyle]::Bold);$f2=New-Object System.Drawing.Font('Yu Gothic UI',38,[System.Drawing.FontStyle]::Bold);$f3=New-Object System.Drawing.Font('Yu Gothic UI',22);$g.FillRectangle($green,28,55,8,560);$g.DrawString('WINDOWS / DEMO LESSON',$f1,$green,70,70);$g.DrawString('地域文化と観光',$f2,$brush,70,145);$g.DrawString('地域の文化は、観光によってどのように変化するのでしょうか。',$f3,$brush,70,245);$g.DrawString('背面の教材を表示したまま、CPCV Desktopを重ねて使います。',$f3,$brush,70,305);$wallpath=Join-Path $out 'lesson_wallpaper.png';$wall.Save($wallpath,[System.Drawing.Imaging.ImageFormat]::Png);$g.Dispose();$wall.Dispose();[W]::SystemParametersInfo(20,0,$wallpath,3)|Out-Null
+          $p=Start-Process (Resolve-Path 'desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe') -ArgumentList '--staging' -PassThru;Start-Sleep 18;$p.Refresh();[W]::ShowWindowAsync($p.MainWindowHandle,3)|Out-Null;[W]::SetForegroundWindow($p.MainWindowHandle)|Out-Null;Start-Sleep 2
+          [System.Windows.Forms.SendKeys]::SendWait($env:CAPTURE_LOGIN_ID);[System.Windows.Forms.SendKeys]::SendWait('{TAB}');[System.Windows.Forms.SendKeys]::SendWait($env:CAPTURE_PASSWORD);[System.Windows.Forms.SendKeys]::SendWait('{ENTER}');Start-Sleep 12;$p.Refresh();[W]::ShowWindowAsync($p.MainWindowHandle,3)|Out-Null;[W]::SetForegroundWindow($p.MainWindowHandle)|Out-Null;Start-Sleep 2
+          [W]::Click(190,345);Start-Sleep -Milliseconds 400;[System.Windows.Forms.SendKeys]::SendWait('U22 Windows Transparent Demo');[W]::Click(190,405);Start-Sleep 12;$p.Refresh();[W]::SetForegroundWindow($p.MainWindowHandle)|Out-Null
+          # Verified coordinates from the prior capture: projection start x=135, QR after projection x=338.
+          [W]::Click(135,674);Start-Sleep 8;[W]::Click(338,674);Start-Sleep 7
+          Shot (Join-Path $out '01_after_projection_and_qr_click.png');$wins=[W]::List([uint32]$p.Id);$wins|Set-Content (Join-Path $out 'windows.txt') -Encoding UTF8
+          [W]::ShowWindowAsync($p.MainWindowHandle,6)|Out-Null;Start-Sleep 5
+          Shot (Join-Path $out '02_GENUINE_TRANSPARENT_OVERLAY_VISIBLE.png');Start-Sleep 3;Shot (Join-Path $out '03_GENUINE_TRANSPARENT_OVERLAY_VISIBLE_2.png')
+          @("source_sha=$(git rev-parse HEAD)","real_desktop=true","real_session=true","projection_start_coordinate=135,674","qr_coordinate_after_projection=338,674","management_minimized=true","wallpaper_is_non_cpcv_background=true","visible_windows=$($wins.Count)")|Set-Content (Join-Path $out 'manifest.txt') -Encoding UTF8
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: cpcv-u22-windows-transparent-v3-${{ github.run_id }}
+          path: u22-windows-transparent-v3/
+          if-no-files-found: error
+          retention-days: 30
