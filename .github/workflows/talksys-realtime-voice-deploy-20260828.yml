@@ -43,28 +43,37 @@ jobs:
           node --check src/voice-fallback-client.js
           node --check src/streaming-workers-ai.js
           npx wrangler deploy --dry-run
-      - name: Preflight GLM 5.3 Flash
+      - name: Deploy v11 canary
+        id: canary
+        working-directory: talksys
         run: |
           set -euo pipefail
-          START=$(date +%s%3N)
-          curl --fail-with-body --silent --show-error \
-            -X POST "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/zai-org/glm-5.3-flash" \
-            -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
-            -H 'content-type: application/json' \
-            --data '{"messages":[{"role":"system","content":"日本語で短く答える。"},{"role":"user","content":"1+1は？"}],"max_completion_tokens":64,"reasoning_effort":"low","chat_template_kwargs":{"enable_thinking":false,"clear_thinking":true}}' \
-            -o /tmp/glm.json
-          END=$(date +%s%3N)
-          cat /tmp/glm.json
-          echo "glm_preflight_ms=$((END-START))"
-          node - <<'NODE'
-          const x=require('/tmp/glm.json');
-          if(x.success===false) process.exit(1);
-          const r=x.result||x;
-          const text=String(r.response||r.choices?.[0]?.message?.content||r.output_text||'').trim();
-          if(!text) process.exit(1);
-          console.log('glm_text='+text.slice(0,120));
+          npx wrangler deploy --name talksys-v11-canary 2>&1 | tee /tmp/canary.log
+          CANARY_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/canary.log | tail -1 | sed -E 's/[).,;]+$//' || true)"
+          test -n "$CANARY_URL"
+          echo "url=$CANARY_URL" >> "$GITHUB_OUTPUT"
+      - name: Verify canary model and streaming TTFT
+        env:
+          WORKER_URL: ${{ steps.canary.outputs.url }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            if curl --fail --silent "$WORKER_URL/voice-health?i=$i" -o /tmp/canary-health.json; then
+              if node -e 'const x=require("/tmp/canary-health.json");process.exit(x.voiceRevision==="live-stream-v11"?0:1)'; then break; fi
+            fi
+            sleep 1
+          done
+          node <<'NODE'
+          const name='canary-'+Date.now();
+          const ws=new WebSocket(process.env.WORKER_URL.replace(/^https:/,'wss:')+'/agents/talk-sys-voice-agent/'+name);
+          let start=0,first=0,final=0,reply='',chunk='',done=false;
+          const timer=setTimeout(()=>finish(new Error('canary timeout')),16000);
+          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};const m={firstChunkMs:first?first-start:0,finalMs:final?final-start:0,chunk,reply};console.log(JSON.stringify(m));if(error){console.error(error);process.exitCode=1;return}if(!first||!final||first>=final||m.firstChunkMs>5000||reply.length<16)process.exitCode=1}
+          ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
+          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return};if(d.type==='welcome'&&!start){start=Date.now();ws.send(JSON.stringify({type:'text_message',text:'今日は少し疲れた。気分転換を二つ提案して'}));return}if(d.type==='assistant_speech_chunk'&&!first){first=Date.now();chunk=String(d.text||'');return}if(d.type==='transcript'&&d.role==='assistant'){final=Date.now();reply=String(d.text||'').trim();return finish()}if(d.type==='error')finish(new Error(d.message||'agent error'))});
+          ws.addEventListener('error',()=>finish(new Error('ws error')));
           NODE
-      - name: Deploy TalkSys
+      - name: Deploy TalkSys production
         id: deploy
         working-directory: talksys
         run: |
@@ -75,7 +84,7 @@ jobs:
           test -n "$WORKER_URL"
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
           echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
-      - name: Wait for live-stream-v11
+      - name: Wait for live-stream-v11 production
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
@@ -113,12 +122,7 @@ jobs:
           const timer=setTimeout(()=>finish(new Error('timeout')),16000);
           function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};const m={firstChunkMs:firstChunk?firstChunk-start:0,finalMs:finalAt?finalAt-start:0,chunk,reply,replyLength:reply.length};console.log(JSON.stringify(m));if(error){console.error(error);process.exitCode=1;return}if(!firstChunk||!finalAt)process.exitCode=1;if(firstChunk>=finalAt)process.exitCode=1;if(m.firstChunkMs>4000)process.exitCode=1;if(reply.length<24)process.exitCode=1}
           ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
-          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
-            if(d.type==='welcome'&&!start){start=Date.now();ws.send(JSON.stringify({type:'text_message',text:'最近ちょっと忙しいんだけど、気分転換の案をいくつか話して'}));return}
-            if(d.type==='assistant_speech_chunk'&&!firstChunk){firstChunk=Date.now();chunk=String(d.text||'');return}
-            if(d.type==='transcript'&&d.role==='assistant'){finalAt=Date.now();reply=String(d.text||'').trim();return finish()}
-            if(d.type==='error')finish(new Error(d.message||'agent error'));
-          });
+          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return};if(d.type==='welcome'&&!start){start=Date.now();ws.send(JSON.stringify({type:'text_message',text:'最近ちょっと忙しいんだけど、気分転換の案をいくつか話して'}));return}if(d.type==='assistant_speech_chunk'&&!firstChunk){firstChunk=Date.now();chunk=String(d.text||'');return}if(d.type==='transcript'&&d.role==='assistant'){finalAt=Date.now();reply=String(d.text||'').trim();return finish()}if(d.type==='error')finish(new Error(d.message||'agent error'))});
           ws.addEventListener('error',()=>finish(new Error('ws error')));
           NODE
       - name: Verify search-grounded live reply
@@ -133,13 +137,7 @@ jobs:
           const timer=setTimeout(()=>finish(new Error('timeout')),18000);
           function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close()}catch{};console.log(JSON.stringify({searched,count,firstChunkMs:firstChunk?firstChunk-start:0,reply}));if(error){console.error(error);process.exitCode=1;return}if(!searched||count<1||!firstChunk||!reply)process.exitCode=1}
           ws.addEventListener('open',()=>ws.send(JSON.stringify({type:'hello',protocol_version:1})));
-          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return}
-            if(d.type==='welcome'&&!start){start=Date.now();ws.send(JSON.stringify({type:'text_message',text:'現在の日本の総理大臣は誰？'}));return}
-            if(d.type==='search_status'&&d.phase==='done'){searched=true;count=Number(d.resultCount||0);return}
-            if(d.type==='assistant_speech_chunk'&&!firstChunk){firstChunk=Date.now();return}
-            if(d.type==='transcript'&&d.role==='assistant'){reply=String(d.text||'').trim();return finish()}
-            if(d.type==='error')finish(new Error(d.message||'agent error'));
-          });
+          ws.addEventListener('message',ev=>{if(typeof ev.data!=='string')return;let d;try{d=JSON.parse(ev.data)}catch{return};if(d.type==='welcome'&&!start){start=Date.now();ws.send(JSON.stringify({type:'text_message',text:'現在の日本の総理大臣は誰？'}));return}if(d.type==='search_status'&&d.phase==='done'){searched=true;count=Number(d.resultCount||0);return}if(d.type==='assistant_speech_chunk'&&!firstChunk){firstChunk=Date.now();return}if(d.type==='transcript'&&d.role==='assistant'){reply=String(d.text||'').trim();return finish()}if(d.type==='error')finish(new Error(d.message||'agent error'))});
           ws.addEventListener('error',()=>finish(new Error('ws error')));
           NODE
       - name: Verify conversation history survives reconnect
@@ -169,6 +167,10 @@ jobs:
           echo "search_ms=$((END-START))"
           node -e 'const x=require("/tmp/search.json");const r=x.results||[];if(!x.ok||r.length<1)process.exit(1);const text=r.map(v=>(v.title||"")+" "+(v.snippet||"")).join(" ");if(!/(総理|首相|内閣)/.test(text))process.exit(1)'
           test $((END-START)) -lt 4500
+      - name: Cleanup canary
+        if: always()
+        working-directory: talksys
+        run: npx wrangler delete --name talksys-v11-canary --force || true
       - name: Production summary
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
