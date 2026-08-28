@@ -62,19 +62,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for i in $(seq 1 18); do
-            if curl --fail --silent --show-error "$WORKER_URL/voice-health" -o /tmp/voice-health.json; then break; fi
-            sleep 4
-          done
-          cat /tmp/voice-health.json
+          code="$(curl --silent --show-error -o /tmp/voice-health.json -w '%{http_code}' "$WORKER_URL/voice-health")"
+          echo "voice-health HTTP $code"; cat /tmp/voice-health.json; echo
+          test "$code" = 200
           node -e 'const x=require("/tmp/voice-health.json");if(!x.ok||!x.realtime||!x.continuousStt||!x.bargeIn||!x.aiScreenDecision||!x.japaneseTts)process.exit(1)'
-          curl --fail --silent --show-error "$WORKER_URL/health" -o /tmp/health.json
-          curl --fail --silent --show-error -X POST "$WORKER_URL/api/chat" -H 'content-type: application/json' --data '{"messages":[{"role":"user","content":"1+1を数字だけで答えて"}]}' -o /tmp/chat.json
+
+          code="$(curl --silent --show-error -o /tmp/health.json -w '%{http_code}' "$WORKER_URL/health")"
+          echo "health HTTP $code"; cat /tmp/health.json; echo
+          test "$code" = 200
+
+          code="$(curl --silent --show-error -o /tmp/chat.json -w '%{http_code}' -X POST "$WORKER_URL/api/chat" -H 'content-type: application/json' --data '{"messages":[{"role":"user","content":"1+1を数字だけで答えて"}]}')"
+          echo "chat HTTP $code"; cat /tmp/chat.json; echo
+          test "$code" = 200
           node -e 'const x=require("/tmp/chat.json");if(typeof x.reply!=="string"||!x.reply.trim())process.exit(1)'
-          curl --fail --silent --show-error "$WORKER_URL/api/voice-smoke" -o /tmp/voice.mp3
-          test "$(wc -c < /tmp/voice.mp3)" -gt 1000
-          file /tmp/voice.mp3
-          echo "Japanese TTS bytes: $(wc -c < /tmp/voice.mp3)"
+
+          code="$(curl --silent --show-error -o /tmp/voice-output -w '%{http_code}' "$WORKER_URL/api/voice-smoke")"
+          echo "voice-smoke HTTP $code"
+          if [ "$code" != 200 ]; then cat /tmp/voice-output; echo; exit 7; fi
+          test "$(wc -c < /tmp/voice-output)" -gt 1000
+          file /tmp/voice-output
+          echo "Japanese TTS bytes: $(wc -c < /tmp/voice-output)"
 
       - name: Verify realtime voice WebSocket, STT startup, and greeting audio
         env:
@@ -106,34 +113,22 @@ jobs:
           }
 
           ws.binaryType = 'arraybuffer';
-          ws.addEventListener('open', () => {
-            ws.send(JSON.stringify({ type: 'hello', protocol_version: 1 }));
-          });
+          ws.addEventListener('open', () => ws.send(JSON.stringify({ type: 'hello', protocol_version: 1 })));
           ws.addEventListener('message', async (event) => {
             if (event.data instanceof ArrayBuffer) {
               audioBytes += event.data.byteLength;
-              if (welcomed && listening && audioBytes > 1000) {
-                ws.send(JSON.stringify({ type: 'end_call' }));
-                finish();
-              }
-              return;
-            }
-            if (event.data instanceof Blob) {
+            } else if (event.data instanceof Blob) {
               audioBytes += event.data.size;
-              if (welcomed && listening && audioBytes > 1000) {
-                ws.send(JSON.stringify({ type: 'end_call' }));
-                finish();
+            } else {
+              let data;
+              try { data = JSON.parse(String(event.data)); } catch { return; }
+              if (data.type === 'welcome') {
+                welcomed = true;
+                ws.send(JSON.stringify({ type: 'start_call', preferred_format: 'mp3' }));
               }
-              return;
+              if (data.type === 'status' && data.status === 'listening') listening = true;
+              if (data.type === 'error') return finish(new Error(`voice error: ${data.message || JSON.stringify(data)}`));
             }
-            let data;
-            try { data = JSON.parse(String(event.data)); } catch { return; }
-            if (data.type === 'welcome') {
-              welcomed = true;
-              ws.send(JSON.stringify({ type: 'start_call', preferred_format: 'mp3' }));
-            }
-            if (data.type === 'status' && data.status === 'listening') listening = true;
-            if (data.type === 'error') finish(new Error(`voice error: ${data.message || JSON.stringify(data)}`));
             if (welcomed && listening && audioBytes > 1000) {
               ws.send(JSON.stringify({ type: 'end_call' }));
               finish();
