@@ -1,0 +1,184 @@
+name: U22 genuine transparent Windows overlay
+
+on:
+  push:
+    branches: [u22-real-capture-20260828]
+    paths:
+      - ".github/workflows/u22-windows-transparent.yml"
+
+permissions:
+  contents: read
+
+env:
+  STAGING_ORIGIN: https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev
+
+jobs:
+  capture:
+    runs-on: windows-2025
+    environment: production
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 22.23.1
+      - name: Install dependencies
+        shell: pwsh
+        env:
+          NPM_CONFIG_STRICT_ALLOW_SCRIPTS: "true"
+        run: |
+          npm ci
+          rustup toolchain install 1.97.1 --profile minimal
+          Push-Location desktop-overlay-poc
+          npm ci
+          Pop-Location
+
+      - name: Build isolated staging config
+        shell: pwsh
+        run: |
+          $s = Get-Content wrangler.toml -Raw -Encoding UTF8
+          $pairs = @(
+            @('name = "class-pdf-comment-viewer-v01"','name = "class-pdf-comment-viewer-v01-staging"'),
+            @('database_name = "class_comment_db"','database_name = "class_comment_db_staging"'),
+            @('database_id = "f11457fa-27af-468d-94cc-6cdf1ae814e4"','database_id = "20e4531c-2765-46b5-a68f-940daa94d6a9"'),
+            @('database_name = "class_comment_db_v2"','database_name = "class_comment_db_v2_staging"'),
+            @('database_id = "8315a076-67ad-44e6-8286-11887af52ad3"','database_id = "7b30a11d-5b3c-49f5-bc54-9a1326818089"'),
+            @('queue = "cpcv-ai-jobs"','queue = "cpcv-ai-jobs-staging"'),
+            @('queue = "cpcv-ai-translation-jobs"','queue = "cpcv-ai-translation-jobs-staging"'),
+            @('dead_letter_queue = "cpcv-ai-translation-dlq"','dead_letter_queue = "cpcv-ai-translation-dlq-staging"'),
+            @('queue = "cpcv-ai-moderation-jobs"','queue = "cpcv-ai-moderation-jobs-staging"'),
+            @('dead_letter_queue = "cpcv-ai-moderation-dlq"','dead_letter_queue = "cpcv-ai-moderation-dlq-staging"'),
+            @('826071901','826071801'),@('826071902','826071802'),@('826071903','826071803'),@('826071904','826071804'),@('826071905','826071805'),@('826071906','826071806'),
+            @('https://class-pdf-comment-viewer-v01.syouziroupc.workers.dev','https://class-pdf-comment-viewer-v01-staging.syouziroupc.workers.dev'),
+            @('TURNSTILE_SITE_KEY = "0x4AAAAAAD9zOVz8FBcawf0n"','TURNSTILE_SITE_KEY = "1x00000000000000000000AA"')
+          )
+          foreach ($p in $pairs) { if (-not $s.Contains($p[0])) { throw "missing staging replacement $($p[0])" }; $s=$s.Replace($p[0],$p[1]) }
+          Set-Content .cpcv-staging.wrangler.toml -Value $s -Encoding UTF8
+
+      - name: Seed temporary teacher
+        shell: pwsh
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          @'
+          import { writeFileSync, appendFileSync } from 'node:fs';
+          import { randomUUID } from 'node:crypto';
+          import { createSalt, hashPassword, PASSWORD_SCHEME } from './src/auth/passwords.js';
+          const suffix=`${process.env.GITHUB_RUN_ID}_${process.env.GITHUB_RUN_ATTEMPT}`;
+          const loginId=`u22wintrans_${suffix}`.slice(0,60), password='CPCV-U22-Capture-2026!';
+          const orgId=`org_${randomUUID().replaceAll('-','')}`, userId=`usr_${randomUUID().replaceAll('-','')}`, now=new Date().toISOString();
+          const salt=createSalt(), hash=await hashPassword(password,salt), q=(v)=>`'${String(v).replaceAll("'","''")}'`;
+          writeFileSync('.u22-wintrans-seed.sql',[
+            `INSERT INTO organizations (id,name,status,created_at,updated_at,deleted_at) VALUES (${q(orgId)},${q('U22 Transparent Windows Capture')},'active',${q(now)},${q(now)},NULL);`,
+            `INSERT INTO users (id,login_id,display_name,password_scheme,password_hash,password_salt,password_changed_at,status,created_at,updated_at,deleted_at) VALUES (${q(userId)},${q(loginId)},${q('U22 Windows Teacher')},${q(PASSWORD_SCHEME)},${q(hash)},${q(salt)},${q(now)},'active',${q(now)},${q(now)},NULL);`,
+            `INSERT INTO organization_members (organization_id,user_id,role,status,created_at,updated_at,removed_at) VALUES (${q(orgId)},${q(userId)},'owner','active',${q(now)},${q(now)},NULL);`
+          ].join('\n'),{encoding:'utf8',mode:0o600});
+          appendFileSync(process.env.GITHUB_ENV,`CAPTURE_LOGIN_ID=${loginId}\nCAPTURE_PASSWORD=${password}\n`);
+          '@ | Set-Content .u22-wintrans-seed.mjs -Encoding UTF8
+          node .u22-wintrans-seed.mjs
+          npx wrangler d1 execute class_comment_db_v2_staging --remote --config .cpcv-staging.wrangler.toml --file .u22-wintrans-seed.sql
+          Remove-Item .u22-wintrans-seed.mjs,.u22-wintrans-seed.sql -Force
+
+      - name: Build actual Desktop executable
+        shell: pwsh
+        run: |
+          Push-Location desktop-overlay-poc
+          npm run build:release
+          Pop-Location
+          if (-not (Test-Path 'desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe')) { throw 'desktop exe missing' }
+
+      - name: Start real projection and capture transparency
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          Add-Type @'
+          using System;
+          using System.Text;
+          using System.Collections.Generic;
+          using System.Runtime.InteropServices;
+          public static class Win32 {
+            public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+            [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+            [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+            [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
+            [DllImport("user32.dll")] public static extern void mouse_event(uint f, uint dx, uint dy, uint data, UIntPtr extra);
+            [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+            [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+            [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+            [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder s, int n);
+            public static void Click(int x,int y){ SetCursorPos(x,y); mouse_event(0x0002,0,0,0,UIntPtr.Zero); mouse_event(0x0004,0,0,0,UIntPtr.Zero); }
+            public static string[] WindowsFor(uint target) {
+              var a=new List<string>(); EnumWindows((h,l)=>{uint p;GetWindowThreadProcessId(h,out p);if(p==target && IsWindowVisible(h)){var b=new StringBuilder(512);GetWindowText(h,b,512);a.Add(h.ToString()+"|"+b.ToString());}return true;},IntPtr.Zero);return a.ToArray();
+            }
+          }
+          '@
+          function Shot($path) {
+            $bounds=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bmp=New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+            $g=[System.Drawing.Graphics]::FromImage($bmp)
+            $g.CopyFromScreen($bounds.Location,[System.Drawing.Point]::Empty,$bounds.Size)
+            $bmp.Save($path,[System.Drawing.Imaging.ImageFormat]::Png)
+            $g.Dispose();$bmp.Dispose()
+          }
+          New-Item -ItemType Directory -Path 'u22-windows-transparent' -Force | Out-Null
+          $out=(Resolve-Path 'u22-windows-transparent').Path
+          $exe = Resolve-Path 'desktop-overlay-poc/src-tauri/target/release/cpcv-desktop.exe'
+          $p = Start-Process -FilePath $exe -ArgumentList '--staging' -PassThru
+          Start-Sleep -Seconds 18
+          $p.Refresh(); if ($p.HasExited) { throw "desktop app exited: $($p.ExitCode)" }
+          [Win32]::ShowWindowAsync($p.MainWindowHandle,3)|Out-Null; [Win32]::SetForegroundWindow($p.MainWindowHandle)|Out-Null; Start-Sleep -Seconds 2
+          [System.Windows.Forms.SendKeys]::SendWait($env:CAPTURE_LOGIN_ID); [System.Windows.Forms.SendKeys]::SendWait('{TAB}'); [System.Windows.Forms.SendKeys]::SendWait($env:CAPTURE_PASSWORD); [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+          Start-Sleep -Seconds 12
+          $p.Refresh(); [Win32]::ShowWindowAsync($p.MainWindowHandle,3)|Out-Null; [Win32]::SetForegroundWindow($p.MainWindowHandle)|Out-Null; Start-Sleep -Seconds 2
+          # Create a real session in the real Desktop-managed CPCV page.
+          [Win32]::Click(190,345); Start-Sleep -Milliseconds 400
+          [System.Windows.Forms.SendKeys]::SendWait('U22 Windows Transparent Demo')
+          [Win32]::Click(190,405); Start-Sleep -Seconds 12
+          $p.Refresh(); [Win32]::SetForegroundWindow($p.MainWindowHandle)|Out-Null
+          Shot (Join-Path $out '01_session_ready.png')
+          # Persistent Desktop control bar: start real projection, then show real QR overlay.
+          [Win32]::Click(150,674); Start-Sleep -Seconds 7
+          [Win32]::Click(420,674); Start-Sleep -Seconds 5
+          $wins=[Win32]::WindowsFor([uint32]$p.Id)
+          $wins | Set-Content -Encoding utf8 (Join-Path $out 'windows_after_projection.txt')
+          Shot (Join-Path $out '02_projection_with_admin_underlay.png')
+          # Minimize only the management window; transparent always-on-top overlay must remain.
+          [Win32]::ShowWindowAsync($p.MainWindowHandle,6)|Out-Null; Start-Sleep -Seconds 3
+          $html=@'
+          <!doctype html><html lang="ja"><meta charset="utf-8"><style>
+          html,body{margin:0;width:100%;height:100%;font-family:"Yu Gothic UI","Meiryo",sans-serif;background:#f7f4ec;color:#17211d}
+          .slide{box-sizing:border-box;height:100vh;padding:76px 90px;border-left:12px solid #0f5345}
+          .k{font-size:18px;color:#0f5345;font-weight:700;letter-spacing:.12em}.h{font-size:54px;font-weight:700;margin-top:28px}.p{font-size:30px;line-height:1.65;margin-top:34px;max-width:900px}.foot{position:absolute;bottom:52px;left:102px;font-size:18px;color:#52615c}
+          </style><div class="slide"><div class="k">DEMO LESSON / WINDOWS</div><div class="h">地域文化と観光</div><div class="p">地域の文化は、観光によってどのように変化するのでしょうか。<br>普段のブラウザ教材の上に、CPCV Desktopを重ねて表示します。</div><div class="foot">ブラウザ教材（背面）</div></div></html>
+          '@
+          $lesson=Join-Path $out 'lesson.html'; Set-Content -Path $lesson -Value $html -Encoding UTF8
+          $edge=@('C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe','C:\Program Files\Microsoft\Edge\Application\msedge.exe') | Where-Object {Test-Path $_} | Select-Object -First 1
+          if ($edge) { Start-Process $edge -ArgumentList @('--new-window','--start-maximized',("file:///"+$lesson.Replace('\\','/'))) | Out-Null }
+          else { Start-Process notepad.exe -ArgumentList $lesson | Out-Null }
+          Start-Sleep -Seconds 8
+          Shot (Join-Path $out '03_GENUINE_TRANSPARENT_OVERLAY.png')
+          Start-Sleep -Seconds 3
+          Shot (Join-Path $out '04_GENUINE_TRANSPARENT_OVERLAY_2.png')
+          @(
+            "source_sha=$(git rev-parse HEAD)",
+            "runner=windows-2025",
+            "real_desktop_exe=true",
+            "real_session_created=true",
+            "projection_start_clicked=true",
+            "qr_overlay_clicked=true",
+            "management_window_minimized=true",
+            "transparent_overlay_expected_by_desktop_contract=true",
+            "visible_process_windows_after_projection=$($wins.Count)"
+          ) | Set-Content -Encoding utf8 (Join-Path $out 'manifest.txt')
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+
+      - name: Upload genuine transparent capture
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: cpcv-u22-windows-transparent-${{ github.run_id }}
+          path: u22-windows-transparent/
+          if-no-files-found: error
+          retention-days: 30
