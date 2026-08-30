@@ -1,12 +1,13 @@
-name: TalkSys Gemini Live v13 deploy
+name: TalkSys Gemini Live v13.1 deploy
 
 on:
   push:
     branches: [talksys-realtime-voice-20260828]
     paths: ['.github/workflows/talksys-realtime-voice-deploy-20260828.yml']
+  workflow_dispatch:
 
 concurrency:
-  group: talksys-realtime-voice-production
+  group: talksys-gemini-live-production
   cancel-in-progress: true
 
 permissions:
@@ -15,7 +16,7 @@ permissions:
 jobs:
   deploy-talksys:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     environment: production
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -36,23 +37,25 @@ jobs:
       - name: Fetch TalkSys main
         run: git clone --depth 1 --branch main https://github.com/syouziroupc/talksys.git talksys
 
-      - name: Validate Gemini Live v13
+      - name: Validate Gemini Live v13.1
         working-directory: talksys
         run: |
           set -euo pipefail
           npm install --no-audit --no-fund
           npm test
           node --check src/worker-v13.js
-          node --check src/gemini-live-primary.js
-          node --check src/worker.js
-          node --check src/realtime-voice-client.js
-          node --check src/voice-fallback-client.js
+          node --check src/gemini-live-v13-client.js
+          node --check src/gemini-transcribe-companion.js
+          node --check desktop/gemini-live.js
+          node --check desktop/gemini-transcribe.js
+          node --check scripts/verify-gemini-live.mjs
           grep -F '"main": "src/worker-v13.js"' wrangler.jsonc
-          grep -F "realtimeInput: { text }" src/gemini-live-primary.js
-          grep -F "audioStreamEnd: true" src/gemini-live-primary.js
+          grep -F "realtimeInput: { text }" src/gemini-live-v13-client.js
+          grep -F "audioStreamEnd: true" src/gemini-live-v13-client.js
+          grep -F "gemini-3.5-transcribe-live" src/gemini-transcribe-companion.js
           npx wrangler deploy --dry-run
 
-      - name: Deploy v13 canary
+      - name: Deploy isolated v13.1 canary
         id: canary
         working-directory: talksys
         run: |
@@ -63,95 +66,25 @@ jobs:
           printf '%s' "$GEMINI_API_KEY" | npx wrangler secret put GEMINI_API_KEY --name talksys-v13-canary
           echo "url=$CANARY_URL" >> "$GITHUB_OUTPUT"
 
-      - name: Verify v13 canary and Gemini token
+      - name: Wait for canary revision
         env:
           WORKER_URL: ${{ steps.canary.outputs.url }}
         run: |
           set -euo pipefail
           matched=0
-          for i in $(seq 1 25); do
-            curl --fail --silent "$WORKER_URL/voice-health?i=$i&ts=$(date +%s%N)" -o /tmp/health.json || true
-            cat /tmp/health.json || true
-            if node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="gemini-live-v13"&&x.primary==="gemini-live"&&x.geminiLiveConfigured===true&&x.googleSearchGrounding===true&&x.sessionResumption===true&&x.hybridVad===true&&x.typedChatTransport==="realtimeInput.text"?0:1)' 2>/dev/null; then matched=1; break; fi
+          for i in $(seq 1 30); do
+            curl --silent --show-error "$WORKER_URL/voice-health?i=$i&ts=$(date +%s%N)" -o /tmp/health.json || true
+            echo "attempt=$i $(cat /tmp/health.json 2>/dev/null || true)"
+            if node -e 'const x=require("/tmp/health.json");process.exit(x.ok&&x.voiceRevision==="gemini-live-v13.1"&&x.geminiLiveConfigured===true&&x.geminiLiveModel==="gemini-3.1-flash-live-preview"&&x.dedicatedTranscriptionModel==="gemini-3.5-transcribe-live"&&x.parallelHighAccuracyTranscription===true&&x.googleSearchGrounding===true&&x.typedChatTransport==="realtimeInput.text"?0:1)' 2>/dev/null; then matched=1; break; fi
             sleep 1
           done
           test "$matched" = 1
-          curl --fail --silent --show-error -X POST "$WORKER_URL/api/gemini-live-token" -H 'content-type: application/json' -d '{}' -o /tmp/token.json
-          node -e 'const x=require("/tmp/token.json");if(!x.available||!x.token||x.model!=="gemini-3.1-flash-live-preview")process.exit(1)'
 
-      - name: Verify real Gemini Live audio session
+      - name: Full real Gemini Live canary
+        working-directory: talksys
         env:
           WORKER_URL: ${{ steps.canary.outputs.url }}
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const workerUrl = process.env.WORKER_URL;
-          const tokenResponse = await fetch(workerUrl + '/api/gemini-live-token', { method: 'POST', headers: {'content-type':'application/json'}, body:'{}' });
-          if (!tokenResponse.ok) throw new Error('token endpoint ' + tokenResponse.status + ': ' + await tokenResponse.text());
-          const token = await tokenResponse.json();
-          const ws = new WebSocket(token.endpoint + '?access_token=' + encodeURIComponent(token.token));
-          let setup=false,audio=false,transcript='',complete=false,done=false;
-          const timer=setTimeout(()=>finish(new Error('Gemini Live smoke timeout')),25000);
-          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close(1000,'done')}catch{};console.log(JSON.stringify({setup,audio,transcript,complete}));if(error){console.error(error);process.exitCode=1;return}if(!setup||!audio||!complete||!transcript.trim())process.exitCode=1}
-          ws.addEventListener('open',()=>{
-            ws.send(JSON.stringify({setup:{
-              model:'models/gemini-3.1-flash-live-preview',
-              generationConfig:{responseModalities:['AUDIO'],speechConfig:{languageCode:'ja-JP'},thinkingConfig:{thinkingLevel:'MINIMAL'},temperature:0.2},
-              systemInstruction:{parts:[{text:'自然な日本語で短く正確に答えてください。'}]},
-              tools:[{googleSearch:{}}],
-              sessionResumption:{},
-              contextWindowCompression:{slidingWindow:{}},
-              inputAudioTranscription:{},
-              outputAudioTranscription:{}
-            }}));
-          });
-          ws.addEventListener('message',ev=>{
-            let d;try{d=JSON.parse(ev.data)}catch{return}
-            if(d.setupComplete&&!setup){
-              setup=true;
-              ws.send(JSON.stringify({realtimeInput:{text:'日本語で、1足す1はいくつですか。短く答えて。'}}));
-              return;
-            }
-            const c=d.serverContent;
-            if(!c)return;
-            if(c.outputTranscription?.text) transcript += c.outputTranscription.text;
-            for(const p of c.modelTurn?.parts||[]) if(p.inlineData?.data && /audio\/pcm/i.test(p.inlineData?.mimeType||'audio/pcm')) audio=true;
-            if(c.turnComplete){complete=true;setTimeout(()=>finish(),350);}
-          });
-          ws.addEventListener('error',()=>finish(new Error('Gemini Live websocket error')));
-          ws.addEventListener('close',ev=>{if(!done)finish(new Error('Gemini Live closed early '+ev.code+' '+ev.reason))});
-          NODE
-
-      - name: Verify Google Search and spoken wait on real Gemini Live
-        env:
-          WORKER_URL: ${{ steps.canary.outputs.url }}
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          const tokenResponse=await fetch(process.env.WORKER_URL+'/api/gemini-live-token',{method:'POST',headers:{'content-type':'application/json'},body:'{}'});
-          if(!tokenResponse.ok)throw new Error(await tokenResponse.text());
-          const token=await tokenResponse.json();
-          const ws=new WebSocket(token.endpoint+'?access_token='+encodeURIComponent(token.token));
-          let setup=false,transcript='',grounded=false,complete=false,done=false;
-          const timer=setTimeout(()=>finish(new Error('Google Search Live timeout')),30000);
-          function finish(error){if(done)return;done=true;clearTimeout(timer);try{ws.close(1000,'done')}catch{};const wait=/(ちょっと)?(調べ|確認).*ます/.test(transcript);console.log(JSON.stringify({setup,grounded,complete,wait,transcript}));if(error){console.error(error);process.exitCode=1;return}if(!setup||!complete||!grounded||!wait||!transcript.trim())process.exitCode=1}
-          ws.addEventListener('open',()=>ws.send(JSON.stringify({setup:{
-            model:'models/gemini-3.1-flash-live-preview',
-            generationConfig:{responseModalities:['AUDIO'],speechConfig:{languageCode:'ja-JP'},thinkingConfig:{thinkingLevel:'MINIMAL'},temperature:0.1},
-            systemInstruction:{parts:[{text:'現在情報や外部事実は必ずGoogle Searchで確認してから日本語で回答してください。検索する時は回答の最初に必ず「ちょっと調べますね。」と言ってください。'}]},
-            tools:[{googleSearch:{}}],sessionResumption:{},contextWindowCompression:{slidingWindow:{}},outputAudioTranscription:{}
-          }})));
-          ws.addEventListener('message',ev=>{
-            let d;try{d=JSON.parse(ev.data)}catch{return}
-            if(d.setupComplete&&!setup){setup=true;ws.send(JSON.stringify({realtimeInput:{text:'現在の日本の内閣総理大臣は誰ですか。Google検索で確認して答えてください。'}}));return}
-            const c=d.serverContent;if(!c)return;
-            if(c.outputTranscription?.text)transcript+=c.outputTranscription.text;
-            if(c.groundingMetadata?.groundingChunks?.length)grounded=true;
-            if(c.turnComplete){complete=true;setTimeout(()=>finish(),350);}
-          });
-          ws.addEventListener('error',()=>finish(new Error('search websocket error')));
-          ws.addEventListener('close',ev=>{if(!done)finish(new Error('search websocket closed '+ev.code+' '+ev.reason))});
-          NODE
+        run: node scripts/verify-gemini-live.mjs
 
       - name: Configure Gemini secret on production
         working-directory: talksys
@@ -159,7 +92,7 @@ jobs:
           set -euo pipefail
           printf '%s' "$GEMINI_API_KEY" | npx wrangler secret put GEMINI_API_KEY --name talksys
 
-      - name: Deploy TalkSys production v13
+      - name: Deploy TalkSys production v13.1
         id: deploy
         working-directory: talksys
         run: |
@@ -171,7 +104,7 @@ jobs:
           echo "worker_url=$WORKER_URL" >> "$GITHUB_OUTPUT"
           echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Verify production Gemini Live v13
+      - name: Wait for production revision
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
         run: |
@@ -180,16 +113,31 @@ jobs:
           for i in $(seq 1 30); do
             curl --silent --show-error "$WORKER_URL/voice-health?i=$i&ts=$(date +%s%N)" -o /tmp/prod-health.json || true
             echo "attempt=$i $(cat /tmp/prod-health.json 2>/dev/null || true)"
-            if node -e 'const x=require("/tmp/prod-health.json");process.exit(x.ok&&x.voiceRevision==="gemini-live-v13"&&x.primary==="gemini-live"&&x.geminiLiveConfigured===true&&x.googleSearchGrounding===true&&x.sessionResumption===true&&x.hybridVad===true&&x.typedChatTransport==="realtimeInput.text"?0:1)' 2>/dev/null; then matched=1; break; fi
+            if node -e 'const x=require("/tmp/prod-health.json");process.exit(x.ok&&x.voiceRevision==="gemini-live-v13.1"&&x.geminiLiveConfigured===true&&x.parallelHighAccuracyTranscription===true&&x.googleSearchGrounding===true&&x.hybridVad===true&&x.typedChatTransport==="realtimeInput.text"?0:1)' 2>/dev/null; then matched=1; break; fi
             sleep 1
           done
           test "$matched" = 1
+
+      - name: Re-run real Gemini verification on production
+        working-directory: talksys
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: node scripts/verify-gemini-live.mjs
+
+      - name: Verify production client assets
+        env:
+          WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
+        run: |
+          set -euo pipefail
           curl --fail --silent --show-error "$WORKER_URL/gemini-live.js?ts=$(date +%s%N)" -o /tmp/live.js
+          curl --fail --silent --show-error "$WORKER_URL/gemini-transcribe.js?ts=$(date +%s%N)" -o /tmp/transcribe.js
           grep -q 'gemini-3.1-flash-live-preview' /tmp/live.js
           grep -q 'googleSearch' /tmp/live.js
-          grep -q "languageCode: 'ja-JP'" /tmp/live.js
+          grep -q "languageCodes: \['ja-JP'\]" /tmp/live.js
           grep -q "realtimeInput: { text }" /tmp/live.js
           grep -q "audioStreamEnd: true" /tmp/live.js
+          grep -q 'gemini-3.5-transcribe-live' /tmp/transcribe.js
+          grep -q "mode: 'SMART'" /tmp/transcribe.js
           ! grep -q 'SpeechSynthesisUtterance' /tmp/live.js
 
       - name: Cleanup canary
@@ -204,4 +152,4 @@ jobs:
         env:
           WORKER_URL: ${{ steps.deploy.outputs.worker_url }}
           VERSION_ID: ${{ steps.deploy.outputs.version_id }}
-        run: echo "TalkSys gemini-live-v13 verified at $WORKER_URL version=$VERSION_ID"
+        run: echo "TalkSys gemini-live-v13.1 fully verified at $WORKER_URL version=$VERSION_ID"
