@@ -1,4 +1,4 @@
-name: TalkSys v18.2 WebSocket latency smoke
+name: TalkSys v18.3 production conversation smoke
 
 on:
   push:
@@ -12,52 +12,161 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 8
     steps:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Direct model diagnostics
+
+      - name: Verify production revision
         run: |
-          echo '--- live non-stream smoke ---'
-          curl -fsS --max-time 30 https://talksys.syouziroupc.workers.dev/api/model-smoke || true
-          echo
-          echo '--- model benchmark ---'
-          curl -fsS --max-time 90 https://talksys.syouziroupc.workers.dev/api/voice-model-bench || true
-          echo
-      - name: Compare default and fresh agent greeting latency
+          body="$(curl -fsS --max-time 20 https://talksys.syouziroupc.workers.dev/voice-health)"
+          BODY="$body" node <<'NODE'
+          const d = JSON.parse(process.env.BODY || '{}');
+          console.log(JSON.stringify({
+            voiceRevision: d.voiceRevision,
+            llmRouting: d.llmRouting,
+            normalConversationLiveOnly: d.normalConversationLiveOnly,
+            casualFastPath: d.casualFastPath,
+            searchPrecisionOnly: d.searchPrecisionOnly,
+            crossTurnContext: d.crossTurnContext,
+          }));
+          if (d.voiceRevision !== 'cloudflare-live-v18.3') process.exit(1);
+          if (d.normalConversationLiveOnly !== true || d.casualFastPath !== true || d.searchPrecisionOnly !== true) process.exit(1);
+          if (d.crossTurnContext !== false) process.exit(1);
+          NODE
+
+      - name: Measure greeting, ordinary live stream, and deep search separately
         run: |
           node <<'NODE'
-          const base = 'wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/';
-          async function probe(name) {
-            return await new Promise((resolve) => {
-              const started = Date.now();
+          const url = 'wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default';
+
+          async function probe({label, text, timeoutMs, expectedTier, expectSearch = false, maxFirstReplyMs = null}) {
+            return await new Promise((resolve, reject) => {
+              const ws = new WebSocket(url);
+              const openedAt = Date.now();
+              let sentAt = 0;
+              let firstAssistantAt = 0;
+              let assistantText = '';
+              let route = '';
+              const searchPhases = [];
               const events = [];
-              const ws = new WebSocket(base + name);
+              let binaryCount = 0;
               let sent = false;
-              const timer = setTimeout(() => {
-                console.log(JSON.stringify({name, timeout:true, elapsedMs:Date.now()-started, events}));
+              let settled = false;
+
+              function finish(error) {
+                if (settled) return;
+                settled = true;
+                clearTimeout(timer);
                 try { ws.close(); } catch {}
-                resolve(false);
-              }, 12000);
-              ws.onopen = () => { events.push(['open', Date.now()-started]); ws.send(JSON.stringify({type:'hello', protocol_version:1})); };
-              ws.onmessage = (event) => {
-                if (typeof event.data !== 'string') { events.push(['binary', Date.now()-started, event.data?.byteLength || 0]); return; }
-                let d; try { d = JSON.parse(event.data); } catch { events.push(['text', Date.now()-started, String(event.data).slice(0,120)]); return; }
-                events.push([d.type, Date.now()-started, d.status || d.role || d.code || String(d.text || '').slice(0,80)]);
-                if (d.type === 'welcome' && !sent) { sent = true; ws.send(JSON.stringify({type:'text_message', text:'こんにちは'})); }
-                if ((d.type === 'transcript_end' || d.type === 'transcript') && d.role === 'assistant' && d.text) {
-                  clearTimeout(timer);
-                  console.log(JSON.stringify({name, timeout:false, elapsedMs:Date.now()-started, answer:d.text, events}));
-                  try { ws.close(); } catch {}
-                  resolve(true);
+                const result = {
+                  label,
+                  text,
+                  route,
+                  searchPhases,
+                  connectMs: sentAt ? sentAt - openedAt : null,
+                  firstAssistantMs: firstAssistantAt && sentAt ? firstAssistantAt - sentAt : null,
+                  totalMs: sentAt ? Date.now() - sentAt : null,
+                  answer: assistantText.trim(),
+                  binaryCount,
+                  events,
+                };
+                console.log(JSON.stringify(result));
+                if (error) reject(error); else resolve(result);
+              }
+
+              const timer = setTimeout(() => finish(new Error(label + ' timed out')), timeoutMs);
+
+              ws.onopen = () => {
+                events.push(['open', Date.now() - openedAt]);
+                ws.send(JSON.stringify({type:'hello', protocol_version:1}));
+              };
+              ws.onerror = () => events.push(['error', Date.now() - openedAt]);
+              ws.onclose = () => events.push(['close', Date.now() - openedAt]);
+              ws.onmessage = async (event) => {
+                if (typeof event.data !== 'string') {
+                  binaryCount += 1;
+                  return;
+                }
+                let d;
+                try { d = JSON.parse(event.data); } catch { return; }
+                const stamp = sentAt ? Date.now() - sentAt : Date.now() - openedAt;
+                const summary = d.status || d.tier || d.phase || d.role || d.code || String(d.text || '').slice(0,80);
+                events.push([d.type, stamp, summary]);
+
+                if (d.type === 'welcome' && !sent) {
+                  sent = true;
+                  sentAt = Date.now();
+                  ws.send(JSON.stringify({type:'text_message', text}));
+                  return;
+                }
+                if (d.type === 'model_route') route = String(d.tier || '');
+                if (d.type === 'search_status') searchPhases.push(String(d.phase || ''));
+                if (d.type === 'transcript_delta') {
+                  if (!firstAssistantAt) firstAssistantAt = Date.now();
+                  assistantText += String(d.text || '');
+                }
+                if (d.type === 'transcript' && d.role === 'assistant' && d.text) {
+                  if (!firstAssistantAt) firstAssistantAt = Date.now();
+                  assistantText = String(d.text || assistantText);
+                  finish();
+                  return;
+                }
+                if (d.type === 'transcript_end') {
+                  const finalText = String(d.text || '').trim();
+                  if (finalText) {
+                    if (!firstAssistantAt) firstAssistantAt = Date.now();
+                    assistantText = finalText;
+                  }
+                  if (assistantText.trim()) {
+                    finish();
+                    return;
+                  }
                 }
               };
-              ws.onerror = () => events.push(['error', Date.now()-started]);
-              ws.onclose = () => events.push(['close', Date.now()-started]);
+            }).then((result) => {
+              if (expectedTier && result.route !== expectedTier) throw new Error(`${label}: expected tier ${expectedTier}, got ${result.route}`);
+              const searched = result.searchPhases.length > 0;
+              if (expectSearch !== searched) throw new Error(`${label}: search routing mismatch ${JSON.stringify(result.searchPhases)}`);
+              if (!result.answer) throw new Error(`${label}: empty assistant answer`);
+              if (maxFirstReplyMs != null && !(result.firstAssistantMs <= maxFirstReplyMs)) {
+                throw new Error(`${label}: first reply ${result.firstAssistantMs}ms exceeded ${maxFirstReplyMs}ms`);
+              }
+              return result;
             });
           }
-          const a = await probe('default');
-          const b = await probe('smoke-' + crypto.randomUUID());
-          if (!a || !b) process.exitCode = 1;
+
+          const greeting = await probe({
+            label: 'instant greeting',
+            text: 'こんにちは',
+            timeoutMs: 8000,
+            expectedTier: 'instant-local',
+            expectSearch: false,
+            maxFirstReplyMs: 1500,
+          });
+
+          const ordinary = await probe({
+            label: 'ordinary live conversation',
+            text: '今日はちょっと疲れた',
+            timeoutMs: 12000,
+            expectedTier: 'live-fast',
+            expectSearch: false,
+          });
+
+          const search = await probe({
+            label: 'explicit deep search',
+            text: '別府市内のパソコン販売店を検索して',
+            timeoutMs: 50000,
+            expectedTier: 'verified-deep-search-v18',
+            expectSearch: true,
+          });
+
+          console.log(JSON.stringify({
+            ok: true,
+            greetingFirstReplyMs: greeting.firstAssistantMs,
+            ordinaryFirstReplyMs: ordinary.firstAssistantMs,
+            searchTotalMs: search.totalMs,
+            searchPhases: search.searchPhases,
+          }));
           NODE
