@@ -1,0 +1,246 @@
+name: Deploy INOSO mosaic fix once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/inoso-mosaic-fix-once.yml'
+      - '.github/inoso-mosaic-assets/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inoso-production-mosaic-fix
+  cancel-in-progress: false
+
+jobs:
+  deploy-inoso:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact fix revision
+        uses: actions/checkout@v4
+
+      - name: Require Cloudflare production credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Reconstruct current production site
+        env:
+          VERIFY_NONCE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          files=(
+            index.html
+            services.html
+            css/style.css
+            css/services.css
+            js/main.js
+            assets/images/facility-interior.webp
+            assets/images/firewood.webp
+            assets/images/hero-facility.webp
+            assets/images/materials.webp
+            assets/images/permit-board.webp
+            assets/images/renovation-floor.webp
+            assets/images/renovation-shelf.webp
+            assets/images/shiitake-field.webp
+            assets/images/shiitake.webp
+            assets/images/site-overview.webp
+            assets/images/sorting-board.webp
+            assets/images/tomato-work.webp
+            assets/images/tomato.webp
+            assets/images/truck.webp
+            assets/images/work-area.webp
+          )
+          for path in "${files[@]}"; do
+            mkdir -p "site/$(dirname "$path")"
+            curl -fsSL --retry 5 --retry-all-errors \
+              -H 'Cache-Control: no-cache' \
+              "https://inoso.szpc.jp/$path?source=$VERIFY_NONCE" \
+              -o "site/$path"
+            test -s "site/$path"
+          done
+
+      - name: Build corrected privacy images and validate patch coordinates
+        id: build
+        run: |
+          set -euo pipefail
+          if ! command -v convert >/dev/null || ! command -v compare >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y imagemagick
+          fi
+          mkdir -p /tmp/inoso-fixed /tmp/inoso-crops
+
+          convert site/assets/images/truck.webp \
+            .github/inoso-mosaic-assets/truck-driver.webp -geometry +580+330 -composite \
+            .github/inoso-mosaic-assets/truck-frontplate.webp -geometry +995+685 -composite \
+            .github/inoso-mosaic-assets/truck-carplate.webp -geometry +125+530 -composite \
+            /tmp/inoso-fixed/truck.png
+
+          convert site/assets/images/permit-board.webp \
+            .github/inoso-mosaic-assets/permit-private.webp -geometry +625+635 -composite \
+            /tmp/inoso-fixed/permit.png
+
+          convert /tmp/inoso-fixed/truck.png -crop 245x205+580+330 +repage /tmp/inoso-crops/truck-driver.png
+          convert /tmp/inoso-fixed/truck.png -crop 215x170+995+685 +repage /tmp/inoso-crops/truck-frontplate.png
+          convert /tmp/inoso-fixed/truck.png -crop 110x105+125+530 +repage /tmp/inoso-crops/truck-carplate.png
+          convert /tmp/inoso-fixed/permit.png -crop 415x195+625+635 +repage /tmp/inoso-crops/permit-private.png
+
+          test "$(compare -metric AE /tmp/inoso-crops/truck-driver.png .github/inoso-mosaic-assets/truck-driver.webp null: 2>&1 || true)" = "0"
+          test "$(compare -metric AE /tmp/inoso-crops/truck-frontplate.png .github/inoso-mosaic-assets/truck-frontplate.webp null: 2>&1 || true)" = "0"
+          test "$(compare -metric AE /tmp/inoso-crops/truck-carplate.png .github/inoso-mosaic-assets/truck-carplate.webp null: 2>&1 || true)" = "0"
+          test "$(compare -metric AE /tmp/inoso-crops/permit-private.png .github/inoso-mosaic-assets/permit-private.webp null: 2>&1 || true)" = "0"
+
+          convert /tmp/inoso-fixed/truck.png -quality 88 site/assets/images/truck.webp
+          convert /tmp/inoso-fixed/permit.png -quality 88 site/assets/images/permit-board.webp
+          test "$(identify -format '%wx%h' site/assets/images/truck.webp)" = "1536x1152"
+          test "$(identify -format '%wx%h' site/assets/images/permit-board.webp)" = "1536x1152"
+
+          truck_sha="$(sha256sum site/assets/images/truck.webp | awk '{print $1}')"
+          permit_sha="$(sha256sum site/assets/images/permit-board.webp | awk '{print $1}')"
+          echo "truck_sha=$truck_sha" >> "$GITHUB_OUTPUT"
+          echo "permit_sha=$permit_sha" >> "$GITHUB_OUTPUT"
+          echo "fixed truck=$truck_sha permit=$permit_sha"
+
+      - name: Try direct Cloudflare Pages production deployment
+        id: pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set +e
+          npx -y wrangler@4.110.0 pages deploy site \
+            --project-name inoso \
+            --branch main \
+            --commit-hash "${{ github.sha }}" \
+            --commit-message "Fix INOSO mosaic alignment" \
+            --commit-dirty=true 2>&1 | tee /tmp/inoso-pages-deploy.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Check whether Pages deployment reached production
+        id: pages_live
+        env:
+          EXPECTED_TRUCK: ${{ steps.build.outputs.truck_sha }}
+          EXPECTED_PERMIT: ${{ steps.build.outputs.permit_sha }}
+          VERIFY_NONCE: ${{ github.run_id }}-${{ github.run_attempt }}-pages
+        run: |
+          set -euo pipefail
+          live_ok=false
+          for i in $(seq 1 12); do
+            curl -fsSL --retry 2 "https://inoso.szpc.jp/assets/images/truck.webp?v=$VERIFY_NONCE-$i" -o /tmp/live-truck.webp || true
+            curl -fsSL --retry 2 "https://inoso.szpc.jp/assets/images/permit-board.webp?v=$VERIFY_NONCE-$i" -o /tmp/live-permit.webp || true
+            got_truck="$(sha256sum /tmp/live-truck.webp 2>/dev/null | awk '{print $1}')"
+            got_permit="$(sha256sum /tmp/live-permit.webp 2>/dev/null | awk '{print $1}')"
+            echo "pages-check attempt=$i truck=$got_truck permit=$got_permit"
+            if [ "$got_truck" = "$EXPECTED_TRUCK" ] && [ "$got_permit" = "$EXPECTED_PERMIT" ]; then
+              live_ok=true
+              break
+            fi
+            sleep 3
+          done
+          echo "live_ok=$live_ok" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy narrow Worker overlay fallback
+        if: steps.pages_live.outputs.live_ok != 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p overlay-assets/assets/images
+          cp site/assets/images/truck.webp overlay-assets/assets/images/truck.webp
+          cp site/assets/images/permit-board.webp overlay-assets/assets/images/permit-board.webp
+          cat > inoso-overlay-worker.js <<'JS'
+          export default {
+            async fetch(request, env) {
+              const url = new URL(request.url);
+              if (url.pathname !== '/assets/images/truck.webp' && url.pathname !== '/assets/images/permit-board.webp') {
+                return fetch(request);
+              }
+              const response = await env.ASSETS.fetch(request);
+              const headers = new Headers(response.headers);
+              headers.set('Cache-Control', 'public, max-age=60');
+              headers.set('X-INOSO-Mosaic-Fix', '2026-09-08');
+              return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+            }
+          };
+          JS
+          cat > wrangler-inoso-overlay.jsonc <<'JSON'
+          {
+            "name": "inoso-mosaic-overlay",
+            "main": "inoso-overlay-worker.js",
+            "compatibility_date": "2026-09-08",
+            "routes": [
+              { "pattern": "inoso.szpc.jp/assets/images/truck.webp*", "zone_id": "7b3905101c71c6f8c189a1e4a6d3e628" },
+              { "pattern": "inoso.szpc.jp/assets/images/permit-board.webp*", "zone_id": "7b3905101c71c6f8c189a1e4a6d3e628" }
+            ],
+            "assets": {
+              "directory": "./overlay-assets",
+              "binding": "ASSETS"
+            }
+          }
+          JSON
+          npx -y wrangler@4.110.0 deploy --config wrangler-inoso-overlay.jsonc 2>&1 | tee /tmp/inoso-overlay-deploy.txt
+
+      - name: Final production byte verification
+        env:
+          EXPECTED_TRUCK: ${{ steps.build.outputs.truck_sha }}
+          EXPECTED_PERMIT: ${{ steps.build.outputs.permit_sha }}
+          VERIFY_NONCE: ${{ github.run_id }}-${{ github.run_attempt }}-final
+        run: |
+          set -euo pipefail
+          ok=0
+          for i in $(seq 1 30); do
+            curl -fsSL --retry 2 "https://inoso.szpc.jp/assets/images/truck.webp?v=$VERIFY_NONCE-$i" -o /tmp/live-truck.webp || true
+            curl -fsSL --retry 2 "https://inoso.szpc.jp/assets/images/permit-board.webp?v=$VERIFY_NONCE-$i" -o /tmp/live-permit.webp || true
+            got_truck="$(sha256sum /tmp/live-truck.webp 2>/dev/null | awk '{print $1}')"
+            got_permit="$(sha256sum /tmp/live-permit.webp 2>/dev/null | awk '{print $1}')"
+            echo "final-check attempt=$i truck=$got_truck permit=$got_permit"
+            if [ "$got_truck" = "$EXPECTED_TRUCK" ] && [ "$got_permit" = "$EXPECTED_PERMIT" ]; then
+              ok=1
+              break
+            fi
+            sleep 4
+          done
+          test "$ok" = "1"
+          curl -fsSL "https://inoso.szpc.jp/?v=$VERIFY_NONCE" | grep -q '株式会社イノソー'
+
+      - name: Capture production verification screenshots
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          test -n "$CHROME"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=live-truck.png "https://inoso.szpc.jp/assets/images/truck.webp?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=live-permit.png "https://inoso.szpc.jp/assets/images/permit-board.webp?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1440,5000 --screenshot=inoso-desktop.png "https://inoso.szpc.jp/?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=390,5000 --screenshot=inoso-mobile.png "https://inoso.szpc.jp/?shot=${{ github.run_id }}-m"
+          test -s live-truck.png
+          test -s live-permit.png
+          test -s inoso-desktop.png
+          test -s inoso-mobile.png
+
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: inoso-mosaic-production-verification-${{ github.run_id }}
+          path: |
+            live-truck.png
+            live-permit.png
+            inoso-desktop.png
+            inoso-mobile.png
+            /tmp/inoso-pages-deploy.txt
+            /tmp/inoso-overlay-deploy.txt
+          if-no-files-found: warn
+          retention-days: 7
