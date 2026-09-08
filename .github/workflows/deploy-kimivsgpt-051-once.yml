@@ -1,0 +1,55 @@
+name: deploy-kimivsgpt-051-once
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: contains(github.event.head_commit.message, '[deploy-kimivsgpt-051]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: production
+    steps:
+      - name: Checkout Kimi vs GPT
+        uses: actions/checkout@v4
+        with:
+          repository: syouziroupc/kimivsgpt
+          ref: main
+          path: kimivsgpt
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate and deploy canonical Worker
+        working-directory: kimivsgpt
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install
+          npm run audit
+          npm run type-check
+          npm run build-check
+          npx wrangler deploy
+
+      - name: Verify production v0.5.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6; do
+            body="$(curl --fail --silent --show-error https://kimivsgpt.syouziroupc.workers.dev/health || true)"
+            echo "$body"
+            if printf '%s' "$body" | grep -q '"ok":true' && printf '%s' "$body" | grep -q '"version":"0.5.1"' && printf '%s' "$body" | grep -q '"pkce":"S256"'; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
