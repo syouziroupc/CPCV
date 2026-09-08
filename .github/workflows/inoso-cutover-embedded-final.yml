@@ -1,0 +1,203 @@
+name: INOSO embedded mosaic production cutover
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/inoso-cutover-embedded-final.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: inoso-embedded-mosaic-cutover
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 40
+    env:
+      HOSTNAME: inoso.szpc.jp
+      PAGES_ORIGIN: inoso.pages.dev
+      WORKER_NAME: inoso-mosaic-overlay
+      WORKERS_DEV: inoso-mosaic-overlay.syouziroupc.workers.dev
+      ZONE_ID: 7b3905101c71c6f8c189a1e4a6d3e628
+      ZONE_NAME: szpc.jp
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build fixed images
+        id: build
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          mkdir -p evidence/crops-before evidence/crops-after fixed
+          curl -fsSL --retry 5 --retry-all-errors "https://$PAGES_ORIGIN/assets/images/truck.webp?src=${{ github.sha }}" -o truck-original.webp
+          curl -fsSL --retry 5 --retry-all-errors "https://$PAGES_ORIGIN/assets/images/permit-board.webp?src=${{ github.sha }}" -o permit-original.webp
+          test "$(identify -format '%wx%h' truck-original.webp)" = 1536x1152
+          test "$(identify -format '%wx%h' permit-original.webp)" = 1536x1152
+          convert truck-original.webp truck.png
+          convert permit-original.webp permit.png
+          mosaic() {
+            src="$1" x="$2" y="$3" w="$4" h="$5" sw="$6" sh="$7" tag="$8"
+            convert "$src" -crop "${w}x${h}+${x}+${y}" +repage "evidence/crops-before/${tag}.png"
+            convert "evidence/crops-before/${tag}.png" -filter point -resize "${sw}x${sh}!" -resize "${w}x${h}!" /tmp/m.png
+            convert "$src" /tmp/m.png -geometry "+${x}+${y}" -composite /tmp/o.png
+            mv /tmp/o.png "$src"
+            convert "$src" -crop "${w}x${h}+${x}+${y}" +repage "evidence/crops-after/${tag}.png"
+            ae="$(compare -metric AE "evidence/crops-before/${tag}.png" "evidence/crops-after/${tag}.png" null: 2>&1 || true)"
+            echo "$tag changed_pixels=$ae" | tee -a evidence/mosaic-metrics.txt
+            test "$ae" != 0
+          }
+          mosaic truck.png 580 330 245 205 16 14 truck-driver
+          mosaic truck.png 995 685 215 170 14 11 truck-frontplate
+          mosaic truck.png 125 530 110 105 8 8 truck-carplate
+          mosaic permit.png 625 635 415 195 26 12 permit-private
+          convert truck.png -quality 88 fixed/truck.webp
+          convert permit.png -quality 88 fixed/permit-board.webp
+          truck_sha="$(sha256sum fixed/truck.webp | awk '{print $1}')"
+          permit_sha="$(sha256sum fixed/permit-board.webp | awk '{print $1}')"
+          echo "truck_sha=$truck_sha" >> "$GITHUB_OUTPUT"
+          echo "permit_sha=$permit_sha" >> "$GITHUB_OUTPUT"
+          printf '%s  truck.webp\n%s  permit-board.webp\n' "$truck_sha" "$permit_sha" | tee evidence/expected-sha256.txt
+
+      - name: Deploy self-contained Worker and prove it
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_TRUCK: ${{ steps.build.outputs.truck_sha }}
+          EXPECTED_PERMIT: ${{ steps.build.outputs.permit_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          python3 - <<'PY'
+          import base64, pathlib
+          truck=base64.b64encode(pathlib.Path('fixed/truck.webp').read_bytes()).decode()
+          permit=base64.b64encode(pathlib.Path('fixed/permit-board.webp').read_bytes()).decode()
+          js=f'''const TB64={truck!r};\nconst PB64={permit!r};\nfunction dec(s){{const b=atob(s);const a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a;}}\nconst T=dec(TB64), P=dec(PB64);\nexport default {{async fetch(request){{const u=new URL(request.url);if(u.pathname==='/assets/images/truck.webp')return new Response(T,{{headers:{{'content-type':'image/webp','cache-control':'public, max-age=300'}}}});if(u.pathname==='/assets/images/permit-board.webp')return new Response(P,{{headers:{{'content-type':'image/webp','cache-control':'public, max-age=300'}}}});const x=new URL(request.url);x.protocol='https:';x.hostname='inoso.pages.dev';x.port='';return fetch(new Request(x.toString(),request));}}}};\n'''
+          pathlib.Path('worker.js').write_text(js)
+          PY
+          cat > wrangler.jsonc <<JSON
+          {
+            "name": "$WORKER_NAME",
+            "main": "worker.js",
+            "compatibility_date": "2026-09-08",
+            "workers_dev": true,
+            "preview_urls": true
+          }
+          JSON
+          npx -y wrangler@4.110.0 deploy --config wrangler.jsonc 2>&1 | tee evidence/worker-deploy.txt
+          hash_file() { if [ -s "$1" ]; then sha256sum "$1" | awk '{print $1}'; fi; }
+          ok=0
+          for i in $(seq 1 80); do
+            rm -f /tmp/t.webp /tmp/p.webp
+            curl -sS -fL --connect-timeout 10 --max-time 20 "https://$WORKERS_DEV/assets/images/truck.webp?v=${{ github.run_id }}-$i" -o /tmp/t.webp || true
+            curl -sS -fL --connect-timeout 10 --max-time 20 "https://$WORKERS_DEV/assets/images/permit-board.webp?v=${{ github.run_id }}-$i" -o /tmp/p.webp || true
+            th="$(hash_file /tmp/t.webp)"; ph="$(hash_file /tmp/p.webp)"
+            echo "workers_dev attempt=$i truck=$th permit=$ph" | tee -a evidence/workers-dev-verify.txt
+            if [ "$th" = "$EXPECTED_TRUCK" ] && [ "$ph" = "$EXPECTED_PERMIT" ]; then ok=1; break; fi
+            sleep 3
+          done
+          test "$ok" = 1
+          curl -fsSL "https://$WORKERS_DEV/?verify=${{ github.run_id }}" -o evidence/workers-dev-index.html
+          curl -fsSL "https://$WORKERS_DEV/services.html?verify=${{ github.run_id }}" -o evidence/workers-dev-services.html
+          grep -q '株式会社イノソー' evidence/workers-dev-index.html
+          grep -q '株式会社イノソー' evidence/workers-dev-services.html
+          echo SELF_CONTAINED_WORKER_VERIFIED | tee evidence/worker-verified.txt
+
+      - name: Cut over inoso.szpc.jp
+        id: cutover
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json')
+          payload="$(jq -n --arg hostname "$HOSTNAME" --arg service "$WORKER_NAME" --arg zone_name "$ZONE_NAME" '{hostname:$hostname,service:$service,zone_name:$zone_name}')"
+          code="$(curl -sS -o evidence/attach-direct.json -w '%{http_code}' -X PUT "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains" --data "$payload" || true)"
+          echo "attach_direct_http=$code" | tee evidence/attach-direct-status.txt
+          cat evidence/attach-direct.json
+          if jq -e '.success == true' evidence/attach-direct.json >/dev/null 2>&1; then
+            echo attached=1 >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          dns_code="$(curl -sS -o evidence/dns-list.json -w '%{http_code}' "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$HOSTNAME&per_page=100" || true)"
+          echo "dns_list_http=$dns_code" | tee evidence/dns-list-status.txt
+          cat evidence/dns-list.json
+          jq -e '.success == true' evidence/dns-list.json >/dev/null
+          record="$(jq -c --arg h "$HOSTNAME" '[.result[] | select(.name == $h)][0] // empty' evidence/dns-list.json)"
+          test -n "$record"
+          record_id="$(jq -r '.id' <<<"$record")"
+          record_type="$(jq -r '.type' <<<"$record")"
+          record_content="$(jq -r '.content' <<<"$record")"
+          record_ttl="$(jq -r '.ttl' <<<"$record")"
+          record_proxied="$(jq -r '.proxied // false' <<<"$record")"
+          printf '%s\n' "$record" > evidence/dns-original.json
+          same="$(jq -n --arg type "$record_type" --arg name "$HOSTNAME" --arg content "$record_content" --argjson ttl "$record_ttl" --argjson proxied "$record_proxied" '{type:$type,name:$name,content:$content,ttl:$ttl,proxied:$proxied}')"
+          noop_code="$(curl -sS -o evidence/dns-noop.json -w '%{http_code}' -X PATCH "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$record_id" --data "$same" || true)"
+          echo "dns_noop_http=$noop_code" | tee evidence/dns-noop-status.txt
+          cat evidence/dns-noop.json
+          jq -e '.success == true' evidence/dns-noop.json >/dev/null
+          del_code="$(curl -sS -o evidence/dns-delete.json -w '%{http_code}' -X DELETE "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$record_id" || true)"
+          echo "dns_delete_http=$del_code" | tee evidence/dns-delete-status.txt
+          cat evidence/dns-delete.json
+          jq -e '.success == true' evidence/dns-delete.json >/dev/null
+          code2="$(curl -sS -o evidence/attach-after-delete.json -w '%{http_code}' -X PUT "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains" --data "$payload" || true)"
+          echo "attach_after_delete_http=$code2" | tee evidence/attach-after-delete-status.txt
+          cat evidence/attach-after-delete.json
+          if ! jq -e '.success == true' evidence/attach-after-delete.json >/dev/null 2>&1; then
+            curl -sS -o evidence/dns-restore.json -X POST "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" --data "$same" || true
+            cat evidence/dns-restore.json
+            exit 1
+          fi
+          echo attached=1 >> "$GITHUB_OUTPUT"
+
+      - name: Verify production and capture screenshots
+        if: steps.cutover.outputs.attached == '1'
+        env:
+          EXPECTED_TRUCK: ${{ steps.build.outputs.truck_sha }}
+          EXPECTED_PERMIT: ${{ steps.build.outputs.permit_sha }}
+        run: |
+          set -euo pipefail
+          hash_file() { if [ -s "$1" ]; then sha256sum "$1" | awk '{print $1}'; fi; }
+          ok=0
+          for i in $(seq 1 120); do
+            rm -f evidence/live-truck.webp evidence/live-permit.webp
+            curl -sS -fL --connect-timeout 10 --max-time 25 "https://$HOSTNAME/assets/images/truck.webp?v=${{ github.run_id }}-$i" -o evidence/live-truck.webp || true
+            curl -sS -fL --connect-timeout 10 --max-time 25 "https://$HOSTNAME/assets/images/permit-board.webp?v=${{ github.run_id }}-$i" -o evidence/live-permit.webp || true
+            th="$(hash_file evidence/live-truck.webp)"; ph="$(hash_file evidence/live-permit.webp)"
+            echo "production attempt=$i truck=$th permit=$ph" | tee -a evidence/production-verify.txt
+            if [ "$th" = "$EXPECTED_TRUCK" ] && [ "$ph" = "$EXPECTED_PERMIT" ]; then ok=1; break; fi
+            sleep 3
+          done
+          test "$ok" = 1
+          curl -fsSL "https://$HOSTNAME/?verify=${{ github.run_id }}" -o evidence/live-index.html
+          curl -fsSL "https://$HOSTNAME/services.html?verify=${{ github.run_id }}" -o evidence/live-services.html
+          grep -q '株式会社イノソー' evidence/live-index.html
+          grep -q '株式会社イノソー' evidence/live-services.html
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=evidence/live-truck.png "https://$HOSTNAME/assets/images/truck.webp?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=evidence/live-permit.png "https://$HOSTNAME/assets/images/permit-board.webp?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1440,5000 --screenshot=evidence/desktop.png "https://$HOSTNAME/?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=390,5000 --screenshot=evidence/mobile.png "https://$HOSTNAME/?shot=${{ github.run_id }}-m"
+          convert evidence/live-truck.webp -crop 245x205+580+330 +repage evidence/live-truck-driver.png
+          convert evidence/live-truck.webp -crop 215x170+995+685 +repage evidence/live-truck-frontplate.png
+          convert evidence/live-truck.webp -crop 110x105+125+530 +repage evidence/live-truck-carplate.png
+          convert evidence/live-permit.webp -crop 415x195+625+635 +repage evidence/live-permit-private.png
+          identify evidence/live-truck.png evidence/live-permit.png evidence/desktop.png evidence/mobile.png evidence/live-truck-driver.png evidence/live-truck-frontplate.png evidence/live-truck-carplate.png evidence/live-permit-private.png | tee evidence/screenshot-check.txt
+          echo PRODUCTION_VERIFIED | tee evidence/production-verified.txt
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: inoso-embedded-cutover-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
