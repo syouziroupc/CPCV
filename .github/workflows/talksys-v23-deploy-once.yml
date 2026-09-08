@@ -17,7 +17,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: c0684c4e6b67f622e9049921438195f93ec616a0
+      TALKSYS_SHA: a578a08076dfd38bcfa29e9b561e21b99b918da4
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
       EXPECTED_VOICE_REVISION: cloudflare-agent-v23-mobile-search-pc-quality
     steps:
@@ -121,7 +121,7 @@ jobs:
           grep -F "scheduleMicRecovery('capture-stalled')" <<< "$script"
           grep -F "micCaptureKind === 'audio-worklet'" <<< "$script"
 
-      - name: Smoke test real transit and PC search
+      - name: Smoke test exact spoken transit query and PC search quality
         shell: bash
         run: |
           transit="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v23-transit")"
@@ -133,12 +133,19 @@ jobs:
           const pc = JSON.parse(process.env.PC || '{}');
           if (!transit.ok || !Array.isArray(transit.sources) || transit.sources.length < 2) throw new Error('transit smoke has insufficient evidence');
           if (!pc.ok || !Array.isArray(pc.sources) || pc.sources.length < 2) throw new Error('PC smoke has insufficient evidence');
+          if (transit.resolvedQuestion !== '鷺沼から用賀までの行き方を知りたい') throw new Error('transit smoke is not using the exact spoken phrasing');
           const tq = (transit.queries || []).join(' ');
           if (!/鷺沼/.test(tq) || !/用賀/.test(tq) || !/所要時間|運賃/.test(tq)) throw new Error('transit queries are not intent-expanded');
-          const ts = JSON.stringify(transit.sources);
-          if (!/鷺沼/.test(ts) || !/用賀/.test(ts)) throw new Error('transit evidence does not cover both stations');
+          for (const source of transit.sources) {
+            const s = JSON.stringify(source);
+            if (!/鷺沼/.test(s) || !/用賀/.test(s)) throw new Error(`off-topic transit source survived: ${source.title}`);
+            if (/wikipedia/i.test(s)) throw new Error(`encyclopedia transit source survived: ${source.title}`);
+          }
           const pq = (pc.queries || []).join(' ');
           if (!/CF-SV8/i.test(pq) || !/仕様|マニュアル|公式/.test(pq)) throw new Error('PC queries are not specification-oriented');
-          const ps = JSON.stringify(pc.sources);
-          if (!/CF-SV8|SV8/i.test(ps)) throw new Error('PC evidence does not cover CF-SV8');
+          for (const source of pc.sources) {
+            const s = JSON.stringify(source).replace(/[\s\-‐‑‒–—―ー_]/g, '').toLowerCase();
+            if (!s.includes('cfsv8')) throw new Error(`off-topic PC source survived: ${source.title}`);
+            if (/gmail|apple community/i.test(JSON.stringify(source))) throw new Error(`irrelevant PC source survived: ${source.title}`);
+          }
           NODE
