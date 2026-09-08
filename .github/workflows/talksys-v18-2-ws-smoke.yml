@@ -1,0 +1,55 @@
+name: TalkSys v18.2 WebSocket latency smoke
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/talksys-v18-2-ws-smoke.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Compare default and fresh agent greeting latency
+        run: |
+          node <<'NODE'
+          const base = 'wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/';
+          async function probe(name) {
+            return await new Promise((resolve) => {
+              const started = Date.now();
+              const events = [];
+              const ws = new WebSocket(base + name);
+              let sent = false;
+              const timer = setTimeout(() => {
+                console.log(JSON.stringify({name, timeout:true, elapsedMs:Date.now()-started, events}));
+                try { ws.close(); } catch {}
+                resolve(false);
+              }, 15000);
+              ws.onopen = () => { events.push(['open', Date.now()-started]); ws.send(JSON.stringify({type:'hello', protocol_version:1})); };
+              ws.onmessage = (event) => {
+                if (typeof event.data !== 'string') { events.push(['binary', Date.now()-started, event.data?.byteLength || 0]); return; }
+                let d; try { d = JSON.parse(event.data); } catch { events.push(['text', Date.now()-started, String(event.data).slice(0,120)]); return; }
+                events.push([d.type, Date.now()-started, d.status || d.role || String(d.text || '').slice(0,80)]);
+                if (d.type === 'welcome' && !sent) { sent = true; ws.send(JSON.stringify({type:'text_message', text:'こんにちは'})); }
+                if ((d.type === 'transcript_end' || d.type === 'transcript') && d.role === 'assistant' && d.text) {
+                  clearTimeout(timer);
+                  console.log(JSON.stringify({name, timeout:false, elapsedMs:Date.now()-started, answer:d.text, events}));
+                  try { ws.close(); } catch {}
+                  resolve(true);
+                }
+              };
+              ws.onerror = () => events.push(['error', Date.now()-started]);
+              ws.onclose = () => events.push(['close', Date.now()-started]);
+            });
+          }
+          const a = await probe('default');
+          const b = await probe('smoke-' + crypto.randomUUID());
+          if (!a || !b) process.exitCode = 1;
+          NODE
