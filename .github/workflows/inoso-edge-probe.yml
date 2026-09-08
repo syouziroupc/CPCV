@@ -1,0 +1,34 @@
+name: Probe INOSO edge and production
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/inoso-edge-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe endpoints
+        shell: bash
+        run: |
+          set -u
+          for base in \
+            'https://inoso-mosaic-overlay.syouziroupc.workers.dev' \
+            'https://inoso-mosaic-edge.syouziroupc.workers.dev' \
+            'https://inoso.szpc.jp'; do
+            echo "=== $base ==="
+            for path in '/assets/images/truck.webp' '/assets/images/permit-board.webp' '/'; do
+              out="/tmp/$(echo "$base$path" | tr '/:.' '____')"
+              code="$(curl -sS -L --connect-timeout 10 --max-time 20 -o "$out" -w '%{http_code}' "$base$path?probe=${{ github.run_id }}" || true)"
+              size="$(wc -c < "$out" 2>/dev/null || echo 0)"
+              sha="$(sha256sum "$out" 2>/dev/null | awk '{print $1}')"
+              type="$(file -b "$out" 2>/dev/null || true)"
+              echo "$path code=$code size=$size sha=$sha type=$type"
+            done
+          done
