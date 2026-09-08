@@ -1,0 +1,107 @@
+name: TalkSys v25 deploy once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v25-deploy-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys-v25:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TALKSYS_SHA: 852a9b9f649ed885aab4c1ce7f52aa8ebcdc80b3
+      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
+      EXPECTED_VOICE_REVISION: cloudflare-agent-v25-glm-mobile-audio
+    steps:
+      - name: Checkout exact TalkSys revision
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: ${{ env.TALKSYS_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Require Cloudflare production credentials
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - run: npm install --no-audit --no-fund
+      - name: Validate exact v25 revision before deploy
+        run: |
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          node --check src/worker-v25-production.js
+          node --check src/worker-v25.js
+          node --check src/glm-conversation-v25.js
+          node --check src/cloudflare-live-client-v25.js
+          npm test
+          npx wrangler deploy --dry-run
+      - name: Deploy TalkSys v25 to Cloudflare production
+        run: |
+          set -o pipefail
+          npx wrangler deploy
+          npx wrangler deployments status
+      - name: Verify production v25 health contract
+        run: |
+          body=""
+          for attempt in $(seq 1 15); do
+            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health")" || true
+            current="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
+            echo "Production voiceRevision: ${current:-missing}"
+            if [ "$current" = "$EXPECTED_VOICE_REVISION" ]; then break; fi
+            test "$attempt" -lt 15 || exit 1
+            sleep 5
+          done
+          BODY="$body" EXPECTED="$EXPECTED_VOICE_REVISION" node <<'NODE'
+          const d = JSON.parse(process.env.BODY || '{}');
+          if (d.voiceRevision !== process.env.EXPECTED) throw new Error('wrong v25 revision');
+          if (d.conversationModel !== '@cf/zai-org/glm-5.3-flash') throw new Error('wrong conversation model');
+          if (d.conversationModelFallback !== '@cf/zai-org/glm-5.3-flash') throw new Error('non-GLM fallback remains');
+          if (d.glmReasoningEffort !== 'low') throw new Error('wrong reasoning effort');
+          for (const key of ['glmOnlyConversation','mobileAudioPipelineV25','dedicatedCaptureAudioContext','androidScriptProcessorPreferred','androidCallStartsAfterFirstMicFrame','nativeMobileCaptureSampleRate','microphoneDiagnostics','browserStreamingTtsStartsAtFirstSentence','preListeningMicFrames','voiceBargeIn','contextualSearchSubjectOnlyCarryover']) {
+            if (d[key] !== true) throw new Error(`${key} is not true`);
+          }
+          NODE
+      - name: Verify live v25 client code
+        run: |
+          script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
+          grep -F "captureAudioContext" <<< "$script"
+          grep -F "IS_ANDROID" <<< "$script"
+          grep -F "micFrameCount < 1" <<< "$script"
+          grep -F "__talksysVoiceDebug" <<< "$script"
+          grep -F "talksys-mic-stalled" <<< "$script"
+          grep -F "callStartPending" <<< "$script"
+          grep -F "talksys-barge-in" <<< "$script"
+          grep -F "queueCompletedStreamSpeech(streamText, false)" <<< "$script"
+      - name: Smoke test contextual local used-PC search
+        run: |
+          body=""
+          for attempt in $(seq 1 12); do
+            set +e
+            body="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v25-context")"
+            code=$?
+            set -e
+            if [ "$code" -eq 0 ]; then break; fi
+            echo "context smoke attempt $attempt not ready (curl=$code)"
+            test "$attempt" -lt 12 || exit "$code"
+            sleep 5
+          done
+          echo "CONTEXT=$body"
+          BODY="$body" node <<'NODE'
+          const d = JSON.parse(process.env.BODY || '{}');
+          if (!d.ok || !Array.isArray(d.sources) || d.sources.length < 1) throw new Error('context smoke has insufficient evidence');
+          const q = String(d.resolvedQuestion || '');
+          if (!/パソコン/.test(q) || !/中古/.test(q) || !/横浜/.test(q)) throw new Error(`context not preserved: ${q}`);
+          if (/YouTube|ネットサーフィン/i.test(q)) throw new Error(`old usage polluted current search: ${q}`);
+          const queries = (d.queries || []).join(' ');
+          if (!/横浜市/.test(queries) || !/中古/.test(queries) || !/店舗|専門店|ショップ|店頭/.test(queries)) throw new Error(`not routed as local used-PC store search: ${queries}`);
+          if (/仕様|比較/.test(queries)) throw new Error(`generic PC comparison search survived: ${queries}`);
+          NODE
