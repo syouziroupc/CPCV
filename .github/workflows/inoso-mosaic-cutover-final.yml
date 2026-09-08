@@ -37,6 +37,15 @@ jobs:
           curl -fsSL --retry 4 "https://$PAGES_ORIGIN/?origin-check=${{ github.sha }}" -o /tmp/origin.html
           grep -q '株式会社イノソー' /tmp/origin.html
 
+      - name: Install image tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          command -v identify
+          command -v convert
+          command -v compare
+
       - name: Download live privacy images and build corrected mosaics
         id: build
         run: |
@@ -90,7 +99,7 @@ jobs:
               return fetch(new Request(upstream.toString(), request));
             }
           };
-          JS
+n          JS
           cat > wrangler.jsonc <<'JSON'
           {
             "name": "inoso-mosaic-overlay",
