@@ -1,4 +1,4 @@
-name: Temporary TalkSys v20.1 fast-search deploy
+name: Temporary TalkSys v20.2 audio-search deploy
 
 on:
   push:
@@ -19,9 +19,9 @@ jobs:
     timeout-minutes: 20
     environment: production
     env:
-      TALKSYS_COMMIT: 9cec9f3c440e08da9800e013e661b9a838b8566e
+      TALKSYS_COMMIT: 0dd087187ed25aec206dc5d890bbb58e1957884d
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
-      EXPECTED_REVISION: cloudflare-agent-v20.1-fast-search
+      EXPECTED_REVISION: cloudflare-agent-v20.2-audio-search
     steps:
       - name: Checkout audited TalkSys commit
         uses: actions/checkout@v6
@@ -43,8 +43,10 @@ jobs:
           test "$(git rev-parse HEAD)" = "$TALKSYS_COMMIT"
           grep -q '"main": "src/worker-v20.js"' wrangler.jsonc
           node --check src/worker-v20.js
+          node --check src/cloudflare-live-client-v20.js
           node --check src/search-tool-v20.js
           node --check src/search-policy-v20.js
+          node --check src/search-fallbacks.js
           npm test
           npx wrangler deploy --dry-run
 
@@ -57,81 +59,103 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
 
-      - name: Deploy TalkSys v20.1
+      - name: Deploy TalkSys v20.2
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler deploy
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if npx wrangler deploy; then exit 0; fi
+            if [ "$attempt" = 3 ]; then exit 1; fi
+            sleep 4
+          done
 
-      - name: Verify production contract
+      - name: Verify production contract and regressions
         shell: bash
         run: |
           set -euo pipefail
-
-          wait_for_revision() {
-            local output=/tmp/voice-health.json
-            for attempt in $(seq 1 30); do
-              if curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health?verify=$attempt" >"$output"; then
-                if EXPECTED="$EXPECTED_REVISION" node -e "const d=require('/tmp/voice-health.json'); process.exit(d.ok && d.voiceRevision===process.env.EXPECTED ? 0 : 1)"; then
-                  echo "Expected revision active after attempt $attempt"
-                  return 0
-                fi
-                echo "Attempt $attempt returned revision: $(node -e "try{console.log(require('/tmp/voice-health.json').voiceRevision||'unknown')}catch{console.log('invalid-json')}")"
-              fi
-              sleep 2
-            done
-            return 1
-          }
 
           curl_retry() {
             local url="$1"
             local output="$2"
             for attempt in $(seq 1 10); do
-              if curl -fsS --max-time 45 "$url" >"$output"; then return 0; fi
+              if curl -fsS --max-time 50 "$url" >"$output"; then return 0; fi
               sleep 2
             done
             return 1
           }
 
-          wait_for_revision
+          for attempt in $(seq 1 30); do
+            if curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health?verify=$attempt" >/tmp/voice-health.json; then
+              if EXPECTED="$EXPECTED_REVISION" node -e "const d=require('/tmp/voice-health.json'); process.exit(d.ok && d.voiceRevision===process.env.EXPECTED ? 0 : 1)"; then break; fi
+            fi
+            sleep 2
+            if [ "$attempt" = 30 ]; then echo 'Expected revision did not activate'; exit 1; fi
+          done
+
           EXPECTED="$EXPECTED_REVISION" node <<'NODE'
           const d = require('/tmp/voice-health.json');
-          if (!d.ok) throw new Error('voice-health not ok');
-          if (d.voiceRevision !== process.env.EXPECTED) throw new Error(`revision mismatch: ${d.voiceRevision}`);
-          if (d.conversationOrchestrator !== 'tiered-fast-agent-v20.1') throw new Error(`orchestrator mismatch: ${d.conversationOrchestrator}`);
-          if (d.toolCalling !== 'deterministic-search-router-v20.1') throw new Error(`search router mismatch: ${d.toolCalling}`);
-          if (d.webSearchTool !== 'evidence-only-web-tool-v20.1-fast') throw new Error(`search tool mismatch: ${d.webSearchTool}`);
-          if (d.primaryConversationModel !== '@cf/qwen/qwen3.8-27b') throw new Error(`primary model mismatch: ${d.primaryConversationModel}`);
-          if (d.qualityConversationModel !== '@cf/zai-org/glm-5.3-flash') throw new Error(`quality model mismatch: ${d.qualityConversationModel}`);
-          if (d.ordinaryConversationUsesToolInference !== false) throw new Error('ordinary turns still use tool inference');
-          if (d.modelDecidesToolUse !== false) throw new Error('model still decides mandatory real-world search');
-          if (d.normalConversationFastPath !== true) throw new Error('fast path disabled');
+          const req = (k, v) => { if (d[k] !== v) throw new Error(`${k}: ${d[k]} != ${v}`); };
+          req('voiceRevision', process.env.EXPECTED);
+          req('conversationOrchestrator', 'tiered-fast-agent-v20.2');
+          req('toolCalling', 'deterministic-search-router-v20.2');
+          req('webSearchTool', 'evidence-only-web-tool-v20.2-verified-local');
+          req('ordinaryConversationUsesToolInference', false);
+          req('modelDecidesToolUse', false);
+          req('midStreamContinuationRecovery', true);
+          req('audioWorkletCapture', true);
+          req('scriptProcessorMicFallback', true);
+          req('microphoneMonitorMuted', true);
+          req('strictHalfDuplexEchoGuard', true);
+          req('localSearchEvidenceFilter', true);
+          req('localSearchOpenStreetMapFallback', true);
+          req('namedBusinessContactSearch', true);
           console.log('VOICE_HEALTH=' + JSON.stringify(d));
           NODE
 
-          curl_retry "$PRODUCTION_URL/api/search-smoke?verify=1" /tmp/search-smoke.json
+          curl_retry "$PRODUCTION_URL/cloudflare-live.js?verify=1" /tmp/live.js
+          grep -q 'PLAYBACK_TAIL_GUARD_MS = 700' /tmp/live.js
+          grep -q 'createScriptProcessorCapture' /tmp/live.js
+          grep -q 'captureSilenceGain.gain.value = 0' /tmp/live.js
+          grep -q 'if (assistantAudioActive()) return' /tmp/live.js
+
+          curl_retry "$PRODUCTION_URL/api/search-smoke?verify=2" /tmp/beppu.json
           node <<'NODE'
-          const d = require('/tmp/search-smoke.json');
-          if (d.routedToSearch !== true) throw new Error('Beppu reproduction did not route to search');
-          if (d.ok !== true) throw new Error(`search smoke failed: ${JSON.stringify(d)}`);
-          if (!(d.evidenceCount > 0)) throw new Error(`no evidence: ${JSON.stringify(d)}`);
-          const qs = (d.queries || []).join(' ');
-          if (!/別府/.test(qs)) throw new Error(`Beppu missing from queries: ${qs}`);
-          if (!/パソコン|PC/.test(qs)) throw new Error(`PC subject missing from queries: ${qs}`);
-          console.log('SEARCH_SMOKE=' + JSON.stringify(d));
+          const d = require('/tmp/beppu.json');
+          if (!d.ok || d.routedToSearch !== true || !(d.evidenceCount > 0)) throw new Error(`Beppu smoke failed: ${JSON.stringify(d)}`);
+          const junk = (d.sources || []).filter(x => /wikipedia|観光|ケンミン/i.test(`${x.title} ${x.url}`));
+          if (junk.length) throw new Error(`Beppu junk survived: ${JSON.stringify(junk)}`);
+          console.log('BEPPU=' + JSON.stringify(d));
           NODE
 
-          curl_retry "$PRODUCTION_URL/api/model-smoke?verify=1" /tmp/model-smoke.json
+          curl_retry "$PRODUCTION_URL/api/search-smoke-yokohama?verify=3" /tmp/yokohama.json
           node <<'NODE'
-          const d = require('/tmp/model-smoke.json');
-          if (!d.ok) throw new Error(`live model smoke failed: ${JSON.stringify(d)}`);
-          console.log('LIVE_MODEL=' + JSON.stringify(d));
+          const d = require('/tmp/yokohama.json');
+          if (!d.ok || d.routedToSearch !== true || !(d.evidenceCount > 0)) throw new Error(`Yokohama smoke failed: ${JSON.stringify(d)}`);
+          const q = (d.queries || []).join(' ');
+          if (!/横浜市.*高島町/.test(q)) throw new Error(`granular location missing: ${q}`);
+          if (!/パソコン/.test(q)) throw new Error(`PC subject missing: ${q}`);
+          console.log('YOKOHAMA=' + JSON.stringify(d));
           NODE
 
-          curl_retry "$PRODUCTION_URL/api/quality-model-smoke?verify=1" /tmp/quality-smoke.json
+          curl_retry "$PRODUCTION_URL/api/search-smoke-contact?verify=4" /tmp/contact.json
           node <<'NODE'
-          const d = require('/tmp/quality-smoke.json');
-          if (!d.ok) throw new Error(`quality model smoke failed: ${JSON.stringify(d)}`);
-          console.log('QUALITY_MODEL=' + JSON.stringify(d));
+          const d = require('/tmp/contact.json');
+          if (!d.ok || d.routedToSearch !== true || !(d.evidenceCount > 0)) throw new Error(`Contact smoke failed: ${JSON.stringify(d)}`);
+          const q = (d.queries || []).join(' ');
+          if (!/ドスパラ横浜駅前店/.test(q) || !/電話番号/.test(q)) throw new Error(`contact query wrong: ${q}`);
+          if (/購入先|通販|中古 専門店/.test(q)) throw new Error(`contact query polluted: ${q}`);
+          if (!(d.sources || []).some(x => /ドスパラ|dospara/i.test(`${x.title} ${x.url}`))) throw new Error(`official/contact evidence missing: ${JSON.stringify(d.sources)}`);
+          console.log('CONTACT=' + JSON.stringify(d));
+          NODE
+
+          curl_retry "$PRODUCTION_URL/api/model-smoke?verify=5" /tmp/model.json
+          curl_retry "$PRODUCTION_URL/api/quality-model-smoke?verify=6" /tmp/quality.json
+          node <<'NODE'
+          for (const path of ['/tmp/model.json','/tmp/quality.json']) {
+            const d = require(path);
+            if (!d.ok) throw new Error(`${path} failed: ${JSON.stringify(d)}`);
+          }
           NODE
