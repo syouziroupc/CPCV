@@ -24,58 +24,51 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
 
-      - name: Identify Pages project serving inoso.szpc.jp
+      - name: Probe production target and Cloudflare capabilities
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          projects="$(curl -fsS --retry 4 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects")"
-          echo "$projects" > projects.json
-          project=""
-          production_branch=""
-          while IFS= read -r name; do
-            [ -n "$name" ] || continue
-            domains="$(curl -fsS --retry 4 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$name/domains")"
-            if echo "$domains" | jq -e '.result[]? | select(.name == "inoso.szpc.jp")' >/dev/null; then
-              project="$name"
-              production_branch="$(echo "$projects" | jq -r --arg n "$name" '.result[] | select(.name==$n) | .production_branch // "main"')"
-              echo "$domains" > inoso-domains.json
-              break
-            fi
-          done < <(echo "$projects" | jq -r '.result[].name')
-          test -n "$project"
-          echo "PROJECT=$project" >> "$GITHUB_ENV"
-          echo "PRODUCTION_BRANCH=$production_branch" >> "$GITHUB_ENV"
-          echo "Pages project: $project"
-          echo "Production branch: $production_branch"
+          mkdir -p evidence
+          dig +short inoso.szpc.jp CNAME | tee evidence/dns-cname.txt || true
+          dig +short inoso.szpc.jp A | tee evidence/dns-a.txt || true
+          curl -sSIL --retry 4 "https://inoso.szpc.jp/?diagnose=$GITHUB_SHA" | tee evidence/headers.txt
+          for ep in \
+            "workers/domains" \
+            "workers/scripts" \
+            "workers/services" \
+            "pages/projects"; do
+            safe="$(echo "$ep" | tr '/' '-')"
+            code="$(curl -sS -o "evidence/$safe.json" -w '%{http_code}' --retry 4 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/$ep" || true)"
+            echo "$ep $code" | tee -a evidence/cloudflare-endpoints.txt
+          done
+          if jq -e '.result[]? | select((.hostname // .domain // .name // "") == "inoso.szpc.jp")' evidence/workers-domains.json >/dev/null 2>&1; then
+            jq '.result[] | select((.hostname // .domain // .name // "") == "inoso.szpc.jp")' evidence/workers-domains.json | tee evidence/inoso-worker-domain.json
+          fi
 
       - name: Download current production privacy images
         run: |
           set -euo pipefail
-          mkdir -p evidence
           curl -fsSL --retry 5 --retry-all-errors -H 'Cache-Control: no-cache' "https://inoso.szpc.jp/assets/images/truck.webp?diagnose=$GITHUB_SHA" -o evidence/truck-current.webp
           curl -fsSL --retry 5 --retry-all-errors -H 'Cache-Control: no-cache' "https://inoso.szpc.jp/assets/images/permit-board.webp?diagnose=$GITHUB_SHA" -o evidence/permit-current.webp
           sha256sum evidence/*.webp | tee evidence/SHA256SUMS.txt
           file evidence/*.webp | tee evidence/file.txt
 
-      - name: Capture current production page and image screenshots
+      - name: Capture current production screenshots
         run: |
           set -euo pipefail
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
-          if [ -n "$CHROME" ]; then
-            "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=evidence/truck-current.png "https://inoso.szpc.jp/assets/images/truck.webp?diagnose=$GITHUB_SHA"
-            "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=evidence/permit-current.png "https://inoso.szpc.jp/assets/images/permit-board.webp?diagnose=$GITHUB_SHA"
-            "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1440,5000 --screenshot=evidence/page-current-desktop.png "https://inoso.szpc.jp/?diagnose=$GITHUB_SHA"
-          fi
+          test -n "$CHROME"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=evidence/truck-current.png "https://inoso.szpc.jp/assets/images/truck.webp?diagnose=$GITHUB_SHA"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=evidence/permit-current.png "https://inoso.szpc.jp/assets/images/permit-board.webp?diagnose=$GITHUB_SHA"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1440,5000 --screenshot=evidence/page-current-desktop.png "https://inoso.szpc.jp/?diagnose=$GITHUB_SHA"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=390,5000 --screenshot=evidence/page-current-mobile.png "https://inoso.szpc.jp/?diagnose=$GITHUB_SHA"
 
       - name: Upload diagnostic evidence
         uses: actions/upload-artifact@v4
         with:
           name: inoso-mosaic-diagnostic-${{ github.sha }}
-          path: |
-            evidence/
-            projects.json
-            inoso-domains.json
+          path: evidence/
           if-no-files-found: error
           retention-days: 7
