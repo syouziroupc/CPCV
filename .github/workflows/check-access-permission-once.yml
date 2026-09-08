@@ -1,3 +1,4 @@
+# one-shot permission probe; no Access configuration changes
 name: Check Cloudflare Access permission once
 
 on:
