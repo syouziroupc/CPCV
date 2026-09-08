@@ -1,0 +1,121 @@
+name: Temporary TalkSys v20.1 fast-search deploy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v20-fast-search-deploy.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: talksys-v20-fast-search-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      TALKSYS_COMMIT: 9cec9f3c440e08da9800e013e661b9a838b8566e
+      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
+      EXPECTED_REVISION: cloudflare-agent-v20.1-fast-search
+    steps:
+      - name: Checkout audited TalkSys commit
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: ${{ env.TALKSYS_COMMIT }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Verify immutable source and full tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TALKSYS_COMMIT"
+          grep -q '"main": "src/worker-v20.js"' wrangler.jsonc
+          node --check src/worker-v20.js
+          node --check src/search-tool-v20.js
+          node --check src/search-policy-v20.js
+          npm test
+          npx wrangler deploy --dry-run
+
+      - name: Require Cloudflare production credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Deploy TalkSys v20.1
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+      - name: Verify production contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl_retry() {
+            local url="$1"
+            local output="$2"
+            for attempt in $(seq 1 10); do
+              if curl -fsS --max-time 45 "$url" >"$output"; then return 0; fi
+              sleep 2
+            done
+            return 1
+          }
+
+          curl_retry "$PRODUCTION_URL/voice-health" /tmp/voice-health.json
+          EXPECTED="$EXPECTED_REVISION" node <<'NODE'
+          const d = require('/tmp/voice-health.json');
+          if (!d.ok) throw new Error('voice-health not ok');
+          if (d.voiceRevision !== process.env.EXPECTED) throw new Error(`revision mismatch: ${d.voiceRevision}`);
+          if (d.conversationOrchestrator !== 'tiered-fast-agent-v20.1') throw new Error(`orchestrator mismatch: ${d.conversationOrchestrator}`);
+          if (d.toolCalling !== 'deterministic-search-router-v20.1') throw new Error(`search router mismatch: ${d.toolCalling}`);
+          if (d.webSearchTool !== 'evidence-only-web-tool-v20.1-fast') throw new Error(`search tool mismatch: ${d.webSearchTool}`);
+          if (d.primaryConversationModel !== '@cf/qwen/qwen3.8-27b') throw new Error(`primary model mismatch: ${d.primaryConversationModel}`);
+          if (d.qualityConversationModel !== '@cf/zai-org/glm-5.3-flash') throw new Error(`quality model mismatch: ${d.qualityConversationModel}`);
+          if (d.ordinaryConversationUsesToolInference !== false) throw new Error('ordinary turns still use tool inference');
+          if (d.modelDecidesToolUse !== false) throw new Error('model still decides mandatory real-world search');
+          if (d.normalConversationFastPath !== true) throw new Error('fast path disabled');
+          console.log('VOICE_HEALTH=' + JSON.stringify(d));
+          NODE
+
+          curl_retry "$PRODUCTION_URL/api/search-smoke" /tmp/search-smoke.json
+          node <<'NODE'
+          const d = require('/tmp/search-smoke.json');
+          if (d.routedToSearch !== true) throw new Error('Beppu reproduction did not route to search');
+          if (d.ok !== true) throw new Error(`search smoke failed: ${JSON.stringify(d)}`);
+          if (!(d.evidenceCount > 0)) throw new Error(`no evidence: ${JSON.stringify(d)}`);
+          const qs = (d.queries || []).join(' ');
+          if (!/別府/.test(qs)) throw new Error(`Beppu missing from queries: ${qs}`);
+          if (!/パソコン|PC/.test(qs)) throw new Error(`PC subject missing from queries: ${qs}`);
+          console.log('SEARCH_SMOKE=' + JSON.stringify(d));
+          NODE
+
+          curl_retry "$PRODUCTION_URL/api/model-smoke" /tmp/model-smoke.json
+          node <<'NODE'
+          const d = require('/tmp/model-smoke.json');
+          if (!d.ok) throw new Error(`live model smoke failed: ${JSON.stringify(d)}`);
+          console.log('LIVE_MODEL=' + JSON.stringify(d));
+          NODE
+
+          curl_retry "$PRODUCTION_URL/api/quality-model-smoke" /tmp/quality-smoke.json
+          node <<'NODE'
+          const d = require('/tmp/quality-smoke.json');
+          if (!d.ok) throw new Error(`quality model smoke failed: ${JSON.stringify(d)}`);
+          console.log('QUALITY_MODEL=' + JSON.stringify(d));
+          NODE
