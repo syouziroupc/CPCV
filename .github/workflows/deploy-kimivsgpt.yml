@@ -52,7 +52,7 @@ jobs:
           npm run type-check
           npm run build-check
 
-      - name: Deploy to canonical Cloudflare account
+      - name: Deploy canonical GitHub-linked Worker
         working-directory: kimivsgpt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -62,12 +62,12 @@ jobs:
           set -euo pipefail
           npx wrangler deploy
 
-      - name: Verify live auditor after propagation
+      - name: Verify canonical live auditor after propagation
         shell: bash
         run: |
           set -euo pipefail
           for i in 1 2 3 4 5 6; do
-            body="$(curl --fail --silent --show-error https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/health || true)"
+            body="$(curl --fail --silent --show-error https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
             if printf '%s' "$body" | grep -q '"ok":true' && printf '%s' "$body" | grep -q '"version":"0.3.2"'; then
               exit 0
