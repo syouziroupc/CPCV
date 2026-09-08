@@ -1,0 +1,235 @@
+name: INOSO final mosaic production cutover
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/inoso-mosaic-cutover-final.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    env:
+      ZONE_ID: 7b3905101c71c6f8c189a1e4a6d3e628
+      ZONE_NAME: szpc.jp
+      HOSTNAME: inoso.szpc.jp
+      PAGES_ORIGIN: inoso.pages.dev
+      WORKER_NAME: inoso-mosaic-overlay
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate origin and credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsSIL --retry 4 "https://$PAGES_ORIGIN/?origin-check=${{ github.sha }}" -o /tmp/origin-headers.txt
+          ! grep -Eqi '^location: *https://inoso\.szpc\.jp' /tmp/origin-headers.txt
+          curl -fsSL --retry 4 "https://$PAGES_ORIGIN/?origin-check=${{ github.sha }}" -o /tmp/origin.html
+          grep -q '株式会社イノソー' /tmp/origin.html
+
+      - name: Download live privacy images and build corrected mosaics
+        id: build
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 5 "https://$HOSTNAME/assets/images/truck.webp?source=${{ github.sha }}" -o truck-original.webp
+          curl -fsSL --retry 5 "https://$HOSTNAME/assets/images/permit-board.webp?source=${{ github.sha }}" -o permit-original.webp
+          test "$(identify -format '%wx%h' truck-original.webp)" = '1536x1152'
+          test "$(identify -format '%wx%h' permit-original.webp)" = '1536x1152'
+          convert truck-original.webp truck.png
+          convert permit-original.webp permit.png
+          mkdir -p crops-before crops-after overlay-assets/assets/images
+
+          mosaic() {
+            src="$1" x="$2" y="$3" w="$4" h="$5" sw="$6" sh="$7" tag="$8"
+            convert "$src" -crop "${w}x${h}+${x}+${y}" +repage "crops-before/${tag}.png"
+            convert "crops-before/${tag}.png" -filter point -resize "${sw}x${sh}!" -resize "${w}x${h}!" /tmp/mosaic.png
+            convert "$src" /tmp/mosaic.png -geometry "+${x}+${y}" -composite /tmp/out.png
+            mv /tmp/out.png "$src"
+            convert "$src" -crop "${w}x${h}+${x}+${y}" +repage "crops-after/${tag}.png"
+            ae="$(compare -metric AE "crops-before/${tag}.png" "crops-after/${tag}.png" null: 2>&1 || true)"
+            echo "$tag changed_pixels=$ae"
+            test "$ae" != '0'
+          }
+
+          mosaic truck.png 580 330 245 205 16 14 truck-driver
+          mosaic truck.png 995 685 215 170 14 11 truck-frontplate
+          mosaic truck.png 125 530 110 105 8 8 truck-carplate
+          mosaic permit.png 625 635 415 195 26 12 permit-private
+
+          convert truck.png -quality 88 overlay-assets/assets/images/truck.webp
+          convert permit.png -quality 88 overlay-assets/assets/images/permit-board.webp
+          truck_sha="$(sha256sum overlay-assets/assets/images/truck.webp | awk '{print $1}')"
+          permit_sha="$(sha256sum overlay-assets/assets/images/permit-board.webp | awk '{print $1}')"
+          echo "truck_sha=$truck_sha" >> "$GITHUB_OUTPUT"
+          echo "permit_sha=$permit_sha" >> "$GITHUB_OUTPUT"
+          echo "$truck_sha  truck.webp" > expected-sha256.txt
+          echo "$permit_sha  permit-board.webp" >> expected-sha256.txt
+
+      - name: Deploy overlay Worker assets and Pages proxy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          cat > worker.js <<'JS'
+          export default {
+            async fetch(request) {
+              const upstream = new URL(request.url);
+              upstream.protocol = 'https:';
+              upstream.hostname = 'inoso.pages.dev';
+              return fetch(new Request(upstream.toString(), request));
+            }
+          };
+          JS
+          cat > wrangler.jsonc <<'JSON'
+          {
+            "name": "inoso-mosaic-overlay",
+            "main": "worker.js",
+            "compatibility_date": "2026-09-08",
+            "assets": {
+              "directory": "./overlay-assets",
+              "binding": "ASSETS"
+            }
+          }
+          JSON
+          npx -y wrangler@4.110.0 deploy --config wrangler.jsonc 2>&1 | tee worker-deploy.txt
+
+      - name: Prove DNS edit capability with no-op update
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json')
+          curl -sS --retry 4 "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?type=CNAME&name=$HOSTNAME" -o dns-before.json
+          jq -e '.success == true and (.result|length)==1' dns-before.json >/dev/null
+          id="$(jq -r '.result[0].id' dns-before.json)"
+          name="$(jq -r '.result[0].name' dns-before.json)"
+          content="$(jq -r '.result[0].content' dns-before.json)"
+          ttl="$(jq -r '.result[0].ttl' dns-before.json)"
+          proxied="$(jq -r '.result[0].proxied' dns-before.json)"
+          payload="$(jq -n --arg type CNAME --arg name "$name" --arg content "$content" --argjson ttl "$ttl" --argjson proxied "$proxied" '{type:$type,name:$name,content:$content,ttl:$ttl,proxied:$proxied}')"
+          curl -sS --retry 4 -X PATCH "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$id" --data "$payload" -o dns-noop.json
+          cat dns-noop.json
+          jq -e '.success == true' dns-noop.json >/dev/null
+
+      - name: Cut over hostname with automatic rollback
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          EXPECTED_TRUCK: ${{ steps.build.outputs.truck_sha }}
+          EXPECTED_PERMIT: ${{ steps.build.outputs.permit_sha }}
+        run: |
+          set -euo pipefail
+          auth=(-H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json')
+          id="$(jq -r '.result[0].id' dns-before.json)"
+          old_name="$(jq -r '.result[0].name' dns-before.json)"
+          old_content="$(jq -r '.result[0].content' dns-before.json)"
+          old_ttl="$(jq -r '.result[0].ttl' dns-before.json)"
+          old_proxied="$(jq -r '.result[0].proxied' dns-before.json)"
+          keep=0
+
+          rollback() {
+            set +e
+            echo 'ROLLBACK: restoring original Pages CNAME'
+            domains="$(curl -sS "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains")"
+            did="$(printf '%s' "$domains" | jq -r --arg h "$HOSTNAME" '.result[]? | select(.hostname==$h) | .id' | head -n1)"
+            if [ -n "$did" ]; then
+              curl -sS -X DELETE "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains/$did" | tee rollback-domain.json
+            fi
+            existing="$(curl -sS "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?type=CNAME&name=$HOSTNAME")"
+            if [ "$(printf '%s' "$existing" | jq '.result|length' 2>/dev/null)" = '0' ]; then
+              payload="$(jq -n --arg type CNAME --arg name "$old_name" --arg content "$old_content" --argjson ttl "$old_ttl" --argjson proxied "$old_proxied" '{type:$type,name:$name,content:$content,ttl:$ttl,proxied:$proxied}')"
+              curl -sS -X POST "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" --data "$payload" | tee rollback-dns.json
+            fi
+          }
+          trap 'if [ "$keep" = 0 ]; then rollback; fi' ERR
+
+          curl -sS --retry 4 -X DELETE "${auth[@]}" "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$id" -o dns-delete.json
+          cat dns-delete.json
+          jq -e '.success == true' dns-delete.json >/dev/null
+
+          payload="$(jq -n --arg hostname "$HOSTNAME" --arg service "$WORKER_NAME" --arg zone_id "$ZONE_ID" --arg zone_name "$ZONE_NAME" '{hostname:$hostname,service:$service,zone_id:$zone_id,zone_name:$zone_name}')"
+          curl -sS --retry 4 -X PUT "${auth[@]}" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/domains" --data "$payload" -o domain-attach.json
+          cat domain-attach.json
+          jq -e '.success == true' domain-attach.json >/dev/null
+
+          ok=0
+          for i in $(seq 1 90); do
+            rm -f live-truck.webp live-permit.webp
+            curl -fsSL --connect-timeout 10 --max-time 25 "https://$HOSTNAME/assets/images/truck.webp?v=${{ github.run_id }}-$i" -o live-truck.webp || true
+            curl -fsSL --connect-timeout 10 --max-time 25 "https://$HOSTNAME/assets/images/permit-board.webp?v=${{ github.run_id }}-$i" -o live-permit.webp || true
+            th="$(sha256sum live-truck.webp 2>/dev/null | awk '{print $1}')"
+            ph="$(sha256sum live-permit.webp 2>/dev/null | awk '{print $1}')"
+            echo "attempt=$i truck=$th permit=$ph"
+            if [ "$th" = "$EXPECTED_TRUCK" ] && [ "$ph" = "$EXPECTED_PERMIT" ]; then
+              curl -fsSL "https://$HOSTNAME/?v=${{ github.run_id }}-$i" -o live-index.html
+              curl -fsSL "https://$HOSTNAME/services.html?v=${{ github.run_id }}-$i" -o live-services.html
+              if grep -q '株式会社イノソー' live-index.html && grep -q '株式会社イノソー' live-services.html; then
+                ok=1
+                break
+              fi
+            fi
+            sleep 5
+          done
+          test "$ok" = 1
+          curl -fsSI "https://$HOSTNAME/css/style.css?v=${{ github.run_id }}" -o style-headers.txt
+          curl -fsSI "https://$HOSTNAME/js/main.js?v=${{ github.run_id }}" -o js-headers.txt
+          keep=1
+          trap - ERR
+          echo 'PRODUCTION VERIFIED; cutover retained.'
+
+      - name: Screenshot-debug production desktop mobile and sensitive regions
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=live-truck.png "https://$HOSTNAME/assets/images/truck.webp?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=live-permit.png "https://$HOSTNAME/assets/images/permit-board.webp?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1440,5000 --screenshot=desktop.png "https://$HOSTNAME/?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=390,5000 --screenshot=mobile.png "https://$HOSTNAME/?shot=${{ github.run_id }}-m"
+          convert live-truck.webp -crop 245x205+580+330 +repage live-truck-driver.png
+          convert live-truck.webp -crop 215x170+995+685 +repage live-truck-frontplate.png
+          convert live-truck.webp -crop 110x105+125+530 +repage live-truck-carplate.png
+          convert live-permit.webp -crop 415x195+625+635 +repage live-permit-private.png
+          identify live-truck.png live-permit.png desktop.png mobile.png live-truck-driver.png live-truck-frontplate.png live-truck-carplate.png live-permit-private.png | tee screenshot-check.txt
+
+      - name: Upload final verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: inoso-final-production-${{ github.run_id }}
+          path: |
+            live-truck.webp
+            live-permit.webp
+            live-truck.png
+            live-permit.png
+            desktop.png
+            mobile.png
+            live-truck-driver.png
+            live-truck-frontplate.png
+            live-truck-carplate.png
+            live-permit-private.png
+            crops-before/
+            crops-after/
+            expected-sha256.txt
+            screenshot-check.txt
+            live-index.html
+            live-services.html
+            dns-before.json
+            dns-noop.json
+            dns-delete.json
+            domain-attach.json
+            worker-deploy.txt
+            style-headers.txt
+            js-headers.txt
+            /tmp/origin-headers.txt
+          if-no-files-found: warn
+          retention-days: 7
