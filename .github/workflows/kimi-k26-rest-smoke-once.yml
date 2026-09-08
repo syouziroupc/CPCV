@@ -1,0 +1,87 @@
+name: kimi-k26-rest-smoke-once
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: contains(github.event.head_commit.message, '[kimi-k26-smoke]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Call Kimi K2.6 exactly once with production-equivalent parameters
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/payload.json <<'JSON'
+          {
+            "messages": [
+              {"role":"system","content":"Act only as a terse adversarial reviewer. Do not emit analysis or thinking text; produce final compact JSON immediately with keys verdict, risk, issues, verify, next_step, confidence."},
+              {"role":"user","content":"{\"user_request\":\"Audit the absolute claim that used PCs always offer better value than new PCs.\",\"proposed_direction\":\"Reject the word always because warranty, remaining life, support and price vary.\",\"key_claims\":[\"Used PCs can cost less.\",\"New PCs can have longer warranty.\"],\"assumptions\":[\"Value includes total ownership cost.\"],\"evidence\":[],\"constraints\":[\"Compact critique only.\"],\"uncertainties\":[\"Condition and prices vary.\"],\"review_level\":\"deep\"}"}
+            ],
+            "max_completion_tokens": 512,
+            "temperature": 0,
+            "stream": false,
+            "reasoning_effort": null,
+            "chat_template_kwargs": {"thinking": false}
+          }
+          JSON
+
+          code="$(curl --silent --show-error --output /tmp/kimi-response.json --write-out '%{http_code}' \
+            -X POST \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary @/tmp/payload.json \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/@cf/moonshotai/kimi-k2.6")"
+
+          if [ "$code" != "200" ]; then
+            echo "KIMI_HTTP_FAILURE:$code"
+            python - <<'PY'
+          import json
+          try:
+              d=json.load(open('/tmp/kimi-response.json',encoding='utf-8'))
+              print(json.dumps({'success':d.get('success'),'errors':d.get('errors')},ensure_ascii=False))
+          except Exception:
+              print('response_not_json')
+          PY
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json, sys
+          d=json.load(open('/tmp/kimi-response.json',encoding='utf-8'))
+          if not d.get('success', True):
+              print('KIMI_API_SUCCESS_FALSE')
+              sys.exit(1)
+          r=d.get('result', d)
+          value=r.get('response') if isinstance(r,dict) and r.get('response') not in (None,'') else r
+          if isinstance(value,dict) and isinstance(value.get('choices'),list) and value['choices']:
+              msg=(value['choices'][0] or {}).get('message') or {}
+              value=msg.get('content')
+          if isinstance(value,dict):
+              obj=value
+          elif isinstance(value,str):
+              t=value.strip()
+              a=t.find('{'); b=t.rfind('}')
+              if a < 0 or b <= a:
+                  print('KIMI_NO_JSON_CONTENT')
+                  sys.exit(1)
+              obj=json.loads(t[a:b+1])
+          else:
+              print('KIMI_EMPTY_OR_UNKNOWN_CONTENT')
+              sys.exit(1)
+          verdict=obj.get('verdict')
+          if verdict not in ('proceed','revise','verify'):
+              print('KIMI_BAD_VERDICT')
+              sys.exit(1)
+          print('KIMI_K26_SMOKE_OK')
+          print('verdict='+verdict)
+          PY
