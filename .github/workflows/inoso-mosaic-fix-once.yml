@@ -22,47 +22,31 @@ jobs:
     env:
       HOSTNAME: inoso.szpc.jp
       PAGES_ORIGIN: inoso.pages.dev
-      PAGES_PROJECT: inoso
+      ZONE_ID: 7b3905101c71c6f8c189a1e4a6d3e628
+      WORKER_NAME: inoso-mosaic-overlay
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install required tools
+      - name: Install image tools
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y imagemagick wget
+          sudo apt-get install -y imagemagick
           command -v identify
           command -v convert
           command -v compare
-          command -v wget
 
-      - name: Reconstruct current production site
-        run: |
-          set -euo pipefail
-          rm -rf site
-          mkdir -p site
-          wget --mirror --page-requisites --no-parent --no-host-directories --directory-prefix=site --execute robots=off "https://$PAGES_ORIGIN/"
-          test -s site/index.html
-          test -s site/services.html
-          test -s site/css/style.css
-          test -s site/css/services.css
-          test -s site/js/main.js
-          test -s site/assets/images/truck.webp
-          test -s site/assets/images/permit-board.webp
-          grep -q '株式会社イノソー' site/index.html
-          grep -q '株式会社イノソー' site/services.html
-
-      - name: Build corrected privacy mosaics
+      - name: Build corrected privacy images from current Pages origin
         id: build
         run: |
           set -euo pipefail
-          test "$(identify -format '%wx%h' site/assets/images/truck.webp)" = '1536x1152'
-          test "$(identify -format '%wx%h' site/assets/images/permit-board.webp)" = '1536x1152'
-          cp site/assets/images/truck.webp truck-original.webp
-          cp site/assets/images/permit-board.webp permit-original.webp
+          curl -fsSL --retry 5 "https://$PAGES_ORIGIN/assets/images/truck.webp?source=${{ github.sha }}" -o truck-original.webp
+          curl -fsSL --retry 5 "https://$PAGES_ORIGIN/assets/images/permit-board.webp?source=${{ github.sha }}" -o permit-original.webp
+          test "$(identify -format '%wx%h' truck-original.webp)" = '1536x1152'
+          test "$(identify -format '%wx%h' permit-original.webp)" = '1536x1152'
           convert truck-original.webp truck.png
           convert permit-original.webp permit.png
-          mkdir -p crops-before crops-after
+          mkdir -p overlay-assets/assets/images crops-before crops-after
           mosaic() {
             src="$1"; x="$2"; y="$3"; w="$4"; h="$5"; sw="$6"; sh="$7"; tag="$8"
             convert "$src" -crop "${w}x${h}+${x}+${y}" +repage "crops-before/${tag}.png"
@@ -78,16 +62,15 @@ jobs:
           mosaic truck.png 995 685 215 170 14 11 truck-frontplate
           mosaic truck.png 125 530 110 105 8 8 truck-carplate
           mosaic permit.png 625 635 415 195 26 12 permit-private
-          convert truck.png -quality 88 site/assets/images/truck.webp
-          convert permit.png -quality 88 site/assets/images/permit-board.webp
-          truck_sha="$(sha256sum site/assets/images/truck.webp | awk '{print $1}')"
-          permit_sha="$(sha256sum site/assets/images/permit-board.webp | awk '{print $1}')"
+          convert truck.png -quality 88 overlay-assets/assets/images/truck.webp
+          convert permit.png -quality 88 overlay-assets/assets/images/permit-board.webp
+          truck_sha="$(sha256sum overlay-assets/assets/images/truck.webp | awk '{print $1}')"
+          permit_sha="$(sha256sum overlay-assets/assets/images/permit-board.webp | awk '{print $1}')"
           echo "truck_sha=$truck_sha" >> "$GITHUB_OUTPUT"
           echo "permit_sha=$permit_sha" >> "$GITHUB_OUTPUT"
           printf '%s  truck.webp\n%s  permit-board.webp\n' "$truck_sha" "$permit_sha" > expected-sha256.txt
 
-      - name: Read Pages project production branch
-        id: project
+      - name: Deploy fixed images on production Worker route
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -95,53 +78,61 @@ jobs:
           set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-          curl -fsSL --retry 4 -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT" -o pages-project.json
-          jq -e '.success == true' pages-project.json >/dev/null
-          branch="$(jq -r '.result.production_branch // empty' pages-project.json)"
-          test -n "$branch"
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          cat > worker.js <<'JS'
+          export default {
+            async fetch(request) {
+              return fetch(request);
+            }
+          };
+          JS
+          cat > wrangler.jsonc <<JSON
+          {
+            "name": "$WORKER_NAME",
+            "main": "worker.js",
+            "compatibility_date": "2026-09-08",
+            "assets": {
+              "directory": "./overlay-assets",
+              "binding": "ASSETS"
+            },
+            "routes": [
+              {
+                "pattern": "$HOSTNAME/*",
+                "zone_id": "$ZONE_ID"
+              }
+            ]
+          }
+          JSON
+          npx -y wrangler@4.110.0 deploy --config wrangler.jsonc 2>&1 | tee worker-route-deploy.txt
 
-      - name: Deploy directly to Pages production
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PRODUCTION_BRANCH: ${{ steps.project.outputs.branch }}
-        run: |
-          set -euo pipefail
-          npx -y wrangler@4.110.0 pages deploy site --project-name="$PAGES_PROJECT" --branch="$PRODUCTION_BRANCH" --commit-hash="${{ github.sha }}" --commit-message="Fix INOSO mosaic alignment" 2>&1 | tee pages-deploy.txt
-
-      - name: Verify Pages origin and custom domain bytes
+      - name: Verify production fixed bytes and unaffected pages
         env:
           EXPECTED_TRUCK: ${{ steps.build.outputs.truck_sha }}
           EXPECTED_PERMIT: ${{ steps.build.outputs.permit_sha }}
         run: |
           set -euo pipefail
-          verify_host() {
-            host="$1"
-            for i in $(seq 1 60); do
-              curl -fsSL --connect-timeout 10 --max-time 25 "https://$host/assets/images/truck.webp?v=${{ github.run_id }}-$i" -o "${host}-truck.webp" || true
-              curl -fsSL --connect-timeout 10 --max-time 25 "https://$host/assets/images/permit-board.webp?v=${{ github.run_id }}-$i" -o "${host}-permit.webp" || true
-              th="$(sha256sum "${host}-truck.webp" 2>/dev/null | awk '{print $1}')"
-              ph="$(sha256sum "${host}-permit.webp" 2>/dev/null | awk '{print $1}')"
-              echo "host=$host attempt=$i truck=$th permit=$ph"
-              if [ "$th" = "$EXPECTED_TRUCK" ] && [ "$ph" = "$EXPECTED_PERMIT" ]; then
-                return 0
-              fi
-              sleep 5
-            done
-            return 1
-          }
-          verify_host "$PAGES_ORIGIN"
-          verify_host "$HOSTNAME"
-          cp "$HOSTNAME-truck.webp" live-truck.webp
-          cp "$HOSTNAME-permit.webp" live-permit.webp
-          curl -fsSL "https://$HOSTNAME/?v=${{ github.run_id }}" -o live-index.html
-          curl -fsSL "https://$HOSTNAME/services.html?v=${{ github.run_id }}" -o live-services.html
+          ok=0
+          for i in $(seq 1 60); do
+            curl -fsSL --connect-timeout 10 --max-time 25 "https://$HOSTNAME/assets/images/truck.webp?v=${{ github.run_id }}-$i" -o live-truck.webp || true
+            curl -fsSL --connect-timeout 10 --max-time 25 "https://$HOSTNAME/assets/images/permit-board.webp?v=${{ github.run_id }}-$i" -o live-permit.webp || true
+            th="$(sha256sum live-truck.webp 2>/dev/null | awk '{print $1}')"
+            ph="$(sha256sum live-permit.webp 2>/dev/null | awk '{print $1}')"
+            echo "attempt=$i truck=$th permit=$ph"
+            if [ "$th" = "$EXPECTED_TRUCK" ] && [ "$ph" = "$EXPECTED_PERMIT" ]; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+          test "$ok" = 1
+          curl -fsSL "https://$HOSTNAME/?verify=${{ github.run_id }}" -o live-index.html
+          curl -fsSL "https://$HOSTNAME/services.html?verify=${{ github.run_id }}" -o live-services.html
+          curl -fsSI "https://$HOSTNAME/css/style.css?verify=${{ github.run_id }}" -o style-headers.txt
+          curl -fsSI "https://$HOSTNAME/js/main.js?verify=${{ github.run_id }}" -o js-headers.txt
           grep -q '株式会社イノソー' live-index.html
           grep -q '株式会社イノソー' live-services.html
-          echo 'PRODUCTION VERIFIED'
+          echo 'PRODUCTION BYTES VERIFIED'
 
-      - name: Screenshot-debug production desktop and mobile
+      - name: Screenshot-debug production desktop mobile and sensitive regions
         run: |
           set -euo pipefail
           CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
@@ -159,13 +150,14 @@ jobs:
       - name: Upload final verification evidence
         uses: actions/upload-artifact@v4
         with:
-          name: inoso-final-production-${{ github.run_id }}
+          name: inoso-production-mosaic-${{ github.run_id }}
           path: |
-            pages-project.json
-            pages-deploy.txt
+            worker-route-deploy.txt
             expected-sha256.txt
             live-index.html
             live-services.html
+            style-headers.txt
+            js-headers.txt
             live-truck.webp
             live-permit.webp
             live-truck.png
