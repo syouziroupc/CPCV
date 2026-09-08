@@ -62,11 +62,16 @@ jobs:
           set -euo pipefail
           npx wrangler deploy
 
-      - name: Verify live auditor
+      - name: Verify live auditor after propagation
         shell: bash
         run: |
           set -euo pipefail
-          body="$(curl --fail --silent --show-error --retry 3 --retry-delay 1 https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/health)"
-          echo "$body"
-          printf '%s' "$body" | grep -q '"ok":true'
-          printf '%s' "$body" | grep -q '"version":"0.3.2"'
+          for i in 1 2 3 4 5 6; do
+            body="$(curl --fail --silent --show-error https://kimi-vs-gpt-auditor.syouziroupc.workers.dev/health || true)"
+            echo "$body"
+            if printf '%s' "$body" | grep -q '"ok":true' && printf '%s' "$body" | grep -q '"version":"0.3.2"'; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
