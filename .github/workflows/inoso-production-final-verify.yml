@@ -1,0 +1,72 @@
+name: Verify INOSO production mosaic final
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/inoso-production-final-verify.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      HOSTNAME: inoso.szpc.jp
+      EXPECTED_TRUCK: 8653af1c9ab03942100db012fed43c5a5913aa7bfbb7b216e0b76d05285aa084
+      EXPECTED_PERMIT: b7dd064d8dc3d24c4f76a116d8e2d785951c6f590286de28aaaeb65a2407e850
+    steps:
+      - name: Install image tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+
+      - name: Verify production bytes and HTML
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          ok=0
+          for i in $(seq 1 60); do
+            rm -f evidence/truck.webp evidence/permit-board.webp
+            curl -sS -fL --connect-timeout 10 --max-time 25 -H 'Cache-Control: no-cache' "https://$HOSTNAME/assets/images/truck.webp?v=${{ github.run_id }}-$i" -o evidence/truck.webp || true
+            curl -sS -fL --connect-timeout 10 --max-time 25 -H 'Cache-Control: no-cache' "https://$HOSTNAME/assets/images/permit-board.webp?v=${{ github.run_id }}-$i" -o evidence/permit-board.webp || true
+            th="$(sha256sum evidence/truck.webp 2>/dev/null | awk '{print $1}')"
+            ph="$(sha256sum evidence/permit-board.webp 2>/dev/null | awk '{print $1}')"
+            echo "attempt=$i truck=$th permit=$ph" | tee -a evidence/verify.log
+            if [ "$th" = "$EXPECTED_TRUCK" ] && [ "$ph" = "$EXPECTED_PERMIT" ]; then ok=1; break; fi
+            sleep 3
+          done
+          test "$ok" = 1
+          curl -fsSL "https://$HOSTNAME/?v=${{ github.run_id }}" -o evidence/index.html
+          curl -fsSL "https://$HOSTNAME/services.html?v=${{ github.run_id }}" -o evidence/services.html
+          grep -q '株式会社イノソー' evidence/index.html
+          grep -q '株式会社イノソー' evidence/services.html
+          sha256sum evidence/truck.webp evidence/permit-board.webp | tee evidence/SHA256SUMS.txt
+          echo PRODUCTION_BYTES_VERIFIED | tee evidence/production-bytes-verified.txt
+
+      - name: Capture desktop mobile and privacy-region screenshots
+        run: |
+          set -euo pipefail
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=evidence/truck.png "https://$HOSTNAME/assets/images/truck.webp?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=evidence/permit.png "https://$HOSTNAME/assets/images/permit-board.webp?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1440,5000 --screenshot=evidence/desktop.png "https://$HOSTNAME/?shot=${{ github.run_id }}"
+          "$CHROME" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=390,5000 --screenshot=evidence/mobile.png "https://$HOSTNAME/?shot=${{ github.run_id }}-m"
+          convert evidence/truck.webp -crop 245x205+580+330 +repage evidence/truck-driver.png
+          convert evidence/truck.webp -crop 215x170+995+685 +repage evidence/truck-frontplate.png
+          convert evidence/truck.webp -crop 110x105+125+530 +repage evidence/truck-carplate.png
+          convert evidence/permit-board.webp -crop 415x195+625+635 +repage evidence/permit-private.png
+          identify evidence/truck.png evidence/permit.png evidence/desktop.png evidence/mobile.png evidence/truck-driver.png evidence/truck-frontplate.png evidence/truck-carplate.png evidence/permit-private.png | tee evidence/image-identify.txt
+          echo SCREENSHOTS_CAPTURED | tee evidence/screenshots-captured.txt
+
+      - name: Upload verification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: inoso-production-final-verify-${{ github.run_id }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 7
