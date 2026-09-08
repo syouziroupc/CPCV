@@ -5,7 +5,6 @@ on:
     branches: [master]
     paths:
       - '.github/workflows/inoso-mosaic-fix-once.yml'
-      - '.github/inoso-mosaic-assets/**'
   workflow_dispatch:
 
 permissions:
@@ -70,7 +69,7 @@ jobs:
             test -s "site/$path"
           done
 
-      - name: Build corrected privacy images and validate patch coordinates
+      - name: Build corrected privacy mosaics and validate coordinates
         id: build
         run: |
           set -euo pipefail
@@ -78,30 +77,33 @@ jobs:
             sudo apt-get update
             sudo apt-get install -y imagemagick
           fi
-          mkdir -p /tmp/inoso-fixed /tmp/inoso-crops
+          mkdir -p /tmp/inoso-work /tmp/inoso-original /tmp/inoso-fixed
 
-          convert site/assets/images/truck.webp \
-            .github/inoso-mosaic-assets/truck-driver.webp -geometry +580+330 -composite \
-            .github/inoso-mosaic-assets/truck-frontplate.webp -geometry +995+685 -composite \
-            .github/inoso-mosaic-assets/truck-carplate.webp -geometry +125+530 -composite \
-            /tmp/inoso-fixed/truck.png
+          cp site/assets/images/truck.webp /tmp/inoso-work/truck.webp
+          cp site/assets/images/permit-board.webp /tmp/inoso-work/permit.webp
 
-          convert site/assets/images/permit-board.webp \
-            .github/inoso-mosaic-assets/permit-private.webp -geometry +625+635 -composite \
-            /tmp/inoso-fixed/permit.png
+          mosaic_region() {
+            src="$1"; x="$2"; y="$3"; w="$4"; h="$5"; sw="$6"; sh="$7"; tag="$8"
+            convert "$src" -crop "${w}x${h}+${x}+${y}" +repage "/tmp/inoso-original/${tag}.png"
+            convert "/tmp/inoso-original/${tag}.png" -filter point -resize "${sw}x${sh}!" -resize "${w}x${h}!" "/tmp/inoso-work/${tag}-mosaic.png"
+            convert "$src" "/tmp/inoso-work/${tag}-mosaic.png" -geometry "+${x}+${y}" -composite "/tmp/inoso-work/${tag}-out.png"
+            mv "/tmp/inoso-work/${tag}-out.png" "$src"
+            convert "$src" -crop "${w}x${h}+${x}+${y}" +repage "/tmp/inoso-fixed/${tag}.png"
+            ae="$(compare -metric AE "/tmp/inoso-original/${tag}.png" "/tmp/inoso-fixed/${tag}.png" null: 2>&1 || true)"
+            echo "$tag changed_pixels=$ae"
+            test "$ae" != "0"
+          }
 
-          convert /tmp/inoso-fixed/truck.png -crop 245x205+580+330 +repage /tmp/inoso-crops/truck-driver.png
-          convert /tmp/inoso-fixed/truck.png -crop 215x170+995+685 +repage /tmp/inoso-crops/truck-frontplate.png
-          convert /tmp/inoso-fixed/truck.png -crop 110x105+125+530 +repage /tmp/inoso-crops/truck-carplate.png
-          convert /tmp/inoso-fixed/permit.png -crop 415x195+625+635 +repage /tmp/inoso-crops/permit-private.png
+          convert /tmp/inoso-work/truck.webp /tmp/inoso-work/truck.png
+          mosaic_region /tmp/inoso-work/truck.png 580 330 245 205 16 14 truck-driver
+          mosaic_region /tmp/inoso-work/truck.png 995 685 215 170 14 11 truck-frontplate
+          mosaic_region /tmp/inoso-work/truck.png 125 530 110 105 8 8 truck-carplate
 
-          test "$(compare -metric AE /tmp/inoso-crops/truck-driver.png .github/inoso-mosaic-assets/truck-driver.webp null: 2>&1 || true)" = "0"
-          test "$(compare -metric AE /tmp/inoso-crops/truck-frontplate.png .github/inoso-mosaic-assets/truck-frontplate.webp null: 2>&1 || true)" = "0"
-          test "$(compare -metric AE /tmp/inoso-crops/truck-carplate.png .github/inoso-mosaic-assets/truck-carplate.webp null: 2>&1 || true)" = "0"
-          test "$(compare -metric AE /tmp/inoso-crops/permit-private.png .github/inoso-mosaic-assets/permit-private.webp null: 2>&1 || true)" = "0"
+          convert /tmp/inoso-work/permit.webp /tmp/inoso-work/permit.png
+          mosaic_region /tmp/inoso-work/permit.png 625 635 415 195 26 12 permit-private
 
-          convert /tmp/inoso-fixed/truck.png -quality 88 site/assets/images/truck.webp
-          convert /tmp/inoso-fixed/permit.png -quality 88 site/assets/images/permit-board.webp
+          convert /tmp/inoso-work/truck.png -quality 88 site/assets/images/truck.webp
+          convert /tmp/inoso-work/permit.png -quality 88 site/assets/images/permit-board.webp
           test "$(identify -format '%wx%h' site/assets/images/truck.webp)" = "1536x1152"
           test "$(identify -format '%wx%h' site/assets/images/permit-board.webp)" = "1536x1152"
 
