@@ -1,0 +1,162 @@
+name: INOSO Pages direct deploy once
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/inoso-pages-direct-deploy-once.yml
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    env:
+      HOSTNAME: inoso.szpc.jp
+      PAGES_ORIGIN: inoso.pages.dev
+      PAGES_PROJECT: inoso
+    steps:
+      - name: Install tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y imagemagick wget
+
+      - name: Reconstruct current Pages site
+        run: |
+          set -euo pipefail
+          rm -rf site
+          mkdir -p site
+          wget --mirror --page-requisites --no-parent --no-host-directories --directory-prefix=site --execute robots=off "https://$PAGES_ORIGIN/"
+          test -s site/index.html
+          test -s site/services.html
+          test -s site/assets/images/truck.webp
+          test -s site/assets/images/permit-board.webp
+          grep -q '株式会社イノソー' site/index.html
+
+      - name: Build fixed mosaic images
+        id: fix
+        run: |
+          set -euo pipefail
+          test "$(identify -format '%wx%h' site/assets/images/truck.webp)" = 1536x1152
+          test "$(identify -format '%wx%h' site/assets/images/permit-board.webp)" = 1536x1152
+          cp site/assets/images/truck.webp truck-original.webp
+          cp site/assets/images/permit-board.webp permit-original.webp
+          convert truck-original.webp truck.png
+          convert permit-original.webp permit.png
+          mkdir -p crops-before crops-after
+          mosaic() {
+            src="$1"; x="$2"; y="$3"; w="$4"; h="$5"; sw="$6"; sh="$7"; tag="$8"
+            convert "$src" -crop "${w}x${h}+${x}+${y}" +repage "crops-before/${tag}.png"
+            convert "crops-before/${tag}.png" -filter point -resize "${sw}x${sh}!" -resize "${w}x${h}!" /tmp/mosaic.png
+            convert "$src" /tmp/mosaic.png -geometry "+${x}+${y}" -composite /tmp/out.png
+            mv /tmp/out.png "$src"
+            convert "$src" -crop "${w}x${h}+${x}+${y}" +repage "crops-after/${tag}.png"
+            changed="$(compare -metric AE "crops-before/${tag}.png" "crops-after/${tag}.png" null: 2>&1 || true)"
+            echo "$tag changed_pixels=$changed"
+            test "$changed" != 0
+          }
+          mosaic truck.png 580 330 245 205 16 14 truck-driver
+          mosaic truck.png 995 685 215 170 14 11 truck-frontplate
+          mosaic truck.png 125 530 110 105 8 8 truck-carplate
+          mosaic permit.png 625 635 415 195 26 12 permit-private
+          convert truck.png -quality 88 site/assets/images/truck.webp
+          convert permit.png -quality 88 site/assets/images/permit-board.webp
+          truck_sha="$(sha256sum site/assets/images/truck.webp | awk '{print $1}')"
+          permit_sha="$(sha256sum site/assets/images/permit-board.webp | awk '{print $1}')"
+          echo "truck_sha=$truck_sha" >> "$GITHUB_OUTPUT"
+          echo "permit_sha=$permit_sha" >> "$GITHUB_OUTPUT"
+          printf '%s  truck.webp\n%s  permit-board.webp\n' "$truck_sha" "$permit_sha" > expected-sha256.txt
+
+      - name: Get production branch
+        id: project
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          curl -fsSL -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PAGES_PROJECT" -o pages-project.json
+          jq -e '.success == true' pages-project.json >/dev/null
+          branch="$(jq -r '.result.production_branch' pages-project.json)"
+          test -n "$branch"
+          test "$branch" != null
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Pages production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PRODUCTION_BRANCH: ${{ steps.project.outputs.branch }}
+        run: |
+          set -euo pipefail
+          npx -y wrangler@4.110.0 pages deploy site --project-name="$PAGES_PROJECT" --branch="$PRODUCTION_BRANCH" --commit-hash="${{ github.sha }}" --commit-message="Fix INOSO mosaic alignment" 2>&1 | tee pages-deploy.txt
+
+      - name: Verify deployed production bytes
+        env:
+          EXPECTED_TRUCK: ${{ steps.fix.outputs.truck_sha }}
+          EXPECTED_PERMIT: ${{ steps.fix.outputs.permit_sha }}
+        run: |
+          set -euo pipefail
+          verify_host() {
+            host="$1"
+            for i in $(seq 1 60); do
+              curl -fsSL "https://$host/assets/images/truck.webp?v=${{ github.run_id }}-$i" -o live-truck.webp || true
+              curl -fsSL "https://$host/assets/images/permit-board.webp?v=${{ github.run_id }}-$i" -o live-permit.webp || true
+              th="$(sha256sum live-truck.webp 2>/dev/null | awk '{print $1}')"
+              ph="$(sha256sum live-permit.webp 2>/dev/null | awk '{print $1}')"
+              echo "host=$host attempt=$i truck=$th permit=$ph"
+              if [ "$th" = "$EXPECTED_TRUCK" ] && [ "$ph" = "$EXPECTED_PERMIT" ]; then return 0; fi
+              sleep 5
+            done
+            return 1
+          }
+          verify_host "$PAGES_ORIGIN"
+          verify_host "$HOSTNAME"
+          curl -fsSL "https://$HOSTNAME/?v=${{ github.run_id }}" -o live-index.html
+          curl -fsSL "https://$HOSTNAME/services.html?v=${{ github.run_id }}" -o live-services.html
+          grep -q '株式会社イノソー' live-index.html
+          grep -q '株式会社イノソー' live-services.html
+
+      - name: Screenshot debug production
+        run: |
+          set -euo pipefail
+          chrome="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$chrome"
+          "$chrome" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=live-truck.png "https://$HOSTNAME/assets/images/truck.webp?shot=${{ github.run_id }}"
+          "$chrome" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1536,1152 --screenshot=live-permit.png "https://$HOSTNAME/assets/images/permit-board.webp?shot=${{ github.run_id }}"
+          "$chrome" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=1440,5000 --screenshot=desktop.png "https://$HOSTNAME/?shot=${{ github.run_id }}"
+          "$chrome" --headless --no-sandbox --disable-gpu --hide-scrollbars --window-size=390,5000 --screenshot=mobile.png "https://$HOSTNAME/?shot=${{ github.run_id }}-m"
+          convert live-truck.webp -crop 245x205+580+330 +repage live-truck-driver.png
+          convert live-truck.webp -crop 215x170+995+685 +repage live-truck-frontplate.png
+          convert live-truck.webp -crop 110x105+125+530 +repage live-truck-carplate.png
+          convert live-permit.webp -crop 415x195+625+635 +repage live-permit-private.png
+          identify live-truck.png live-permit.png desktop.png mobile.png live-truck-driver.png live-truck-frontplate.png live-truck-carplate.png live-permit-private.png > screenshot-check.txt
+
+      - name: Upload verification artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: inoso-pages-production-${{ github.run_id }}
+          path: |
+            pages-project.json
+            pages-deploy.txt
+            expected-sha256.txt
+            live-index.html
+            live-services.html
+            live-truck.webp
+            live-permit.webp
+            live-truck.png
+            live-permit.png
+            desktop.png
+            mobile.png
+            live-truck-driver.png
+            live-truck-frontplate.png
+            live-truck-carplate.png
+            live-permit-private.png
+            crops-before/
+            crops-after/
+            screenshot-check.txt
+          if-no-files-found: error
+          retention-days: 7
