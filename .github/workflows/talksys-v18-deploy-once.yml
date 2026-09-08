@@ -1,4 +1,4 @@
-name: Deploy TalkSys v18.6 once
+name: Deploy TalkSys v19.0 once
 
 on:
   push:
@@ -15,11 +15,11 @@ jobs:
     environment: production
     timeout-minutes: 35
     steps:
-      - name: Checkout exact TalkSys v18.6 main commit
+      - name: Checkout exact TalkSys v19.0 main commit
         uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 735a2c82b8cec52ae13477996328b396a7e731c0
+          ref: ce8850da36c0c278e04d1e926bcd8af0d493d45b
           path: talksys
 
       - name: Setup Node
@@ -31,7 +31,7 @@ jobs:
         working-directory: talksys
         run: npm install --no-audit --no-fund
 
-      - name: Validate exact TalkSys v18.6 commit
+      - name: Validate exact TalkSys v19.0 commit
         working-directory: talksys
         run: |
           npm test
@@ -45,14 +45,14 @@ jobs:
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
 
-      - name: Deploy TalkSys v18.6 to Cloudflare
+      - name: Deploy TalkSys v19.0 to Cloudflare
         working-directory: talksys
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
 
-      - name: Verify TalkSys v18.6 production health
+      - name: Verify TalkSys v19.0 production health and UI
         env:
           PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
         run: |
@@ -64,26 +64,28 @@ jobs:
           console.log(JSON.stringify({
             voiceRevision: data.voiceRevision,
             mode: data.mode,
-            conversationPersistence: data.conversationPersistence,
-            sessionMemoryLifecycle: data.sessionMemoryLifecycle,
-            sessionMemoryTimeBasedExpiry: data.sessionMemoryTimeBasedExpiry,
             crossTurnContext: data.crossTurnContext,
-            crossSessionContext: data.crossSessionContext,
-            trustedCallerIdentityRequired: data.trustedCallerIdentityRequired,
-            callerIdentityPersistence: data.callerIdentityPersistence,
-            voiceBuiltinHistoryDisabled: data.voiceBuiltinHistoryDisabled,
-            qualityRouteForComplexConversation: data.qualityRouteForComplexConversation,
+            searchPlannerBeforeRetrieval: data.searchPlannerBeforeRetrieval,
+            searchRawConversationSeedDisabled: data.searchRawConversationSeedDisabled,
+            searchContextConstraintGuard: data.searchContextConstraintGuard,
+            searchEmptyPlaceholderDisabled: data.searchEmptyPlaceholderDisabled,
+            searchProcessTrace: data.searchProcessTrace,
+            searchProcessTraceExposesPrivateReasoning: data.searchProcessTraceExposesPrivateReasoning,
             searchPrecisionOnly: data.searchPrecisionOnly,
-            searchMaxQueries: data.searchMaxQueries,
-            searchMaxRounds: data.searchMaxRounds,
-            typedSpeechVoiceOutput: data.typedSpeechVoiceOutput,
-            callConnectTimeoutMs: data.callConnectTimeoutMs,
             searchAnswerAudit: data.searchAnswerAudit,
-            speechClarityProcessing: data.speechClarityProcessing,
           }));
           NODE
-            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision==='cloudflare-live-v18.6' && d.mode==='phone-consultation-only' && d.conversationPersistence==='call-session-with-trusted-caller-memory' && d.sessionMemoryLifecycle==='start_call-to-end_call' && d.sessionMemoryTimeBasedExpiry===false && d.crossTurnContext===true && d.crossSessionContext==='trusted-caller-only' && d.trustedCallerIdentityRequired===true && d.callerIdentityPersistence===true && d.voiceBuiltinHistoryDisabled===true && d.qualityRouteForComplexConversation===true && d.searchPrecisionOnly===true && d.searchMaxQueries===8 && d.searchMaxRounds===2 && d.typedSpeechVoiceOutput===true && d.callConnectTimeoutMs===10000 && d.searchAnswerAudit===true && d.speechClarityProcessing===true))")"
-            if [ "$ok" = "true" ]; then exit 0; fi
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision==='cloudflare-live-v19.0' && d.mode==='phone-consultation-only' && d.crossTurnContext===true && d.searchPlannerBeforeRetrieval===true && d.searchRawConversationSeedDisabled===true && d.searchContextConstraintGuard===true && d.searchEmptyPlaceholderDisabled===true && d.searchProcessTrace===true && d.searchProcessTraceExposesPrivateReasoning===false && d.searchPrecisionOnly===true && d.searchAnswerAudit===true))")"
+            if [ "$ok" = "true" ]; then
+              page="$(curl -fsS --max-time 20 "$PRODUCTION_URL/" || true)"
+              printf '%s' "$page" | grep -q 'AI処理ビュー'
+              printf '%s' "$page" | grep -q '会話から解決した検索課題'
+              if printf '%s' "$page" | grep -q '以前の質問内容は次の質問へ引き継ぎません'; then
+                echo 'stale no-context UI text is still present' >&2
+                exit 1
+              fi
+              exit 0
+            fi
             sleep 3
           done
           exit 1
