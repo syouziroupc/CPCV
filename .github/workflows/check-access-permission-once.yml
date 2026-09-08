@@ -1,0 +1,42 @@
+name: Check Cloudflare Access permission once
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    if: contains(github.event.head_commit.message, '[cf-access-check]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Check Access applications API permission
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl --silent --show-error --output /tmp/access-apps.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/access/apps")"
+          echo "HTTP_STATUS=$code"
+          python - <<'PY'
+          import json
+          p='/tmp/access-apps.json'
+          try:
+              d=json.load(open(p,encoding='utf-8'))
+              print('success=', d.get('success'))
+              errs=d.get('errors') or []
+              for e in errs[:3]:
+                  print('error_code=',e.get('code'),'message=',e.get('message'))
+              if d.get('success'):
+                  print('access_api_readable=true')
+          except Exception as e:
+              print('parse_error=',e)
+          PY
+          test "$code" = "200"
