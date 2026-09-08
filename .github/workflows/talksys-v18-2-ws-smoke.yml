@@ -12,11 +12,19 @@ permissions:
 jobs:
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+      - name: Direct model diagnostics
+        run: |
+          echo '--- live non-stream smoke ---'
+          curl -fsS --max-time 30 https://talksys.syouziroupc.workers.dev/api/model-smoke || true
+          echo
+          echo '--- model benchmark ---'
+          curl -fsS --max-time 90 https://talksys.syouziroupc.workers.dev/api/voice-model-bench || true
+          echo
       - name: Compare default and fresh agent greeting latency
         run: |
           node <<'NODE'
@@ -31,12 +39,12 @@ jobs:
                 console.log(JSON.stringify({name, timeout:true, elapsedMs:Date.now()-started, events}));
                 try { ws.close(); } catch {}
                 resolve(false);
-              }, 15000);
+              }, 12000);
               ws.onopen = () => { events.push(['open', Date.now()-started]); ws.send(JSON.stringify({type:'hello', protocol_version:1})); };
               ws.onmessage = (event) => {
                 if (typeof event.data !== 'string') { events.push(['binary', Date.now()-started, event.data?.byteLength || 0]); return; }
                 let d; try { d = JSON.parse(event.data); } catch { events.push(['text', Date.now()-started, String(event.data).slice(0,120)]); return; }
-                events.push([d.type, Date.now()-started, d.status || d.role || String(d.text || '').slice(0,80)]);
+                events.push([d.type, Date.now()-started, d.status || d.role || d.code || String(d.text || '').slice(0,80)]);
                 if (d.type === 'welcome' && !sent) { sent = true; ws.send(JSON.stringify({type:'text_message', text:'こんにちは'})); }
                 if ((d.type === 'transcript_end' || d.type === 'transcript') && d.role === 'assistant' && d.text) {
                   clearTimeout(timer);
