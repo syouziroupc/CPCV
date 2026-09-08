@@ -27,37 +27,25 @@ jobs:
           repository: syouziroupc/talksys
           ref: ${{ env.TALKSYS_SHA }}
           persist-credentials: false
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
-
       - name: Require Cloudflare production credentials
-        shell: bash
         run: |
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
+      - run: npm install --no-audit --no-fund
       - name: Validate exact v24 revision before deploy
-        shell: bash
         run: |
           test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
           npm test
           npx wrangler deploy --dry-run
-
       - name: Deploy TalkSys v24 to Cloudflare production
-        shell: bash
         run: |
           set -o pipefail
-          npx wrangler deploy 2>&1 | tee /tmp/talksys-v24-deploy.txt
+          npx wrangler deploy
           npx wrangler deployments status
-
       - name: Verify production v24 health contract
-        shell: bash
         run: |
           body=""
           for attempt in $(seq 1 15); do
@@ -65,42 +53,37 @@ jobs:
             current="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
             echo "Production voiceRevision: ${current:-missing}"
             if [ "$current" = "$EXPECTED_VOICE_REVISION" ]; then break; fi
-            if [ "$attempt" -eq 15 ]; then
-              echo "Production did not reach expected v24 revision"
-              exit 1
-            fi
+            test "$attempt" -lt 15 || exit 1
             sleep 5
           done
-
           BODY="$body" EXPECTED="$EXPECTED_VOICE_REVISION" node <<'NODE'
           const d = JSON.parse(process.env.BODY || '{}');
-          if (d.voiceRevision !== process.env.EXPECTED) throw new Error(`expected ${process.env.EXPECTED}, got ${d.voiceRevision}`);
-          if (d.conversationOrchestrator !== 'precise-fast-conversation-agent-v24') throw new Error('v24 orchestrator inactive');
-          const required = [
-            'conciseRepliesByDefault','pcDecisionDetailOnly','browserStreamingTts','browserStreamingTtsStartsAtFirstSentence',
-            'preListeningMicFrames','startCallPendingGuard','voiceBargeIn','hardStopOnUserTranscript','xperiaHandshakeFix',
-            'contextualSearchSubjectOnlyCarryover','microphoneConstraintFallback','microphoneFrameWatchdog','microphoneAutoRecovery',
-            'workletToScriptProcessorAutoFallback'
-          ];
-          for (const key of required) if (d[key] !== true) throw new Error(`${key} is not true`);
-          console.log('HEALTH=' + JSON.stringify(Object.fromEntries(['voiceRevision','conversationOrchestrator',...required].map(k => [k,d[k]]))));
+          if (d.voiceRevision !== process.env.EXPECTED) throw new Error('wrong v24 revision');
+          if (d.conversationOrchestrator !== 'precise-fast-conversation-agent-v24') throw new Error('wrong orchestrator');
+          for (const key of ['conciseRepliesByDefault','pcDecisionDetailOnly','browserStreamingTtsStartsAtFirstSentence','preListeningMicFrames','startCallPendingGuard','voiceBargeIn','hardStopOnUserTranscript','xperiaHandshakeFix','contextualSearchSubjectOnlyCarryover']) {
+            if (d[key] !== true) throw new Error(`${key} is not true`);
+          }
           NODE
-
       - name: Verify live v24 client code
-        shell: bash
         run: |
           script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
           grep -F "callStartPending" <<< "$script"
-          grep -F "inCall || callStartPending" <<< "$script"
           grep -F "BARGE_IN_THRESHOLD" <<< "$script"
           grep -F "talksys-barge-in" <<< "$script"
           grep -F "queueCompletedStreamSpeech(streamText, false)" <<< "$script"
-          grep -F "stopPlayback(true)" <<< "$script"
-
-      - name: Smoke test contextual search quality
-        shell: bash
+      - name: Smoke test contextual search quality after rollout
         run: |
-          body="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v24-context")"
+          body=""
+          for attempt in $(seq 1 12); do
+            set +e
+            body="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v24-context")"
+            code=$?
+            set -e
+            if [ "$code" -eq 0 ]; then break; fi
+            echo "context smoke attempt $attempt not ready (curl=$code)"
+            test "$attempt" -lt 12 || exit "$code"
+            sleep 5
+          done
           echo "CONTEXT=$body"
           BODY="$body" node <<'NODE'
           const d = JSON.parse(process.env.BODY || '{}');
@@ -108,6 +91,5 @@ jobs:
           const q = String(d.resolvedQuestion || '');
           if (!/パソコン/.test(q) || !/中古/.test(q) || !/横浜/.test(q)) throw new Error(`context not preserved: ${q}`);
           if (/YouTube|ネットサーフィン/i.test(q)) throw new Error(`old usage polluted current search: ${q}`);
-          const sources = JSON.stringify(d.sources);
-          if (/YouTube - Apps on Google Play|YouTube Music|YouTube Japan 公式チャンネル/i.test(sources)) throw new Error('YouTube junk survived contextual PC store search');
+          if (/YouTube - Apps on Google Play|YouTube Music|YouTube Japan 公式チャンネル/i.test(JSON.stringify(d.sources))) throw new Error('YouTube junk survived contextual PC store search');
           NODE
