@@ -1,3 +1,4 @@
+# one-shot bridge: deploy kimivsgpt v0.3.1 using CPCV production credentials
 name: Deploy Kimi vs GPT auditor once
 
 on:
