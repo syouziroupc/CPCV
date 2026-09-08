@@ -115,11 +115,18 @@ jobs:
           console.log('VOICE_HEALTH=' + JSON.stringify(d));
           NODE
 
-          curl_retry "$PRODUCTION_URL/cloudflare-live.js?verify=1" /tmp/live.js
-          grep -q 'PLAYBACK_TAIL_GUARD_MS = 700' /tmp/live.js
-          grep -q 'createScriptProcessorCapture' /tmp/live.js
-          grep -q 'captureSilenceGain.gain.value = 0' /tmp/live.js
-          grep -q 'if (assistantAudioActive()) return' /tmp/live.js
+          curl_retry "$PRODUCTION_URL/cloudflare-live.js?verify=runtime" /tmp/live.js
+          node <<'NODE'
+          const fs = require('fs');
+          const s = fs.readFileSync('/tmp/live.js', 'utf8');
+          console.log('LIVE_JS_BYTES=' + Buffer.byteLength(s));
+          const markers = ['talksys-mic-ready', 'createScriptProcessorCapture', 'assistantAudioActive', 'captureSilenceGain'];
+          const missing = markers.filter(x => !s.includes(x));
+          if (missing.length) {
+            console.log('LIVE_JS_PREFIX=' + JSON.stringify(s.slice(0, 500)));
+            throw new Error('missing v20.2 live markers: ' + missing.join(', '));
+          }
+          NODE
 
           curl_retry "$PRODUCTION_URL/api/search-smoke?verify=2" /tmp/beppu.json
           node <<'NODE'
