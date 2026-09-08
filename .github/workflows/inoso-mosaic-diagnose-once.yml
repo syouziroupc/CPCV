@@ -72,3 +72,5 @@ jobs:
           path: evidence/
           if-no-files-found: error
           retention-days: 7
+
+# trigger: exhaustive-production-diagnosis-2026-09-08
