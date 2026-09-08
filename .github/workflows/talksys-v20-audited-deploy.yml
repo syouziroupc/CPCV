@@ -1,0 +1,104 @@
+name: Temporary audited TalkSys v20 deploy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v20-audited-deploy.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: talksys-v20-production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      TALKSYS_COMMIT: 8f9b4dac8adeca0f56c084a5857e8b9ad4abd044
+      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
+      EXPECTED_VOICE_REVISION: cloudflare-agent-tools-v20.0
+    steps:
+      - name: Checkout audited TalkSys commit
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: ${{ env.TALKSYS_COMMIT }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Verify immutable audited source
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$TALKSYS_COMMIT"
+          grep -q '"main": "src/worker-v20.js"' wrangler.jsonc
+          node --check src/worker-v20.js
+          node --check src/search-tool-v20.js
+          npm test
+          npx wrangler deploy --dry-run
+
+      - name: Require Cloudflare production credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Deploy audited TalkSys commit
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+      - name: Verify production v20 contract and live quality model
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=''
+          for attempt in $(seq 1 10); do
+            if body="$(curl -fsS --max-time 30 "$PRODUCTION_URL/voice-health")"; then
+              break
+            fi
+            sleep 2
+          done
+          BODY="$body" EXPECTED="$EXPECTED_VOICE_REVISION" node <<'NODE'
+          const d = JSON.parse(process.env.BODY || '{}');
+          if (d.voiceRevision !== process.env.EXPECTED) throw new Error(`voice revision mismatch: ${d.voiceRevision}`);
+          if (d.conversationOrchestrator !== 'single-agent-v20') throw new Error('single-agent-v20 is not active');
+          if (d.toolCalling !== 'cloudflare-embedded-function-calling') throw new Error('embedded function calling is not active');
+          if (d.webSearchTool !== 'evidence-only-web-tool-v20') throw new Error(`unexpected search tool: ${d.webSearchTool}`);
+          if (d.webSearchToolRole !== 'evidence-only') throw new Error('web search tool role mismatch');
+          if (d.modelDecidesToolUse !== true) throw new Error('model tool-use decision is disabled');
+          if (d.mandatoryFreshSearchGuard !== true) throw new Error('mandatory fresh search guard is disabled');
+          if (d.voiceBuiltinHistoryDisabled !== true) throw new Error('shared voice history must remain disabled');
+          console.log(JSON.stringify({
+            voiceRevision: d.voiceRevision,
+            conversationOrchestrator: d.conversationOrchestrator,
+            toolCalling: d.toolCalling,
+            webSearchTool: d.webSearchTool,
+            mandatoryFreshSearchGuard: d.mandatoryFreshSearchGuard
+          }));
+          NODE
+
+          curl -fsS --max-time 20 "$PRODUCTION_URL/health" >/tmp/talksys-health.json
+          node -e "const d=require('/tmp/talksys-health.json'); if(!d.ok) process.exit(1); console.log(JSON.stringify(d))"
+
+          curl -fsS --max-time 45 "$PRODUCTION_URL/api/quality-model-smoke" >/tmp/talksys-quality.json
+          node - <<'NODE'
+          const d = require('/tmp/talksys-quality.json');
+          if (!d.ok) throw new Error(`quality model smoke failed: ${JSON.stringify(d)}`);
+          if (d.model !== '@cf/zai-org/glm-5.3-flash') throw new Error(`unexpected quality model: ${d.model}`);
+          console.log(JSON.stringify({ ok: d.ok, model: d.model, elapsedMs: d.elapsedMs }));
+          NODE
