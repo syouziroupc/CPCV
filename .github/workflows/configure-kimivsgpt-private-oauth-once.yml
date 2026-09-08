@@ -1,0 +1,176 @@
+name: Configure Kimi vs GPT private OAuth once
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  configure:
+    if: contains(github.event.head_commit.message, '[cf-private-mcp]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: production
+    steps:
+      - name: Configure owner-only Cloudflare Access + Managed OAuth
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, sys, urllib.request, urllib.error
+
+          token = os.environ['CLOUDFLARE_API_TOKEN']
+          account = os.environ['CLOUDFLARE_ACCOUNT_ID']
+          base = 'https://api.cloudflare.com/client/v4'
+          target = 'kimivsgpt.syouziroupc.workers.dev/mcp'
+          app_name = 'Kimi vs GPT private MCP'
+          policy_name = 'Owner account member only'
+
+          def api(method, path, body=None):
+              data = None if body is None else json.dumps(body).encode('utf-8')
+              req = urllib.request.Request(
+                  base + path,
+                  data=data,
+                  method=method,
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Content-Type': 'application/json',
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      obj = json.load(r)
+              except urllib.error.HTTPError as e:
+                  raw = e.read().decode('utf-8', 'replace')
+                  try:
+                      obj = json.loads(raw)
+                      errs = obj.get('errors') or []
+                      detail = '; '.join(str(x.get('message','')) for x in errs[:3])
+                  except Exception:
+                      detail = raw[:400]
+                  raise RuntimeError(f'{method} {path} failed HTTP {e.code}: {detail}')
+              if not obj.get('success', False):
+                  errs = obj.get('errors') or []
+                  raise RuntimeError(f'{method} {path} failed: ' + '; '.join(str(x.get('message','')) for x in errs[:3]))
+              return obj.get('result')
+
+          # Safety invariant: only auto-configure account-member auth when exactly one active member exists.
+          members = api('GET', f'/accounts/{account}/members?per_page=50') or []
+          active = [m for m in members if m.get('status') == 'member']
+          invited = [m for m in members if m.get('status') == 'invited']
+          print(f'active_account_members={len(active)}')
+          print(f'invited_account_members={len(invited)}')
+          if len(active) != 1:
+              raise SystemExit('SAFETY_STOP: Cloudflare account does not have exactly one active member; no Access writes performed.')
+
+          # Ensure Cloudflare itself is the only IdP for this app and restrict that IdP to account members.
+          idps = api('GET', f'/accounts/{account}/access/identity_providers?per_page=50') or []
+          cf = next((x for x in idps if x.get('type') == 'cloudflare'), None)
+          desired_idp = {
+              'name': 'Cloudflare',
+              'type': 'cloudflare',
+              'config': {'restrict_to_account_members': True},
+          }
+          if cf is None:
+              cf = api('POST', f'/accounts/{account}/access/identity_providers', desired_idp)
+              print('cloudflare_idp=created')
+          elif not (cf.get('config') or {}).get('restrict_to_account_members', False):
+              cf = api('PUT', f"/accounts/{account}/access/identity_providers/{cf['id']}", desired_idp)
+              print('cloudflare_idp=updated_restricted')
+          else:
+              print('cloudflare_idp=already_restricted')
+          idp_id = cf['id']
+
+          # Find/create exact-path self-hosted Access application.
+          apps = api('GET', f'/accounts/{account}/access/apps?per_page=100') or []
+          def matches(a):
+              if a.get('domain') == target:
+                  return True
+              return any(d.get('type') == 'public' and d.get('uri') == target for d in (a.get('destinations') or []))
+          app = next((a for a in apps if matches(a)), None)
+          app_body = {
+              'name': app_name,
+              'type': 'self_hosted',
+              'domain': target,
+              'destinations': [{'type': 'public', 'uri': target}],
+              'session_duration': '24h',
+              'allowed_idps': [idp_id],
+              'auto_redirect_to_identity': True,
+              'app_launcher_visible': False,
+              'oauth_configuration': {
+                  'enabled': True,
+                  'dynamic_client_registration': {
+                      'enabled': True,
+                      'allow_any_on_localhost': True,
+                      'allow_any_on_loopback': True
+                  },
+                  'grant': {
+                      'access_token_lifetime': '15m',
+                      'session_duration': '336h'
+                  }
+              }
+          }
+          if app is None:
+              app = api('POST', f'/accounts/{account}/access/apps', app_body)
+              print('access_app=created')
+          else:
+              app = api('PUT', f"/accounts/{account}/access/apps/{app['id']}", app_body)
+              print('access_app=updated')
+          app_id = app['id']
+
+          # Make the account membership selector the only allow policy for this exact MCP app.
+          policies = api('GET', f'/accounts/{account}/access/apps/{app_id}/policies?per_page=100') or []
+          owner_policy = next((p for p in policies if p.get('name') == policy_name), None)
+          body = {
+              'name': policy_name,
+              'decision': 'allow',
+              'precedence': 1,
+              'include': [{'cloudflare_account_member': {'account_id': account}}],
+              'exclude': [],
+              'require': []
+          }
+          if owner_policy is None:
+              api('POST', f'/accounts/{account}/access/apps/{app_id}/policies', body)
+              print('owner_policy=created')
+          else:
+              api('PUT', f"/accounts/{account}/access/apps/{app_id}/policies/{owner_policy['id']}", body)
+              print('owner_policy=updated')
+
+          # Remove any additional app-local policies: with a one-member account, only that member may pass.
+          policies = api('GET', f'/accounts/{account}/access/apps/{app_id}/policies?per_page=100') or []
+          removed = 0
+          for p in policies:
+              if p.get('name') != policy_name:
+                  api('DELETE', f"/accounts/{account}/access/apps/{app_id}/policies/{p['id']}")
+                  removed += 1
+          print(f'extra_policies_removed={removed}')
+          print('managed_oauth_enabled=true')
+          print('protected_target=' + target)
+          print('OWNER_ONLY_ACCESS_CONFIGURED=true')
+          PY
+
+      - name: Verify unauthenticated MCP receives an OAuth challenge
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6; do
+            curl -sS -D /tmp/headers.txt -o /tmp/body.txt \
+              -H 'Accept: application/json, text/event-stream' \
+              https://kimivsgpt.syouziroupc.workers.dev/mcp || true
+            code="$(awk 'toupper($1) ~ /^HTTP\// {c=$2} END{print c}' /tmp/headers.txt)"
+            echo "attempt=$i status=$code"
+            if [ "$code" = "401" ] && grep -qi '^www-authenticate:' /tmp/headers.txt; then
+              echo 'managed_oauth_challenge=true'
+              grep -i '^www-authenticate:' /tmp/headers.txt | sed -E 's/(client_secret|token)=[^, ]+/<redacted>/Ig' || true
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'Managed OAuth challenge not observed.' >&2
+          cat /tmp/headers.txt >&2
+          exit 1
