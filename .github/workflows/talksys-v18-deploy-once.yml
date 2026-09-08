@@ -79,7 +79,7 @@ jobs:
           NODE
             revision="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
             voiceout="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.typedSpeechVoiceOutput||''))")"
-            cross="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.crossTurnContext||''))")"
+            cross="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(d.crossTurnContext === false ? 'false' : String(d.crossTurnContext||''))")"
             timeout="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.callConnectTimeoutMs||''))")"
             if [ "$revision" = "cloudflare-live-v18.2" ] && [ "$voiceout" = "true" ] && [ "$cross" = "false" ] && [ "$timeout" = "10000" ]; then
               exit 0
