@@ -68,6 +68,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          wait_for_revision() {
+            local output=/tmp/voice-health.json
+            for attempt in $(seq 1 30); do
+              if curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health?verify=$attempt" >"$output"; then
+                if EXPECTED="$EXPECTED_REVISION" node -e "const d=require('/tmp/voice-health.json'); process.exit(d.ok && d.voiceRevision===process.env.EXPECTED ? 0 : 1)"; then
+                  echo "Expected revision active after attempt $attempt"
+                  return 0
+                fi
+                echo "Attempt $attempt returned revision: $(node -e "try{console.log(require('/tmp/voice-health.json').voiceRevision||'unknown')}catch{console.log('invalid-json')}")"
+              fi
+              sleep 2
+            done
+            return 1
+          }
+
           curl_retry() {
             local url="$1"
             local output="$2"
@@ -78,7 +94,7 @@ jobs:
             return 1
           }
 
-          curl_retry "$PRODUCTION_URL/voice-health" /tmp/voice-health.json
+          wait_for_revision
           EXPECTED="$EXPECTED_REVISION" node <<'NODE'
           const d = require('/tmp/voice-health.json');
           if (!d.ok) throw new Error('voice-health not ok');
@@ -94,7 +110,7 @@ jobs:
           console.log('VOICE_HEALTH=' + JSON.stringify(d));
           NODE
 
-          curl_retry "$PRODUCTION_URL/api/search-smoke" /tmp/search-smoke.json
+          curl_retry "$PRODUCTION_URL/api/search-smoke?verify=1" /tmp/search-smoke.json
           node <<'NODE'
           const d = require('/tmp/search-smoke.json');
           if (d.routedToSearch !== true) throw new Error('Beppu reproduction did not route to search');
@@ -106,14 +122,14 @@ jobs:
           console.log('SEARCH_SMOKE=' + JSON.stringify(d));
           NODE
 
-          curl_retry "$PRODUCTION_URL/api/model-smoke" /tmp/model-smoke.json
+          curl_retry "$PRODUCTION_URL/api/model-smoke?verify=1" /tmp/model-smoke.json
           node <<'NODE'
           const d = require('/tmp/model-smoke.json');
           if (!d.ok) throw new Error(`live model smoke failed: ${JSON.stringify(d)}`);
           console.log('LIVE_MODEL=' + JSON.stringify(d));
           NODE
 
-          curl_retry "$PRODUCTION_URL/api/quality-model-smoke" /tmp/quality-smoke.json
+          curl_retry "$PRODUCTION_URL/api/quality-model-smoke?verify=1" /tmp/quality-smoke.json
           node <<'NODE'
           const d = require('/tmp/quality-smoke.json');
           if (!d.ok) throw new Error(`quality model smoke failed: ${JSON.stringify(d)}`);
