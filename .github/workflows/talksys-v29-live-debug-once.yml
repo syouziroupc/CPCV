@@ -1,0 +1,46 @@
+name: TalkSys v29 live debug once
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v29-live-debug-once.yml
+permissions:
+  contents: read
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: HTTP and WebSocket end-to-end probe
+        env:
+          BASE: https://talksys.syouziroupc.workers.dev
+        run: |
+          set -euo pipefail
+          curl -fsS "$BASE/voice-health" | tee /tmp/health.json
+          curl -fsS "$BASE/cloudflare-live.js" -o /tmp/live.js
+          echo "browser_speech_refs=$(grep -o 'speechSynthesis' /tmp/live.js | wc -l)"
+          echo "grok_tts_suppressor=$(grep -o 'if (browserStreamTtsThisTurn) return' /tmp/live.js | wc -l)"
+          node <<'NODE'
+          const target='wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default';
+          const ws=new WebSocket(target);
+          const events=[];
+          let binary=0, done=false;
+          const timer=setTimeout(()=>{console.error('TIMEOUT',events);process.exit(2)},25000);
+          ws.binaryType='arraybuffer';
+          ws.onopen=()=>{console.log('OPEN');ws.send(JSON.stringify({type:'hello',protocol_version:1}));};
+          ws.onerror=e=>console.error('WS_ERROR',e?.message||e);
+          ws.onclose=e=>{console.log('CLOSE',e.code,e.reason);if(!done)process.exitCode=3};
+          ws.onmessage=e=>{
+            if(e.data instanceof ArrayBuffer){binary+=e.data.byteLength;console.log('BINARY',e.data.byteLength,'total',binary);return;}
+            console.log('TEXT',String(e.data).slice(0,1200));
+            let d; try{d=JSON.parse(e.data)}catch{return}
+            events.push(d.type+':'+(d.status||d.role||d.phase||''));
+            if(d.type==='welcome') ws.send(JSON.stringify({type:'text_message',text:'こんにちは。これは本番接続テストです。短く返事してください。'}));
+            if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant')) && d.text){
+              setTimeout(()=>{
+                done=true;clearTimeout(timer);console.log('DONE binary=',binary,'events=',events);ws.close();
+                if(binary<100) process.exitCode=4;
+              },5000);
+            }
+          };
+          NODE
