@@ -17,14 +17,14 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: 140ff832e9f304f012025d2d105e4f7e5d7b6ebb
+      TALKSYS_SHA: 7e36069db32e97cf2da61fe5726d34b85a820a20
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
       EXPECTED_REVISION: cloudflare-agent-v30-real-grok-audio-runtime
     steps:
       - uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 140ff832e9f304f012025d2d105e4f7e5d7b6ebb
+          ref: 7e36069db32e97cf2da61fe5726d34b85a820a20
           persist-credentials: false
       - uses: actions/setup-node@v5
         with:
