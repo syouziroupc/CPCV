@@ -18,7 +18,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: 2652d5af73ed66a5ae81b5df0e8ac5c1f5d626aa
+      TALKSYS_SHA: 0d0f6d47146923d7e4f6cb3c755e4e2cec6ff0ff
       URL: https://talksys.syouziroupc.workers.dev
       EXPECTED: talksys-v36-search-voice-barge
     steps:
@@ -108,7 +108,7 @@ jobs:
           const d=JSON.parse(process.env.OUT||'{}');
           if(!d.ok||d.search!==true) throw new Error('subjectless transit follow-up did not search');
           const q=(d.queries||[]).join(' ');
-          if(!/大分/.test(q)||!/別府/.test(q)) throw new Error('previous transit subject missing from queries: '+q);
+          if(!/大分/.test(q)||!/別府/.test(q)||!/乗換|直通|時刻表/.test(q)) throw new Error('transit-specific queries missing: '+q);
           if(!Array.isArray(d.sources)||d.sources.length<1) throw new Error('transit search returned no evidence');
           const first=String(d.sources[0]?.url||'');
           if(!/transit\.yahoo\.co\.jp/.test(first)) throw new Error('direct transit evidence not prioritized: '+first);
