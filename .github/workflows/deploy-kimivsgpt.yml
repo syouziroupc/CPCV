@@ -69,9 +69,20 @@ jobs:
           for i in 1 2 3 4 5 6; do
             body="$(curl --fail --silent --show-error https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
-            if printf '%s' "$body" | grep -q '"ok":true' && printf '%s' "$body" | grep -q '"version":"0.5.3"' && printf '%s' "$body" | grep -q '"pkce":"S256"'; then
-              exit 0
+            if printf '%s' "$body" | grep -q '"ok":true' && printf '%s' "$body" | grep -q '"version":"0.5.4"' && printf '%s' "$body" | grep -q '"pkce":"S256"'; then
+              break
             fi
+            if [ "$i" = "6" ]; then exit 1; fi
             sleep 3
           done
-          exit 1
+
+          status="$(curl --silent --show-error -D /tmp/mcp-headers.txt -o /tmp/mcp-body.txt -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2026-07-28","capabilities":{},"clientInfo":{"name":"production-smoke","version":"1.0.0"}}}' \
+            https://kimivsgpt.syouziroupc.workers.dev/mcp)"
+          cat /tmp/mcp-headers.txt
+          test "$status" = "401"
+          grep -qi '^www-authenticate: Bearer resource_metadata=' /tmp/mcp-headers.txt
+          grep -qi '^access-control-allow-origin: \*' /tmp/mcp-headers.txt
+          grep -qi '^access-control-expose-headers: WWW-Authenticate' /tmp/mcp-headers.txt
