@@ -51,7 +51,7 @@ jobs:
           npm test
           npx wrangler deploy --dry-run --config wrangler.jsonc
 
-      - name: Build isolated staging config
+      - name: Build isolated staging config in repository root
         run: |
           node <<'NODE'
           const fs=require('fs');
@@ -59,12 +59,12 @@ jobs:
           const cfg=JSON.parse(src);
           cfg.name='talksys-v43-smoke';
           delete cfg.migrations;
-          fs.writeFileSync('/tmp/wrangler-v43-smoke.json',JSON.stringify(cfg,null,2));
+          fs.writeFileSync('wrangler.v43-smoke.json',JSON.stringify(cfg,null,2));
           NODE
-          cat /tmp/wrangler-v43-smoke.json
+          cat wrangler.v43-smoke.json
 
       - name: Deploy v43 to isolated staging Worker
-        run: npx wrangler deploy --config /tmp/wrangler-v43-smoke.json
+        run: npx wrangler deploy --config wrangler.v43-smoke.json
 
       - name: Wait for staging propagation
         run: |
@@ -90,52 +90,41 @@ jobs:
           const deny=/検索.{0,20}(?:できない|できません|使えない|使えません)|この電話.{0,30}検索/;
           const giveup=/申し訳ありません.{0,100}(?:確認|検索|情報)|自分で.{0,30}(?:検索|確認)して|(?:ホームページ|アプリ|商品ページ).{0,40}(?:確認|検索)して/;
           const results=[];
-          async function plan(text,history=[]){return post('/api/plan',{text,history,sessionId:'stage-plan-'+Date.now()});}
-          async function turn(text,history=[],searchPlan=null){return post('/api/turn',{text,history,searchPlan,sessionId:'stage-turn-'+Date.now()});}
+          async function cycle(text,history=[]){const p=await post('/api/plan',{text,history,sessionId:'stage-plan-'+Date.now()});const t=await post('/api/turn',{text,history,searchPlan:p,sessionId:'stage-turn-'+Date.now()});return {p,t};}
 
-          let p=await plan('こんにちは。ちょっと話しましょう。');
-          if(p.search)throw new Error('casual greeting unexpectedly searched');
-          let t=await turn('こんにちは。ちょっと話しましょう。',[],p);if(deny.test(t.answer||''))throw new Error('greeting denied search capability');results.push(['casual',t.answer]);
+          let x=await cycle('こんにちは。ちょっと話しましょう。');
+          if(x.p.search||deny.test(x.t.answer||''))throw new Error('casual greeting bad '+JSON.stringify(x));results.push(['casual',x.t.answer]);
 
-          p=await plan('最近パソコンを買おうか悩んでるんだよね');
-          if(p.search||p.planner!=='pc-advice-local-v43')throw new Error('PC advice plan wrong '+JSON.stringify(p));
-          t=await turn('最近パソコンを買おうか悩んでるんだよね',[],p);
-          if(deny.test(t.answer||''))throw new Error('PC advice falsely denied search '+t.answer);
-          if(/\d+\s*万円|\d{4,}\s*円/.test(t.answer||''))throw new Error('PC advice invented unsearched price '+t.answer);
-          results.push(['pc-advice',t.answer]);
+          x=await cycle('最近パソコンを買おうか悩んでるんだよね');
+          if(x.p.search||x.p.planner!=='pc-advice-local-v43')throw new Error('PC advice plan wrong '+JSON.stringify(x.p));
+          if(deny.test(x.t.answer||''))throw new Error('PC advice falsely denied search '+x.t.answer);
+          if(/\d+\s*万円|\d{4,}\s*円/.test(x.t.answer||''))throw new Error('PC advice invented unsearched price '+x.t.answer);
+          results.push(['pc-advice',x.t.answer]);
 
-          p=await plan('うなよ検索できるだろ君');
-          t=await turn('うなよ検索できるだろ君',[],p);
-          if(!/検索できます/.test(t.answer||'')||deny.test(t.answer||''))throw new Error('capability correction failed '+t.answer);results.push(['capability',t.answer]);
+          x=await cycle('うなよ検索できるだろ君');
+          if(!/検索できます/.test(x.t.answer||'')||deny.test(x.t.answer||''))throw new Error('capability correction failed '+x.t.answer);results.push(['capability',x.t.answer]);
 
-          p=await plan('明日の別途の天気は?');
-          if(!p.search||p.planner!=='weather-direct-v43')throw new Error('typo weather plan wrong '+JSON.stringify(p));
-          t=await turn('明日の別途の天気は?',[],p);
-          if(t.route!=='weather-direct-v43'||!t.searchUseful||!/別府/.test(t.answer||'')||giveup.test(t.answer||''))throw new Error('typo Beppu weather failed '+JSON.stringify(t));
-          if(!(t.sources||[]).some(x=>/open-meteo/i.test(x.url||'')))throw new Error('weather direct source missing');results.push(['weather-typo',t.answer]);
+          x=await cycle('明日の別途の天気は?');
+          if(!x.p.search||x.p.planner!=='weather-direct-v43'||x.t.route!=='weather-direct-v43'||!x.t.searchUseful||!/別府/.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('typo Beppu weather failed '+JSON.stringify(x));
+          if(!(x.t.sources||[]).some(s=>/open-meteo/i.test(s.url||'')))throw new Error('weather direct source missing');results.push(['weather-typo',x.t.answer]);
 
-          p=await plan('明日の大分県別府市の天気は?');
-          t=await turn('明日の大分県別府市の天気は?',[],p);
-          if(t.route!=='weather-direct-v43'||!t.searchUseful||!/最高気温/.test(t.answer||'')||!/降水確率/.test(t.answer||'')||giveup.test(t.answer||''))throw new Error('explicit Beppu weather failed '+JSON.stringify(t));results.push(['weather-explicit',t.answer]);
+          x=await cycle('明日の大分県別府市の天気は?');
+          if(x.t.route!=='weather-direct-v43'||!x.t.searchUseful||!/最高気温/.test(x.t.answer||'')||!/最低気温/.test(x.t.answer||'')||!/降水確率/.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('explicit Beppu weather failed '+JSON.stringify(x));results.push(['weather-explicit',x.t.answer]);
 
           const pcHist=[{role:'user',content:'最近パソコンを買おうか悩んでるんだよね。家で使う予定です。'}];
-          p=await plan('大分県内でおすすめのお店はありますか?',pcHist);
-          if(!p.search||p.planner!=='pc-search-v43')throw new Error('local PC store did not search '+JSON.stringify(p));
-          t=await turn('大分県内でおすすめのお店はありますか?',pcHist,p);
-          if(!t.search||!t.searchUseful||(t.sources||[]).length<1||deny.test(t.answer||'')||giveup.test(t.answer||''))throw new Error('local PC store search unusable '+JSON.stringify(t));results.push(['pc-local-store',t.answer]);
+          x=await cycle('大分県内でおすすめのお店はありますか?',pcHist);
+          if(!x.p.search||x.p.planner!=='pc-search-v43'||!x.t.search||!x.t.searchUseful||(x.t.sources||[]).length<1||deny.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('local PC store search unusable '+JSON.stringify(x));results.push(['pc-local-store',x.t.answer]);
 
           const repairText='背面割れです。機種はXperia 5で、半年前にゲオで8000円で買いました。大事なデータは特に入っていません。修理か買い替えか悩んでいます。';
-          p=await plan(repairText,[{role:'user',content:'スマホが壊れて修理か買い替えか悩んでいます。'}]);
-          if(p.search)throw new Error('repair judgment unexpectedly searched '+JSON.stringify(p));
-          t=await turn(repairText,[{role:'user',content:'スマホが壊れて修理か買い替えか悩んでいます。'}],p);
-          if(t.search||deny.test(t.answer||''))throw new Error('repair judgment regressed '+JSON.stringify(t));results.push(['phone-repair',t.answer]);
+          x=await cycle(repairText,[{role:'user',content:'スマホが壊れて修理か買い替えか悩んでいます。'}]);
+          if(x.p.search||x.t.search||deny.test(x.t.answer||''))throw new Error('repair judgment regressed '+JSON.stringify(x));results.push(['phone-repair',x.t.answer]);
 
-          p=await plan('大分駅から別府駅まで何に乗ればいい?',[]);
-          if(!p.search)throw new Error('transit did not plan a search '+JSON.stringify(p));
-          t=await turn('大分駅から別府駅まで何に乗ればいい?',[],p);
-          if(!t.search||deny.test(t.answer||'')||giveup.test(t.answer||''))throw new Error('transit answer regressed '+JSON.stringify(t));results.push(['transit',t.answer]);
+          x=await cycle('大分駅から別府駅まで何に乗ればいい?');
+          if(!x.p.search||!x.t.search||deny.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('transit answer regressed '+JSON.stringify(x));results.push(['transit',x.t.answer]);
 
+          console.log('SMOKE_QA_BEGIN');
           console.log(JSON.stringify(results,null,2));
+          console.log('SMOKE_QA_END');
           NODE
 
       - name: Verify staging client contains adaptive noise controls
@@ -158,7 +147,7 @@ jobs:
         id: production_smoke
         run: |
           set -euo pipefail
-          BASE="$PROD_URL" node <<'NODE'
+          BASE="$PROD_URL" EXPECTED="$EXPECTED" node <<'NODE'
           const base=process.env.BASE;
           async function post(path,body,timeout=90000){const c=new AbortController();const timer=setTimeout(()=>c.abort(),timeout);try{const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json','x-talksys-session':'prod-smoke-'+Date.now()},body:JSON.stringify(body),signal:c.signal});const j=await r.json();if(!r.ok||!j.ok)throw new Error(path+' '+r.status+' '+JSON.stringify(j));return j;}finally{clearTimeout(timer)}}
           const deny=/検索.{0,20}(?:できない|できません|使えない|使えません)|この電話.{0,30}検索/;
@@ -166,11 +155,11 @@ jobs:
           const health=await (await fetch(base+'/voice-health')).json();if(health.revision!==process.env.EXPECTED||!health.preDeploySmokeGate||!health.adaptiveNoiseVad)throw new Error('production health mismatch '+JSON.stringify(health));
           async function cycle(text,history=[]){const p=await post('/api/plan',{text,history,sessionId:'prod-plan-'+Date.now()});const t=await post('/api/turn',{text,history,searchPlan:p,sessionId:'prod-turn-'+Date.now()});return {p,t};}
           let x=await cycle('最近パソコンを買おうか悩んでるんだよね');if(x.p.search||deny.test(x.t.answer||'')||/\d+\s*万円|\d{4,}\s*円/.test(x.t.answer||''))throw new Error('production PC advice bad '+JSON.stringify(x));
-          x=await cycle('うなよ検索できるだろ君');if(!/検索できます/.test(x.t.answer||'')||deny.test(x.t.answer||''))throw new Error('production capability bad '+JSON.stringify(x));
-          x=await cycle('明日の別途の天気は?');if(x.t.route!=='weather-direct-v43'||!x.t.searchUseful||!/別府/.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('production typo weather bad '+JSON.stringify(x));
-          x=await cycle('明日の大分県別府市の天気は?');if(x.t.route!=='weather-direct-v43'||!x.t.searchUseful||!/最高気温/.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('production explicit weather bad '+JSON.stringify(x));
-          const h=[{role:'user',content:'最近パソコンを買おうか悩んでるんだよね。家で使う予定です。'}];x=await cycle('大分県内でおすすめのお店はありますか?',h);if(!x.t.search||!x.t.searchUseful||(x.t.sources||[]).length<1||deny.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('production PC search bad '+JSON.stringify(x));
-          console.log(JSON.stringify({pc:x.t.answer,health},null,2));
+          console.log('PROD_PC_ADVICE='+x.t.answer);
+          x=await cycle('うなよ検索できるだろ君');if(!/検索できます/.test(x.t.answer||'')||deny.test(x.t.answer||''))throw new Error('production capability bad '+JSON.stringify(x));console.log('PROD_CAPABILITY='+x.t.answer);
+          x=await cycle('明日の別途の天気は?');if(x.t.route!=='weather-direct-v43'||!x.t.searchUseful||!/別府/.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('production typo weather bad '+JSON.stringify(x));console.log('PROD_WEATHER_TYPO='+x.t.answer);
+          x=await cycle('明日の大分県別府市の天気は?');if(x.t.route!=='weather-direct-v43'||!x.t.searchUseful||!/最高気温/.test(x.t.answer||'')||!/降水確率/.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('production explicit weather bad '+JSON.stringify(x));console.log('PROD_WEATHER_EXPLICIT='+x.t.answer);
+          const h=[{role:'user',content:'最近パソコンを買おうか悩んでるんだよね。家で使う予定です。'}];x=await cycle('大分県内でおすすめのお店はありますか?',h);if(!x.t.search||!x.t.searchUseful||(x.t.sources||[]).length<1||deny.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('production PC search bad '+JSON.stringify(x));console.log('PROD_PC_SEARCH='+x.t.answer);console.log('PROD_HEALTH='+JSON.stringify(health));
           NODE
 
       - name: Verify production D1 log writes
