@@ -1,4 +1,4 @@
-name: TalkSys v31 diagnose once
+name: TalkSys v32 validate once
 
 on:
   push:
@@ -10,62 +10,30 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      TALKSYS_SHA: 742781f00aea07017fa0273e2d3964eaa0ac80d4
     steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: 742781f00aea07017fa0273e2d3964eaa0ac80d4
+          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Probe exact production multi-turn session
+      - name: Validate v32 source and tests
         run: |
-          node <<'NODE'
-          const url='wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default';
-          const prompts=[
-            'パソコンの買い替えについて相談したいです',
-            'YouTubeとネットを見るくらいです。安いものがいいです',
-            'どういう基準で選べばいい？',
-            '中古でもいいかな',
-            'どこで買うのがいい？'
-          ];
-          const ws=new WebSocket(url);
-          let current=-1, started=0, answer='';
-          const results=[];
-          let timer=null;
-          const fail=(msg)=>{clearTimeout(timer);throw new Error(msg)};
-          const sendNext=()=>{
-            current++;
-            if(current>=prompts.length){
-              console.log('RESULTS',JSON.stringify(results));
-              ws.close();
-              return;
-            }
-            answer=''; started=Date.now();
-            const text=prompts[current];
-            console.log(`TURN ${current+1} SEND ${text}`);
-            ws.send(JSON.stringify({type:'text_message',text}));
-            clearTimeout(timer);
-            timer=setTimeout(()=>fail(`timeout turn ${current+1} ${text}`),18000);
-          };
-          await new Promise((resolve,reject)=>{
-            timer=setTimeout(()=>reject(new Error('welcome timeout')),10000);
-            ws.onopen=()=>ws.send(JSON.stringify({type:'hello',protocol_version:1}));
-            ws.onerror=()=>reject(new Error('websocket error'));
-            ws.onclose=()=>{if(current>=prompts.length)resolve();};
-            ws.onmessage=e=>{
-              if(typeof e.data!=='string') return;
-              let d;try{d=JSON.parse(e.data)}catch{return}
-              const ms=current>=0?Date.now()-started:0;
-              if(['welcome','status','transcript','transcript_start','transcript_delta','transcript_end','model_route','grounding_policy','search_status','search_trace','error','completion_outcome'].includes(d.type)) {
-                console.log(`TURN ${current+1}`,ms,d.type,d.status||d.role||d.phase||'',String(d.text||d.message||'').slice(0,220),d.reason||'');
-              }
-              if(d.type==='welcome'){clearTimeout(timer);sendNext();return;}
-              if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant'))&&d.text){
-                answer=String(d.text);
-                results.push({turn:current+1,ms:Date.now()-started,prompt:prompts[current],answer});
-                clearTimeout(timer);
-                setTimeout(sendNext,250);
-              }
-            };
-          });
-          NODE
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          npm install --no-audit --no-fund
+          node --check src/glm-conversation-v32.js
+          node --check src/search-trace-client-v32.js
+          node --check src/cloudflare-live-client-v32.js
+          node --check src/worker-v32.js
+          node --check src/worker-v32-production.js
+          npm test
+          npx wrangler deploy --dry-run
+          echo TALKSYS_V32_VALIDATION_OK
