@@ -14,12 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      TALKSYS_SHA: 742781f00aea07017fa0273e2d3964eaa0ac80d4
+      TALKSYS_SHA: 89571c24a29380fb3309276659e0c5d9008ef5e0
     steps:
       - uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 742781f00aea07017fa0273e2d3964eaa0ac80d4
+          ref: 89571c24a29380fb3309276659e0c5d9008ef5e0
           persist-credentials: false
       - uses: actions/setup-node@v5
         with:
