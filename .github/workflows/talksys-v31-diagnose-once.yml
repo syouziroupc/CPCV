@@ -1,0 +1,58 @@
+name: TalkSys v31 diagnose once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v31-diagnose-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Probe exact production turns
+        run: |
+          node <<'NODE'
+          const url='wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default';
+          async function one(text, i){
+            const ws=new WebSocket(url);
+            const started=Date.now();
+            const events=[];
+            let answer='';
+            await new Promise((resolve,reject)=>{
+              const timer=setTimeout(()=>reject(new Error(`timeout #${i} ${text} events=${JSON.stringify(events)}`)),18000);
+              ws.onopen=()=>ws.send(JSON.stringify({type:'hello',protocol_version:1}));
+              ws.onerror=()=>reject(new Error(`websocket error #${i}`));
+              ws.onmessage=e=>{
+                if(typeof e.data!=='string') return;
+                let d;try{d=JSON.parse(e.data)}catch{return}
+                const ms=Date.now()-started;
+                if(['welcome','status','transcript','transcript_start','transcript_delta','transcript_end','model_route','grounding_policy','search_status','search_trace','error','completion_outcome'].includes(d.type)) {
+                  events.push({ms,type:d.type,status:d.status,role:d.role,text:d.text,tier:d.tier,model:d.model,phase:d.phase,message:d.message,search:d.search,reason:d.reason});
+                  console.log(`#${i}`,ms,d.type,d.status||d.role||d.phase||'',String(d.text||d.message||'').slice(0,180));
+                }
+                if(d.type==='welcome') ws.send(JSON.stringify({type:'text_message',text}));
+                if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant'))&&d.text){answer=String(d.text);clearTimeout(timer);resolve();}
+              };
+            });
+            ws.close();
+            if(!answer) throw new Error(`no answer #${i}`);
+            console.log(`RESULT #${i} total=${Date.now()-started}ms answer=${answer}`);
+            return {answer,events};
+          }
+          const prompts=[
+            'パソコンの買い替えについて相談したいです',
+            'パソコンの買い替えについて相談したいです',
+            '今使っているパソコンが遅くて、買い替えたほうがいいか相談したいです',
+            'YouTubeとネットを見るくらいです。安いものがいいです',
+            'どういう基準で選べばいい？'
+          ];
+          for(let i=0;i<prompts.length;i++) await one(prompts[i],i+1);
+          NODE
