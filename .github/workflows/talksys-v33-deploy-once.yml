@@ -18,7 +18,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: 7d0863a6b371919372659f6c5e7ef0d9715c414e
+      TALKSYS_SHA: f59019052b7104f7564a717a02a3bd487515ef1e
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
       EXPECTED_VOICE_REVISION: talksys-v33-clean-http-voice
     steps:
@@ -98,8 +98,15 @@ jobs:
             echo "::error::Legacy WebSocket client found"
             exit 1
           fi
-          code="$(curl -sS --max-time 45 -o /tmp/talksys-v33-tts.mp3 -w '%{http_code}' -H 'content-type: application/json' --data '{"text":"日本語の音声テストです。"}' "$PRODUCTION_URL/api/tts")"
-          test "$code" = "200"
-          bytes="$(wc -c < /tmp/talksys-v33-tts.mp3)"
+          code="$(curl -sS --max-time 45 -D /tmp/talksys-v33-tts.headers -o /tmp/talksys-v33-tts.wav -w '%{http_code}' -H 'content-type: application/json' --data '{"text":"Windows 10とWindows 11、日本語の音声テストです。"}' "$PRODUCTION_URL/api/tts")"
+          if [ "$code" != "200" ]; then
+            cat /tmp/talksys-v33-tts.wav
+            exit 1
+          fi
+          bytes="$(wc -c < /tmp/talksys-v33-tts.wav)"
           echo "Japanese TTS bytes: $bytes"
+          cat /tmp/talksys-v33-tts.headers
           test "$bytes" -gt 500
+          grep -qi '^content-type: audio/wav' /tmp/talksys-v33-tts.headers
+          grep -qi '^x-talksys-tts-lang: JP' /tmp/talksys-v33-tts.headers
+          file /tmp/talksys-v33-tts.wav | grep -F 'WAVE audio'
