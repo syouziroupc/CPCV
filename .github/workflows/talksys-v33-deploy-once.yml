@@ -18,7 +18,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: f38af23bccb9f887f7f0cec7fc8fbc9ec5dfb375
+      TALKSYS_SHA: 7d0863a6b371919372659f6c5e7ef0d9715c414e
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
       EXPECTED_VOICE_REVISION: talksys-v33-clean-http-voice
     steps:
