@@ -1,0 +1,144 @@
+name: TalkSys v37 deploy once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v37-deploy-once.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TALKSYS_SHA: 1270b2f7d6355ce15670ba07fd2758190847f9b8
+      URL: https://talksys.syouziroupc.workers.dev
+      EXPECTED: talksys-v37-grounded-continuity
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: ${{ env.TALKSYS_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Require Cloudflare credentials
+        run: test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - run: npm install --no-audit --no-fund
+      - name: Validate v37
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          node --check src/worker-v37.js
+          node --check src/talk-client-v37.js
+          node --check src/search-v26.js
+          node --test tests/v37-grounded-continuity.test.mjs
+          npm test
+          npx wrangler deploy --dry-run
+      - name: Deploy v37
+        run: |
+          set -euo pipefail
+          npx wrangler deploy
+          npx wrangler deployments status
+      - name: Wait for v37 propagation and verify health
+        run: |
+          set -euo pipefail
+          body=''
+          for i in $(seq 1 20); do
+            body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
+            rev="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(d.voiceRevision||'')")"
+            echo "attempt=$i revision=${rev:-missing}"
+            [ "$rev" = "$EXPECTED" ] && break
+            [ "$i" -eq 20 ] && { echo "$body"; exit 1; }
+            sleep 3
+          done
+          echo "$body"
+          BODY="$body" node <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          for (const key of ['genericSearchFallback','searchAnnouncements','searchTrace','bargeIn','falseBargeResume']) if(d[key]!==true) throw new Error(key+' missing');
+          if(!d.serverTimeJst) throw new Error('JST missing');
+          if(d.ttsModel!=='browser/speechSynthesis'||d.ttsVoice!=='stable-ja-preferred') throw new Error('voice contract mismatch');
+          if(d.serverTtsEnabled!==false) throw new Error('server TTS re-enabled');
+          NODE
+      - name: Verify v37 browser client
+        run: |
+          set -euo pipefail
+          script="$(curl -fsS --max-time 20 "$URL/talk-v37.js")"
+          grep -F 'AIアシスタントのフォーンズです' <<< "$script"
+          grep -F 'について検索しています。' <<< "$script"
+          grep -F 'resumeInterruptedSpeech' <<< "$script"
+          grep -F '新しい発話なし。元の読み上げを再開' <<< "$script"
+          grep -F 'searchTrace' <<< "$script"
+          grep -F 'falseBargeResumes' <<< "$script"
+      - name: Verify JST direct knowledge
+        run: |
+          set -euo pipefail
+          out="$(curl -fsS --max-time 20 -H 'content-type: application/json' --data '{"text":"今、日本時間で何時?","history":[]}' "$URL/api/turn")"
+          echo "JST=$out"
+          OUT="$out" node <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}');
+          if(!d.ok||d.search!==false||d.route!=='server-jst-clock'||!/日本時間/.test(d.answer||'')) throw new Error('JST direct answer failed');
+          NODE
+      - name: Verify next-train planning
+        run: |
+          set -euo pipefail
+          payload='{"text":"次の電車、大分発何時?","history":[{"role":"user","content":"大分から別府まで行きたいんだけど、何で行こう。"},{"role":"assistant","content":"JR日豊本線がおすすめです。"}]}'
+          out="$(curl -fsS --max-time 20 -H 'content-type: application/json' --data "$payload" "$URL/api/plan")"
+          echo "PLAN=$out"
+          OUT="$out" node <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}');
+          if(!d.ok||d.search!==true) throw new Error('next-train plan did not search');
+          if(!/大分駅から別府駅/.test(d.resolvedQuestion||'')) throw new Error('route context lost');
+          if(!/現在時刻以降/.test(d.resolvedQuestion||'')||!/発車時刻/.test(d.resolvedQuestion||'')) throw new Error('current timetable intent missing');
+          if(!/交通情報/.test(d.topic||'')) throw new Error('search announcement topic missing');
+          NODE
+      - name: Reproduce current next-train search
+        run: |
+          set -euo pipefail
+          payload='{"text":"次の電車、大分発何時?","history":[{"role":"user","content":"大分から別府まで行きたいんだけど、何で行こう。"},{"role":"assistant","content":"JR日豊本線がおすすめです。"}]}'
+          out="$(curl -fsS --max-time 55 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
+          echo "TRANSIT=$out"
+          OUT="$out" node <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}');
+          if(!d.ok||d.search!==true) throw new Error('next-train lookup did not search');
+          if(!/大分/.test(d.resolvedQuestion||'')||!/別府/.test(d.resolvedQuestion||'')) throw new Error('route context lost');
+          if(!Array.isArray(d.sources)||d.sources.length<1) throw new Error('no transit evidence');
+          if(!/transit\.yahoo\.co\.jp/.test(String(d.sources[0]?.url||''))) throw new Error('Yahoo current route is not primary');
+          if(/正確な発車時刻までは分かりません|時刻表.*ご確認/.test(d.answer||'')) throw new Error('evasive transit answer regressed: '+d.answer);
+          NODE
+      - name: Reproduce PC purchase search
+        run: |
+          set -euo pipefail
+          payload='{"text":"どこで買えばいいの?","history":[{"role":"user","content":"youtubeや動画視聴かなぁ。"},{"role":"assistant","content":"エントリーモデルで十分です。"},{"role":"user","content":"安いノートパソコンでいい。"}]}'
+          out="$(curl -fsS --max-time 55 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
+          echo "PC=$out"
+          OUT="$out" node <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}');
+          if(!d.ok||d.search!==true) throw new Error('purchase lookup did not search');
+          if(!Array.isArray(d.sources)||d.sources.length<1) throw new Error('purchase search returned no evidence');
+          if(/具体的にはお伝えできません|情報を確認できませんでした/.test(d.answer||'')) throw new Error('generic purchase failure regressed: '+d.answer);
+          NODE
+      - name: Verify actual search trace answer
+        run: |
+          set -euo pipefail
+          payload='{"text":"何を検索したの?","history":[],"searchTrace":{"resolvedQuestion":"大分駅から別府駅までの現在時刻以降の列車","queries":["大分駅 別府駅 時刻表","大分駅 別府駅 乗換"],"sources":[{"title":"大分から別府への乗換案内 - Yahoo!路線情報","url":"https://transit.yahoo.co.jp/"}]}}'
+          out="$(curl -fsS --max-time 20 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
+          echo "TRACE=$out"
+          OUT="$out" node <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}');
+          if(!d.ok||d.search!==false||d.route!=='search-trace-v37') throw new Error('search trace route failed');
+          if(!/大分駅 別府駅 時刻表/.test(d.answer||'')||!/Yahoo!路線情報/.test(d.answer||'')) throw new Error('actual search trace missing');
+          NODE
+      - name: Verify server TTS remains disabled
+        run: |
+          code="$(curl -sS -o /tmp/tts.json -w '%{http_code}' -H 'content-type: application/json' --data '{"text":"日本語テスト"}' "$URL/api/tts")"
+          echo "server TTS HTTP=$code body=$(cat /tmp/tts.json)"
+          test "$code" = '410'
