@@ -17,42 +17,55 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Probe exact production turns
+      - name: Probe exact production multi-turn session
         run: |
           node <<'NODE'
           const url='wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default';
-          async function one(text, i){
-            const ws=new WebSocket(url);
-            const started=Date.now();
-            const events=[];
-            let answer='';
-            await new Promise((resolve,reject)=>{
-              const timer=setTimeout(()=>reject(new Error(`timeout #${i} ${text} events=${JSON.stringify(events)}`)),18000);
-              ws.onopen=()=>ws.send(JSON.stringify({type:'hello',protocol_version:1}));
-              ws.onerror=()=>reject(new Error(`websocket error #${i}`));
-              ws.onmessage=e=>{
-                if(typeof e.data!=='string') return;
-                let d;try{d=JSON.parse(e.data)}catch{return}
-                const ms=Date.now()-started;
-                if(['welcome','status','transcript','transcript_start','transcript_delta','transcript_end','model_route','grounding_policy','search_status','search_trace','error','completion_outcome'].includes(d.type)) {
-                  events.push({ms,type:d.type,status:d.status,role:d.role,text:d.text,tier:d.tier,model:d.model,phase:d.phase,message:d.message,search:d.search,reason:d.reason});
-                  console.log(`#${i}`,ms,d.type,d.status||d.role||d.phase||'',String(d.text||d.message||'').slice(0,180));
-                }
-                if(d.type==='welcome') ws.send(JSON.stringify({type:'text_message',text}));
-                if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant'))&&d.text){answer=String(d.text);clearTimeout(timer);resolve();}
-              };
-            });
-            ws.close();
-            if(!answer) throw new Error(`no answer #${i}`);
-            console.log(`RESULT #${i} total=${Date.now()-started}ms answer=${answer}`);
-            return {answer,events};
-          }
           const prompts=[
             'パソコンの買い替えについて相談したいです',
-            'パソコンの買い替えについて相談したいです',
-            '今使っているパソコンが遅くて、買い替えたほうがいいか相談したいです',
             'YouTubeとネットを見るくらいです。安いものがいいです',
-            'どういう基準で選べばいい？'
+            'どういう基準で選べばいい？',
+            '中古でもいいかな',
+            'どこで買うのがいい？'
           ];
-          for(let i=0;i<prompts.length;i++) await one(prompts[i],i+1);
+          const ws=new WebSocket(url);
+          let current=-1, started=0, answer='';
+          const results=[];
+          let timer=null;
+          const fail=(msg)=>{clearTimeout(timer);throw new Error(msg)};
+          const sendNext=()=>{
+            current++;
+            if(current>=prompts.length){
+              console.log('RESULTS',JSON.stringify(results));
+              ws.close();
+              return;
+            }
+            answer=''; started=Date.now();
+            const text=prompts[current];
+            console.log(`TURN ${current+1} SEND ${text}`);
+            ws.send(JSON.stringify({type:'text_message',text}));
+            clearTimeout(timer);
+            timer=setTimeout(()=>fail(`timeout turn ${current+1} ${text}`),18000);
+          };
+          await new Promise((resolve,reject)=>{
+            timer=setTimeout(()=>reject(new Error('welcome timeout')),10000);
+            ws.onopen=()=>ws.send(JSON.stringify({type:'hello',protocol_version:1}));
+            ws.onerror=()=>reject(new Error('websocket error'));
+            ws.onclose=()=>{if(current>=prompts.length)resolve();};
+            ws.onmessage=e=>{
+              if(typeof e.data!=='string') return;
+              let d;try{d=JSON.parse(e.data)}catch{return}
+              const ms=current>=0?Date.now()-started:0;
+              if(['welcome','status','transcript','transcript_start','transcript_delta','transcript_end','model_route','grounding_policy','search_status','search_trace','error','completion_outcome'].includes(d.type)) {
+                console.log(`TURN ${current+1}`,ms,d.type,d.status||d.role||d.phase||'',String(d.text||d.message||'').slice(0,220),d.reason||'');
+              }
+              if(d.type==='welcome'){clearTimeout(timer);sendNext();return;}
+              if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant'))&&d.text){
+                answer=String(d.text);
+                results.push({turn:current+1,ms:Date.now()-started,prompt:prompts[current],answer});
+                clearTimeout(timer);
+                setTimeout(sendNext,250);
+              }
+            };
+          });
           NODE
