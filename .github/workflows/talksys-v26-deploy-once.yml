@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/talksys-v26-deploy-once.yml
 
+# One-shot production deployment for TalkSys v26.
 permissions:
   contents: read
 
