@@ -48,10 +48,18 @@ jobs:
           set -euo pipefail
           npx wrangler deploy
           npx wrangler deployments status
-      - name: Verify health
+      - name: Verify health after propagation
         run: |
           set -euo pipefail
-          body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health")"
+          body=""
+          for attempt in $(seq 1 20); do
+            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
+            current="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
+            echo "health attempt $attempt revision=${current:-missing}"
+            if [ "$current" = "$EXPECTED_REVISION" ]; then break; fi
+            if [ "$attempt" -eq 20 ]; then echo "$body"; exit 1; fi
+            sleep 3
+          done
           echo "$body"
           BODY="$body" EXPECTED="$EXPECTED_REVISION" node <<'NODE'
           const d=JSON.parse(process.env.BODY||'{}');
