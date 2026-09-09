@@ -51,11 +51,15 @@ jobs:
         run: |
           set -euo pipefail
           http_code="$(curl -sS --max-time 25 -o /tmp/grok-tts.json -w '%{http_code}' \
-            -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/xai/grok-tts" \
+            -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             -H 'Content-Type: application/json' \
-            --data-binary '{"text":"TalkSysの日本語音声テストです。","language":"ja","voice_id":"ara","text_normalization":true,"output_format":{"codec":"mp3","sample_rate":24000,"bit_rate":64000}}')"
-          test "$http_code" = "200"
+            --data-binary '{"model":"xai/grok-tts","input":{"text":"TalkSysの日本語音声テストです。","language":"ja","voice_id":"ara","text_normalization":true,"output_format":{"codec":"mp3","sample_rate":24000,"bit_rate":64000}}}')"
+          if [ "$http_code" != "200" ]; then
+            echo "Grok TTS HTTP status: $http_code"
+            node -e "const fs=require('fs');let b={};try{b=JSON.parse(fs.readFileSync('/tmp/grok-tts.json','utf8'))}catch{};console.log(JSON.stringify({success:b.success,state:b.state,errors:b.errors||b.error||null}))"
+            exit 1
+          fi
           node <<'NODE'
           const fs = require('fs');
           const body = JSON.parse(fs.readFileSync('/tmp/grok-tts.json', 'utf8'));
