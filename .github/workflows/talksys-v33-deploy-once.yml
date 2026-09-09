@@ -1,0 +1,105 @@
+name: TalkSys v33 deploy once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v33-deploy-once.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys-v33:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TALKSYS_SHA: f38af23bccb9f887f7f0cec7fc8fbc9ec5dfb375
+      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
+      EXPECTED_VOICE_REVISION: talksys-v33-clean-http-voice
+    steps:
+      - name: Checkout exact TalkSys revision
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: ${{ env.TALKSYS_SHA }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Require Cloudflare production credentials
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - run: npm install --no-audit --no-fund
+
+      - name: Validate exact v33 revision
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          node --check src/worker-v33.js
+          node --check src/talk-client-v33.js
+          node --test tests/v33-clean-voice.test.mjs
+          npx wrangler deploy --dry-run
+
+      - name: Deploy TalkSys v33 to Cloudflare production
+        run: |
+          set -euo pipefail
+          npx wrangler deploy 2>&1 | tee /tmp/talksys-v33-deploy.log
+          npx wrangler deployments status
+
+      - name: Verify production v33 contract
+        run: |
+          set -euo pipefail
+          body=""
+          for attempt in $(seq 1 20); do
+            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
+            current="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
+            echo "Production voiceRevision attempt $attempt: ${current:-missing}"
+            [ "$current" = "$EXPECTED_VOICE_REVISION" ] && break
+            if [ "$attempt" -eq 20 ]; then
+              echo "::error::Production did not reach $EXPECTED_VOICE_REVISION"
+              echo "$body"
+              exit 1
+            fi
+            sleep 3
+          done
+          BODY="$body" EXPECTED="$EXPECTED_VOICE_REVISION" node <<'NODE'
+          const d = JSON.parse(process.env.BODY || '{}');
+          if (d.voiceRevision !== process.env.EXPECTED) throw new Error(`wrong revision: ${d.voiceRevision}`);
+          if (d.architecture !== 'http-turns-client-vad') throw new Error(`wrong architecture: ${d.architecture}`);
+          if (d.conversationModel !== '@cf/zai-org/glm-5.3-flash') throw new Error(`wrong GLM: ${d.conversationModel}`);
+          if (d.sttModel !== '@cf/openai/whisper-large-v3-turbo') throw new Error(`wrong STT: ${d.sttModel}`);
+          if (d.ttsModel !== '@cf/myshell-ai/melotts') throw new Error(`wrong TTS: ${d.ttsModel}`);
+          if (d.ttsLanguage !== 'JP') throw new Error(`wrong TTS language: ${d.ttsLanguage}`);
+          if (d.legacyWebSocketVoice !== false) throw new Error('legacy WebSocket voice still enabled');
+          if (d.durableObjectVoice !== false) throw new Error('legacy Durable Object voice still enabled');
+          console.log(JSON.stringify(d));
+          NODE
+
+      - name: Verify live v33 client and Japanese TTS endpoint
+        run: |
+          set -euo pipefail
+          page="$(curl -fsS --max-time 20 "$PRODUCTION_URL/")"
+          script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/talk-v33.js")"
+          grep -F "TalkSys" <<< "$page"
+          grep -F "非常用の文字入力" <<< "$page"
+          grep -F "/api/transcribe" <<< "$script"
+          grep -F "/api/turn" <<< "$script"
+          grep -F "/api/tts" <<< "$script"
+          if grep -F "new WebSocket" <<< "$script"; then
+            echo "::error::Legacy WebSocket client found"
+            exit 1
+          fi
+          code="$(curl -sS --max-time 45 -o /tmp/talksys-v33-tts.mp3 -w '%{http_code}' -H 'content-type: application/json' --data '{"text":"日本語の音声テストです。"}' "$PRODUCTION_URL/api/tts")"
+          test "$code" = "200"
+          bytes="$(wc -c < /tmp/talksys-v33-tts.mp3)"
+          echo "Japanese TTS bytes: $bytes"
+          test "$bytes" -gt 500
