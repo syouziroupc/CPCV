@@ -66,10 +66,18 @@ jobs:
           if(d.ttsModel!=='browser/speechSynthesis'||d.ttsVoice!=='stable-ja-preferred') throw new Error('stable Japanese voice contract missing');
           if(d.serverTtsEnabled!==false) throw new Error('server TTS re-enabled');
           NODE
-      - name: Verify stable voice and barge-in client
+      - name: Verify stable voice and barge-in client after propagation
         run: |
           set -euo pipefail
-          script="$(curl -fsS --max-time 20 "$URL/talk-v36.js")"
+          script=''
+          for i in $(seq 1 20); do
+            code="$(curl -sS --max-time 20 -D /tmp/client.headers -o /tmp/client.js -w '%{http_code}' "$URL/talk-v36.js" || true)"
+            rev="$(tr -d '\r' </tmp/client.headers | awk -F': ' 'tolower($1)=="x-talksys-revision"{print $2}' | tail -1)"
+            echo "client attempt=$i http=$code revision=${rev:-missing}"
+            if [ "$code" = '200' ] && [ "$rev" = "$EXPECTED" ]; then script="$(cat /tmp/client.js)"; break; fi
+            [ "$i" -eq 20 ] && { cat /tmp/client.headers; cat /tmp/client.js; exit 1; }
+            sleep 3
+          done
           grep -F 'lockedVoiceKey' <<< "$script"
           grep -F 'Google' <<< "$script"
           grep -F 'interruptSpeechForBargeIn' <<< "$script"
