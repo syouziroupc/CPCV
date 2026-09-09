@@ -1,0 +1,90 @@
+name: TalkSys v27 finalize once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v27-finalize-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  finalize-talksys-v27:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TALKSYS_SHA: dba9759906c934fd88f2aa947a7db889b95b3be3
+      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
+      EXPECTED_VOICE_REVISION: cloudflare-agent-v27-grok-conversation-android-realtime
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: ${{ env.TALKSYS_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Require production credentials
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - run: npm install --no-audit --no-fund
+      - name: Validate exact source
+        run: |
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          node --check src/worker-v27-production.js
+          node --check src/worker-v27.js
+          node --check src/grok-conversation-v27.js
+          npm test
+          npx wrangler deploy --dry-run
+      - name: Deploy exact TalkSys v27
+        run: |
+          npx wrangler deploy
+          npx wrangler deployments status
+      - name: Verify production health is internally consistent
+        run: |
+          body=""
+          for attempt in $(seq 1 15); do
+            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
+            current="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
+            if [ "$current" = "$EXPECTED_VOICE_REVISION" ]; then break; fi
+            sleep 3
+          done
+          BODY="$body" EXPECTED="$EXPECTED_VOICE_REVISION" node <<'NODE'
+          const d = JSON.parse(process.env.BODY || '{}');
+          const grok = 'xai/grok-4.20-0309-non-reasoning';
+          const glm = '@cf/zai-org/glm-5.3-flash';
+          const qwen = '@cf/qwen/qwen3.8-27b';
+          if (d.voiceRevision !== process.env.EXPECTED) throw new Error(`revision mismatch: ${d.voiceRevision}`);
+          if (d.conversationModel !== grok || d.primaryConversationModel !== grok || d.llmLive !== grok) throw new Error('Grok metadata inconsistent');
+          if (d.conversationModelFallback !== glm || d.qualityConversationModel !== glm || d.llmQuality !== glm) throw new Error('GLM metadata inconsistent');
+          if (d.conversationEmergencyFallback !== qwen || d.llmFallback !== qwen) throw new Error('Qwen metadata inconsistent');
+          if (d.ttsPrimary !== '@cf/myshell-ai/melotts' || d.ttsPrimaryLanguage !== 'ja' || d.grokTtsPrimary !== false || d.grokTtsMp3 !== false) throw new Error('TTS metadata inconsistent');
+          for (const key of ['grokConversationPrimary','grokNonReasoningRealtime','grokStreaming','mobileAudioPipelineV26','androidAudioWorkletPreferred','androidScriptProcessorFallback','androidPcmFrameProbeBeforeCall','androidCaptureBackendFailover','androidLifecycleResume','mobileWebSocketHardRecovery','microphoneDiagnostics','inFlightUserContext','directTransitEvidenceFallback']) if (d[key] !== true) throw new Error(`${key} missing`);
+          console.log(JSON.stringify({voiceRevision:d.voiceRevision, conversationModel:d.conversationModel, fallback:d.conversationModelFallback, emergency:d.conversationEmergencyFallback, tts:d.ttsPrimary}));
+          NODE
+      - name: Verify Android and context regressions again
+        run: |
+          script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
+          grep -F "verifyAndroidCapturePipeline" <<< "$script"
+          grep -F "talksys-mic-no-frames" <<< "$script"
+          grep -F "resumeMobileRuntime" <<< "$script"
+          grep -F "callStartPending" <<< "$script"
+          grep -F "talksys-barge-in" <<< "$script"
+          transit="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v27-transit-followup")"
+          BODY="$transit" node <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          const q=String(d.resolvedQuestion||'');
+          if(!d.ok || !/鷺沼/.test(q) || !/相模大野/.test(q) || !/どうですか/.test(q)) throw new Error('transit context regression');
+          NODE
+          shopping="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v27-context")"
+          BODY="$shopping" node <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          const q=String(d.resolvedQuestion||'');
+          if(!d.ok || !/パソコン/.test(q) || !/中古/.test(q) || !/横浜/.test(q) || /YouTube|ネットサーフィン/i.test(q)) throw new Error('shopping context regression');
+          NODE
