@@ -1,0 +1,196 @@
+name: TalkSys v43 smoke-gated deploy
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/talksys-v43-smoke-gated-deploy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-gated-deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TALKSYS_SHA: 0225121585bdfaf91b5acff6308d2c499e944437
+      EXPECTED: talksys-v43-smoke-weather-adaptive-vad
+      STAGING_URL: https://talksys-v43-smoke.syouziroupc.workers.dev
+      PROD_URL: https://talksys.syouziroupc.workers.dev
+      LOG_DB: talksys-conversation-logs
+    steps:
+      - name: Checkout exact TalkSys revision
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: ${{ env.TALKSYS_SHA }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Require Cloudflare production credentials
+        run: test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Validate exact v43 before any deployment
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          node --check src/worker-v43.js
+          node --check src/talk-client-v43.js
+          node --test tests/v43-smoke-weather-vad.test.mjs
+          npm test
+          npx wrangler deploy --dry-run --config wrangler.jsonc
+
+      - name: Build isolated staging config
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const src=fs.readFileSync('wrangler.jsonc','utf8').replace(/^\s*\/\/.*$/gm,'');
+          const cfg=JSON.parse(src);
+          cfg.name='talksys-v43-smoke';
+          delete cfg.migrations;
+          fs.writeFileSync('/tmp/wrangler-v43-smoke.json',JSON.stringify(cfg,null,2));
+          NODE
+          cat /tmp/wrangler-v43-smoke.json
+
+      - name: Deploy v43 to isolated staging Worker
+        run: npx wrangler deploy --config /tmp/wrangler-v43-smoke.json
+
+      - name: Wait for staging propagation
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            body="$(curl -fsS --max-time 20 "$STAGING_URL/voice-health" || true)"
+            rev="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(d.revision||'')")"
+            echo "staging attempt=$i revision=${rev:-missing}"
+            [ "$rev" = "$EXPECTED" ] && exit 0
+            sleep 3
+          done
+          exit 1
+
+      - name: Thorough staging conversation smoke test
+        run: |
+          set -euo pipefail
+          BASE="$STAGING_URL" node <<'NODE'
+          const base=process.env.BASE;
+          async function post(path,body,timeout=90000){
+            const c=new AbortController();const timer=setTimeout(()=>c.abort(),timeout);
+            try{const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json','x-talksys-session':'stage-'+Date.now()},body:JSON.stringify(body),signal:c.signal});const text=await r.text();let j;try{j=JSON.parse(text)}catch{throw new Error(path+' non-json '+r.status+' '+text.slice(0,400))}if(!r.ok||!j.ok)throw new Error(path+' failed '+r.status+' '+JSON.stringify(j));return j;}finally{clearTimeout(timer)}
+          }
+          const deny=/検索.{0,20}(?:できない|できません|使えない|使えません)|この電話.{0,30}検索/;
+          const giveup=/申し訳ありません.{0,100}(?:確認|検索|情報)|自分で.{0,30}(?:検索|確認)して|(?:ホームページ|アプリ|商品ページ).{0,40}(?:確認|検索)して/;
+          const results=[];
+          async function plan(text,history=[]){return post('/api/plan',{text,history,sessionId:'stage-plan-'+Date.now()});}
+          async function turn(text,history=[],searchPlan=null){return post('/api/turn',{text,history,searchPlan,sessionId:'stage-turn-'+Date.now()});}
+
+          let p=await plan('こんにちは。ちょっと話しましょう。');
+          if(p.search)throw new Error('casual greeting unexpectedly searched');
+          let t=await turn('こんにちは。ちょっと話しましょう。',[],p);if(deny.test(t.answer||''))throw new Error('greeting denied search capability');results.push(['casual',t.answer]);
+
+          p=await plan('最近パソコンを買おうか悩んでるんだよね');
+          if(p.search||p.planner!=='pc-advice-local-v43')throw new Error('PC advice plan wrong '+JSON.stringify(p));
+          t=await turn('最近パソコンを買おうか悩んでるんだよね',[],p);
+          if(deny.test(t.answer||''))throw new Error('PC advice falsely denied search '+t.answer);
+          if(/\d+\s*万円|\d{4,}\s*円/.test(t.answer||''))throw new Error('PC advice invented unsearched price '+t.answer);
+          results.push(['pc-advice',t.answer]);
+
+          p=await plan('うなよ検索できるだろ君');
+          t=await turn('うなよ検索できるだろ君',[],p);
+          if(!/検索できます/.test(t.answer||'')||deny.test(t.answer||''))throw new Error('capability correction failed '+t.answer);results.push(['capability',t.answer]);
+
+          p=await plan('明日の別途の天気は?');
+          if(!p.search||p.planner!=='weather-direct-v43')throw new Error('typo weather plan wrong '+JSON.stringify(p));
+          t=await turn('明日の別途の天気は?',[],p);
+          if(t.route!=='weather-direct-v43'||!t.searchUseful||!/別府/.test(t.answer||'')||giveup.test(t.answer||''))throw new Error('typo Beppu weather failed '+JSON.stringify(t));
+          if(!(t.sources||[]).some(x=>/open-meteo/i.test(x.url||'')))throw new Error('weather direct source missing');results.push(['weather-typo',t.answer]);
+
+          p=await plan('明日の大分県別府市の天気は?');
+          t=await turn('明日の大分県別府市の天気は?',[],p);
+          if(t.route!=='weather-direct-v43'||!t.searchUseful||!/最高気温/.test(t.answer||'')||!/降水確率/.test(t.answer||'')||giveup.test(t.answer||''))throw new Error('explicit Beppu weather failed '+JSON.stringify(t));results.push(['weather-explicit',t.answer]);
+
+          const pcHist=[{role:'user',content:'最近パソコンを買おうか悩んでるんだよね。家で使う予定です。'}];
+          p=await plan('大分県内でおすすめのお店はありますか?',pcHist);
+          if(!p.search||p.planner!=='pc-search-v43')throw new Error('local PC store did not search '+JSON.stringify(p));
+          t=await turn('大分県内でおすすめのお店はありますか?',pcHist,p);
+          if(!t.search||!t.searchUseful||(t.sources||[]).length<1||deny.test(t.answer||'')||giveup.test(t.answer||''))throw new Error('local PC store search unusable '+JSON.stringify(t));results.push(['pc-local-store',t.answer]);
+
+          const repairText='背面割れです。機種はXperia 5で、半年前にゲオで8000円で買いました。大事なデータは特に入っていません。修理か買い替えか悩んでいます。';
+          p=await plan(repairText,[{role:'user',content:'スマホが壊れて修理か買い替えか悩んでいます。'}]);
+          if(p.search)throw new Error('repair judgment unexpectedly searched '+JSON.stringify(p));
+          t=await turn(repairText,[{role:'user',content:'スマホが壊れて修理か買い替えか悩んでいます。'}],p);
+          if(t.search||deny.test(t.answer||''))throw new Error('repair judgment regressed '+JSON.stringify(t));results.push(['phone-repair',t.answer]);
+
+          p=await plan('大分駅から別府駅まで何に乗ればいい?',[]);
+          if(!p.search)throw new Error('transit did not plan a search '+JSON.stringify(p));
+          t=await turn('大分駅から別府駅まで何に乗ればいい?',[],p);
+          if(!t.search||deny.test(t.answer||'')||giveup.test(t.answer||''))throw new Error('transit answer regressed '+JSON.stringify(t));results.push(['transit',t.answer]);
+
+          console.log(JSON.stringify(results,null,2));
+          NODE
+
+      - name: Verify staging client contains adaptive noise controls
+        run: |
+          set -euo pipefail
+          curl -fsS --max-time 20 "$STAGING_URL/talk-v43.js" >/tmp/v43-client.js
+          grep -F 'noiseBoost' /tmp/v43-client.js
+          grep -F 'falseNoiseRejects' /tmp/v43-client.js
+          grep -F '1.4秒環境音キャリブレーション' /tmp/v43-client.js
+          grep -F 'STT失敗を雑音学習へ反映' /tmp/v43-client.js
+
+      - name: Deploy smoke-approved v43 to production
+        id: production_deploy
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config wrangler.jsonc
+          npx wrangler deployments status
+
+      - name: Production conversation smoke test
+        id: production_smoke
+        run: |
+          set -euo pipefail
+          BASE="$PROD_URL" node <<'NODE'
+          const base=process.env.BASE;
+          async function post(path,body,timeout=90000){const c=new AbortController();const timer=setTimeout(()=>c.abort(),timeout);try{const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json','x-talksys-session':'prod-smoke-'+Date.now()},body:JSON.stringify(body),signal:c.signal});const j=await r.json();if(!r.ok||!j.ok)throw new Error(path+' '+r.status+' '+JSON.stringify(j));return j;}finally{clearTimeout(timer)}}
+          const deny=/検索.{0,20}(?:できない|できません|使えない|使えません)|この電話.{0,30}検索/;
+          const giveup=/申し訳ありません.{0,100}(?:確認|検索|情報)|自分で.{0,30}(?:検索|確認)して|(?:ホームページ|アプリ|商品ページ).{0,40}(?:確認|検索)して/;
+          const health=await (await fetch(base+'/voice-health')).json();if(health.revision!==process.env.EXPECTED||!health.preDeploySmokeGate||!health.adaptiveNoiseVad)throw new Error('production health mismatch '+JSON.stringify(health));
+          async function cycle(text,history=[]){const p=await post('/api/plan',{text,history,sessionId:'prod-plan-'+Date.now()});const t=await post('/api/turn',{text,history,searchPlan:p,sessionId:'prod-turn-'+Date.now()});return {p,t};}
+          let x=await cycle('最近パソコンを買おうか悩んでるんだよね');if(x.p.search||deny.test(x.t.answer||'')||/\d+\s*万円|\d{4,}\s*円/.test(x.t.answer||''))throw new Error('production PC advice bad '+JSON.stringify(x));
+          x=await cycle('うなよ検索できるだろ君');if(!/検索できます/.test(x.t.answer||'')||deny.test(x.t.answer||''))throw new Error('production capability bad '+JSON.stringify(x));
+          x=await cycle('明日の別途の天気は?');if(x.t.route!=='weather-direct-v43'||!x.t.searchUseful||!/別府/.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('production typo weather bad '+JSON.stringify(x));
+          x=await cycle('明日の大分県別府市の天気は?');if(x.t.route!=='weather-direct-v43'||!x.t.searchUseful||!/最高気温/.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('production explicit weather bad '+JSON.stringify(x));
+          const h=[{role:'user',content:'最近パソコンを買おうか悩んでるんだよね。家で使う予定です。'}];x=await cycle('大分県内でおすすめのお店はありますか?',h);if(!x.t.search||!x.t.searchUseful||(x.t.sources||[]).length<1||deny.test(x.t.answer||'')||giveup.test(x.t.answer||''))throw new Error('production PC search bad '+JSON.stringify(x));
+          console.log(JSON.stringify({pc:x.t.answer,health},null,2));
+          NODE
+
+      - name: Verify production D1 log writes
+        run: |
+          set -euo pipefail
+          sleep 3
+          out="$(npx wrangler d1 execute "$LOG_DB" --remote --command "SELECT revision,event,status,path,user_text FROM conversation_logs WHERE revision='$EXPECTED' ORDER BY timestamp DESC LIMIT 12;")"
+          echo "$out"
+          echo "$out" | grep -F "$EXPECTED"
+          echo "$out" | grep -F '/api/turn'
+
+      - name: Verify server TTS remains disabled with 410
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/tts-v43.json -w '%{http_code}' -H 'content-type: application/json' --data '{\"text\":\"日本語テスト\"}' "$PROD_URL/api/tts")"
+          echo "TTS HTTP=$code body=$(cat /tmp/tts-v43.json)"
+          test "$code" = '410'
+
+      - name: Roll back production automatically if post-deploy smoke fails
+        if: failure() && steps.production_deploy.outcome == 'success' && steps.production_smoke.outcome == 'failure'
+        run: |
+          echo 'Production smoke failed; rolling back to the version immediately before v43.'
+          npx wrangler rollback --config wrangler.jsonc --message "Automatic rollback after v43 production smoke failure"
