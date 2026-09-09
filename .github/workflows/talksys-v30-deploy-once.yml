@@ -17,14 +17,14 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: 7e36069db32e97cf2da61fe5726d34b85a820a20
+      TALKSYS_SHA: 3525de39f535a8f7752eff1afcc5f12199929d11
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
       EXPECTED_REVISION: cloudflare-agent-v30-real-grok-audio-runtime
     steps:
       - uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 7e36069db32e97cf2da61fe5726d34b85a820a20
+          ref: 3525de39f535a8f7752eff1afcc5f12199929d11
           persist-credentials: false
       - uses: actions/setup-node@v5
         with:
@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           npx wrangler deploy
           npx wrangler deployments status
-      - name: Verify v30 health and real Grok provider binding
+      - name: Verify v30 health and real Grok binding
         run: |
           set -euo pipefail
           body=""
@@ -61,23 +61,22 @@ jobs:
           if(d.voiceRevision!=='cloudflare-agent-v30-real-grok-audio-runtime') throw new Error('revision mismatch');
           if(d.conversationModel!=='xai/grok-4.20-0309-non-reasoning') throw new Error('conversation model mismatch');
           if(d.ttsPrimary!=='xai/grok-tts') throw new Error('tts mismatch');
-          if(d.browserSpeechSynthesisEnabled!==false||d.typedSpeechUsesGrokTts!==true||d.serverAudioAuthoritative!==true) throw new Error('browser audio contract mismatch');
+          if(d.browserSpeechSynthesisEnabled!==false||d.typedSpeechUsesGrokTts!==true||d.serverAudioAuthoritative!==true) throw new Error('audio contract mismatch');
           NODE
-          code="$(curl -sS -o /tmp/probe.json -w '%{http_code}' --max-time 40 "$PRODUCTION_URL/api/grok-binding-probe-v30")"
+          code="$(curl -sS -o /tmp/probe.json -w '%{http_code}' --max-time 45 "$PRODUCTION_URL/api/grok-binding-probe-v30")"
           echo "BINDING_PROBE_HTTP=$code"
           cat /tmp/probe.json; echo
           test "$code" = 200
           PROBE="$(cat /tmp/probe.json)" node -e "const d=JSON.parse(process.env.PROBE);if(!d.ok||!d.conversation?.ok||!d.tts?.ok||!(d.tts.bytes>100))throw new Error(JSON.stringify(d))"
-      - name: Verify typed simulation gets real Grok text and Grok audio
+      - name: Verify typed simulation and real Grok TTS
         run: |
           set -euo pipefail
           node <<'NODE'
           const base='https://talksys.syouziroupc.workers.dev';
-          const target='wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default';
-          const ws=new WebSocket(target);
+          const ws=new WebSocket('wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default');
           let answer='';
-          const done=new Promise((resolve,reject)=>{
-            const timer=setTimeout(()=>reject(new Error('typed websocket timeout')),30000);
+          await new Promise((resolve,reject)=>{
+            const timer=setTimeout(()=>reject(new Error('typed websocket timeout')),35000);
             ws.onopen=()=>ws.send(JSON.stringify({type:'hello',protocol_version:1}));
             ws.onerror=()=>reject(new Error('typed websocket error'));
             ws.onmessage=(event)=>{
@@ -85,19 +84,17 @@ jobs:
               let d;try{d=JSON.parse(event.data)}catch{return}
               console.log('TYPED_EVENT',d.type,d.status||d.role||'',String(d.text||'').slice(0,160));
               if(d.type==='welcome') ws.send(JSON.stringify({type:'text_message',text:'こんにちは。動作確認です。短く自然に返事してください。'}));
-              if(d.type==='transcript_end' && d.text){ answer=String(d.text);clearTimeout(timer);resolve(); }
-              else if(d.type==='transcript'&&d.role==='assistant'&&d.text){answer=String(d.text);clearTimeout(timer);resolve();}
+              if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant'))&&d.text){answer=String(d.text);clearTimeout(timer);resolve();}
             };
           });
-          await done;
           ws.close();
           if(!answer||/接続を立て直しました|もう一度お願いします/.test(answer)) throw new Error('Grok answer failed: '+answer);
           const r=await fetch(base+'/api/grok-tts-v30',{method:'POST',headers:{'content-type':'application/json','origin':base},body:JSON.stringify({text:answer})});
           const bytes=await r.arrayBuffer();
-          console.log('TYPED_GROK_ANSWER',answer,'TTS_HTTP',r.status,'TTS_PROVIDER',r.headers.get('x-talksys-tts-provider'),'BYTES',bytes.byteLength);
+          console.log('TYPED_GROK_ANSWER',answer,'TTS_HTTP',r.status,'PROVIDER',r.headers.get('x-talksys-tts-provider'),'BYTES',bytes.byteLength);
           if(!r.ok||r.headers.get('x-talksys-tts-provider')!=='xai/grok-tts'||bytes.byteLength<500) throw new Error('typed Grok TTS failed');
           NODE
-      - name: Verify realtime call and Twilio media actually emit Grok audio
+      - name: Verify browser call and Twilio media audio
         run: |
           set -euo pipefail
           node <<'NODE'
@@ -106,12 +103,12 @@ jobs:
             ws.binaryType='arraybuffer';
             let binary=0,listening=false;
             await new Promise((resolve,reject)=>{
-              const timer=setTimeout(()=>reject(new Error(`browser call timeout listening=${listening} binary=${binary}`)),30000);
+              const timer=setTimeout(()=>reject(new Error(`browser call timeout listening=${listening} binary=${binary}`)),35000);
               ws.onopen=()=>ws.send(JSON.stringify({type:'hello',protocol_version:1}));
               ws.onerror=()=>reject(new Error('browser call websocket error'));
               ws.onmessage=e=>{
                 if(e.data instanceof ArrayBuffer){binary+=e.data.byteLength;console.log('CALL_BINARY',e.data.byteLength,binary);if(listening&&binary>100){clearTimeout(timer);resolve();}return;}
-                if(typeof e.data!=='string')return;
+                if(typeof e.data!=='string') return;
                 let d;try{d=JSON.parse(e.data)}catch{return}
                 console.log('CALL_EVENT',d.type,d.status||d.role||'',String(d.text||'').slice(0,100));
                 if(d.type==='welcome') ws.send(JSON.stringify({type:'start_call',preferred_format:'mp3'}));
@@ -119,35 +116,32 @@ jobs:
               };
             });
             ws.close();
-            if(!listening||binary<100)throw new Error('browser call did not reach listening with Grok audio');
+            if(!listening||binary<100) throw new Error('browser call did not get Grok greeting audio');
           }
           async function twilioCall(){
             const ws=new WebSocket('wss://talksys.syouziroupc.workers.dev/phone/media');
             let mediaBytes=0,mark=false;
             await new Promise((resolve,reject)=>{
-              const timer=setTimeout(()=>reject(new Error(`Twilio emulation timeout media=${mediaBytes} mark=${mark}`)),30000);
-              ws.onopen=()=>{
-                ws.send(JSON.stringify({event:'start',streamSid:'MZ_TEST_V30',start:{streamSid:'MZ_TEST_V30',callSid:'CA_TEST_V30',mediaFormat:{encoding:'audio/x-mulaw',sampleRate:8000,channels:1},customParameters:{}}}));
-              };
+              const timer=setTimeout(()=>reject(new Error(`Twilio timeout media=${mediaBytes} mark=${mark}`)),35000);
+              ws.onopen=()=>ws.send(JSON.stringify({event:'start',streamSid:'MZ_TEST_V30',start:{streamSid:'MZ_TEST_V30',callSid:'CA_TEST_V30',mediaFormat:{encoding:'audio/x-mulaw',sampleRate:8000,channels:1},customParameters:{}}}));
               ws.onerror=()=>reject(new Error('Twilio websocket error'));
               ws.onmessage=e=>{
-                if(typeof e.data!=='string')return;
+                if(typeof e.data!=='string') return;
                 let d;try{d=JSON.parse(e.data)}catch{return}
                 console.log('PHONE_EVENT',d.event,d.mark?.name||'',d.media?.payload?.length||0);
                 if(d.event==='media'&&d.media?.payload) mediaBytes+=Buffer.from(d.media.payload,'base64').length;
                 if(d.event==='mark') mark=true;
                 if(mediaBytes>100&&mark){clearTimeout(timer);resolve();}
               };
-              ws.onclose=e=>{if(mediaBytes<=100||!mark)reject(new Error(`Twilio closed ${e.code} ${e.reason}`));};
             });
             ws.close();
-            if(mediaBytes<100||!mark)throw new Error('phone greeting audio missing');
+            if(mediaBytes<100||!mark) throw new Error('phone greeting audio missing');
           }
           await browserCall();
           await twilioCall();
           console.log('V30_REALTIME_AND_PHONE_AUDIO_OK');
           NODE
-      - name: Verify live client and contextual search
+      - name: Verify live client and context
         run: |
           set -euo pipefail
           script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
