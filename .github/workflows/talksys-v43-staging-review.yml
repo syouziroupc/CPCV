@@ -1,0 +1,158 @@
+name: TalkSys v43 staging review
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/talksys-v43-staging-review.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staging-review:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 35
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TALKSYS_SHA: 0225121585bdfaf91b5acff6308d2c499e944437
+      EXPECTED: talksys-v43-smoke-weather-adaptive-vad
+      STAGING_URL: https://talksys-v43-smoke.syouziroupc.workers.dev
+    steps:
+      - name: Checkout exact TalkSys revision
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: ${{ env.TALKSYS_SHA }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Require Cloudflare credentials
+        run: test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Full validation before staging
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          node --check src/worker-v43.js
+          node --check src/talk-client-v43.js
+          node --test tests/v43-smoke-weather-vad.test.mjs
+          npm test
+          npx wrangler deploy --dry-run --config wrangler.jsonc
+
+      - name: Build isolated staging config
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          const src=fs.readFileSync('wrangler.jsonc','utf8').replace(/^\s*\/\/.*$/gm,'');
+          const cfg=JSON.parse(src);
+          cfg.name='talksys-v43-smoke';
+          delete cfg.migrations;
+          fs.writeFileSync('wrangler.v43-smoke.json',JSON.stringify(cfg,null,2));
+          NODE
+
+      - name: Deploy exact v43 to staging only
+        run: npx wrangler deploy --config wrangler.v43-smoke.json
+
+      - name: Verify staging health and adaptive VAD client
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 24); do
+            body="$(curl -fsS --max-time 20 "$STAGING_URL/voice-health" || true)"
+            rev="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(d.revision||'')")"
+            [ "$rev" = "$EXPECTED" ] && break
+            [ "$i" -eq 24 ] && { echo "$body"; exit 1; }
+            sleep 3
+          done
+          echo "$body"
+          BODY="$body" EXPECTED="$EXPECTED" node <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          if(d.revision!==process.env.EXPECTED) throw new Error('wrong revision');
+          if(!d.adaptiveNoiseVad||!d.adaptiveNoiseCalibration||!d.adaptiveFalseTriggerPenalty) throw new Error('adaptive noise contract missing');
+          if(!d.preDeploySmokeGate||!d.searchCapabilityGuard||d.serverTtsEnabled!==false) throw new Error('v43 health contract incomplete');
+          NODE
+          curl -fsS --max-time 20 "$STAGING_URL/talk-v43.js" >/tmp/v43-client.js
+          grep -F 'noiseBoost' /tmp/v43-client.js
+          grep -F 'falseNoiseRejects' /tmp/v43-client.js
+          grep -F 'goodSpeechCount' /tmp/v43-client.js
+          grep -F '1.4秒環境音キャリブレーション' /tmp/v43-client.js
+          grep -F 'STT失敗を雑音学習へ反映' /tmp/v43-client.js
+          grep -F 'startHits<3' /tmp/v43-client.js
+
+      - name: Run complete question-answer staging review suite
+        run: |
+          set -euo pipefail
+          BASE="$STAGING_URL" node <<'NODE'
+          const base=process.env.BASE;
+          const failures=[];
+          const qa=[];
+          let seq=0;
+          const denial=/^(?:すみません、?|申し訳ありません、?).{0,35}(?:検索|Web検索).{0,25}(?:できない|できません|使えない|使えません)|(?:この電話|この通話).{0,35}(?:検索|Web検索).{0,25}(?:できない|できません)/;
+          const handoff=/(?:自分|ご自身).{0,35}(?:検索|確認)して(?:ください|みて)|(?:ホームページ|天気アプリ|商品ページ|通販サイト).{0,45}(?:確認|検索)して(?:ください|みて)/;
+          const apologyGiveup=/申し訳ありません.{0,100}(?:確認できません|情報を確認でき|検索では.*確認でき)/;
+          async function post(path,body,timeout=90000){
+            const c=new AbortController();const timer=setTimeout(()=>c.abort(),timeout);
+            try{
+              const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json','x-talksys-session':body.sessionId||('review-'+Date.now())},body:JSON.stringify(body),signal:c.signal});
+              const text=await r.text();let j;try{j=JSON.parse(text)}catch{throw new Error(path+' non-json HTTP '+r.status+' '+text.slice(0,500))}
+              if(!r.ok||!j.ok)throw new Error(path+' HTTP '+r.status+' '+JSON.stringify(j));return j;
+            }finally{clearTimeout(timer)}
+          }
+          async function cycle(label,text,history=[]){
+            const sessionId=`v43-review-${Date.now()}-${++seq}`;
+            try{
+              const plan=await post('/api/plan',{text,history,sessionId});
+              const turn=await post('/api/turn',{text,history,searchPlan:plan,sessionId});
+              qa.push({label,question:text,history,plan:{search:plan.search,planner:plan.planner,topic:plan.topic,resolvedQuestion:plan.resolvedQuestion},answer:turn.answer,turn:{search:turn.search,route:turn.route,searchUseful:turn.searchUseful,queries:turn.queries||[],sources:turn.sources||[],timings:turn.timings||{}}});
+              return {plan,turn};
+            }catch(e){failures.push(`${label}: request failed: ${e.message}`);qa.push({label,question:text,error:e.message});return null;}
+          }
+          function fail(label,msg){failures.push(label+': '+msg)}
+          function common(label,x){if(!x)return false;const a=String(x.turn.answer||'');if(!a.trim())fail(label,'empty answer');if(denial.test(a))fail(label,'false search-capability denial: '+a);return true;}
+
+          // Reproduce the user's reported conversation as one continuous history.
+          const convo=[];
+          let x=await cycle('reported-1-casual','こんにちは。ちょっと話しましょう。',convo);if(common('reported-1-casual',x)){if(x.plan.search)fail('reported-1-casual','casual greeting searched');convo.push({role:'user',content:'こんにちは。ちょっと話しましょう。'},{role:'assistant',content:x.turn.answer});}
+          x=await cycle('reported-2-pc-vague','最近パソコンを買おうか悩んでるんだよね',convo);if(common('reported-2-pc-vague',x)){if(x.plan.search||x.plan.planner!=='pc-advice-local-v43')fail('reported-2-pc-vague','wrong planner '+JSON.stringify(x.plan));if(/\d+\s*万円|\d{4,}\s*円/.test(x.turn.answer||''))fail('reported-2-pc-vague','invented unsearched price: '+x.turn.answer);convo.push({role:'user',content:'最近パソコンを買おうか悩んでるんだよね'},{role:'assistant',content:x.turn.answer});}
+          x=await cycle('reported-3-capability','うなよ検索できるだろ君',convo);if(common('reported-3-capability',x)){const a=String(x.turn.answer||'');if(!/^検索できます/.test(a))fail('reported-3-capability','does not clearly confirm search: '+a);if(/検索機能がない|検索は利用できません/.test(a))fail('reported-3-capability','contradictory capability claim: '+a);convo.push({role:'user',content:'うなよ検索できるだろ君'},{role:'assistant',content:a});}
+          x=await cycle('reported-4-weather-stt-typo','明日の別途の天気は?',convo);if(common('reported-4-weather-stt-typo',x)){if(!x.plan.search||x.plan.planner!=='weather-direct-v43'||x.turn.route!=='weather-direct-v43'||!x.turn.searchUseful)fail('reported-4-weather-stt-typo','did not use direct weather route');if(!/別府/.test(x.turn.answer||''))fail('reported-4-weather-stt-typo','did not repair 別途→別府: '+x.turn.answer);if(handoff.test(x.turn.answer||'')||apologyGiveup.test(x.turn.answer||''))fail('reported-4-weather-stt-typo','weather gave up: '+x.turn.answer);convo.push({role:'user',content:'明日の別途の天気は?'},{role:'assistant',content:x.turn.answer});}
+          x=await cycle('reported-5-weather-explicit','明日の大分県別府市の天気は?',convo);if(common('reported-5-weather-explicit',x)){const a=String(x.turn.answer||'');if(x.turn.route!=='weather-direct-v43'||!x.turn.searchUseful)fail('reported-5-weather-explicit','direct weather route missing');for(const token of ['別府','最高気温','最低気温','降水確率'])if(!a.includes(token))fail('reported-5-weather-explicit','missing '+token+': '+a);if(handoff.test(a)||apologyGiveup.test(a))fail('reported-5-weather-explicit','weather gave up: '+a);}
+
+          // PC follow-ups and actual lookup.
+          const pcHist=[{role:'user',content:'最近パソコンを買おうか悩んでるんだよね。家で使う予定です。できれば安い方がいいです。'}];
+          x=await cycle('pc-local-store','大分県内でおすすめのお店はありますか?',pcHist);if(common('pc-local-store',x)){if(!x.plan.search||x.plan.planner!=='pc-search-v43'||!x.turn.search||!x.turn.searchUseful)fail('pc-local-store','search route missing');if(!(x.turn.sources||[]).length)fail('pc-local-store','no sources');if(handoff.test(x.turn.answer||'')||apologyGiveup.test(x.turn.answer||''))fail('pc-local-store','search gave up: '+x.turn.answer);}
+          x=await cycle('pc-explicit-current','家で使う安めのノートパソコンを具体的に検索して',pcHist);if(common('pc-explicit-current',x)){if(!x.plan.search||!x.turn.search)fail('pc-explicit-current','explicit request did not search');if(handoff.test(x.turn.answer||'')||apologyGiveup.test(x.turn.answer||''))fail('pc-explicit-current','search gave up: '+x.turn.answer);}
+
+          // Weather inheritance and typo robustness.
+          x=await cycle('weather-context-followup','明後日は?', [{role:'user',content:'大分県別府市の明日の天気を知りたい'},{role:'assistant',content:'明日の予報を確認しました。'}]);if(common('weather-context-followup',x)){if(x.turn.route!=='weather-direct-v43'||!x.turn.searchUseful)fail('weather-context-followup','weather context not inherited');}
+
+          // Existing v42/v37 behaviors that must not regress.
+          const repair='背面割れです。機種はXperia 5で、半年前にゲオで8000円で買いました。大事なデータは特に入っていません。修理か買い替えか悩んでいます。';
+          x=await cycle('phone-repair-local',repair,[{role:'user',content:'スマホが壊れて修理か買い替えか悩んでいます。'}]);if(common('phone-repair-local',x)){if(x.plan.search||x.turn.search)fail('phone-repair-local','general decision unnecessarily searched');}
+          x=await cycle('phone-budget-search','もうちょっと調べてみてよ。2万円以下のスマホについて。',[{role:'user',content:'初代Xperia 5はAndroidが古いので中古で安いスマホへ乗り換えたい。'},{role:'assistant',content:'条件を整理します。'}]);if(common('phone-budget-search',x)){if(!x.plan.search||!x.turn.search)fail('phone-budget-search','explicit lookup did not search');if(handoff.test(x.turn.answer||'')||apologyGiveup.test(x.turn.answer||''))fail('phone-budget-search','search gave up: '+x.turn.answer);}
+          x=await cycle('transit-direct','大分駅から別府駅まで何に乗ればいい?',[]);if(common('transit-direct',x)){if(!x.plan.search||!x.turn.search)fail('transit-direct','transit did not search');if(handoff.test(x.turn.answer||'')||apologyGiveup.test(x.turn.answer||''))fail('transit-direct','transit gave up: '+x.turn.answer);}
+          x=await cycle('subjectless-search-followup','今から君がちょっと検索してほしいんだけど。',[{role:'user',content:'大分駅から別府駅まで行かないといけないんだけど、何を乗っていけばいいかわかんないんだよね。'},{role:'assistant',content:'経路は検索して確認できます。'}]);if(common('subjectless-search-followup',x)){if(!x.plan.search||!x.turn.search)fail('subjectless-search-followup','subjectless search did not inherit context');if(handoff.test(x.turn.answer||'')||apologyGiveup.test(x.turn.answer||''))fail('subjectless-search-followup','subjectless search gave up: '+x.turn.answer);}
+
+          console.log('V43_STAGING_REVIEW_QA_BEGIN');
+          console.log(JSON.stringify(qa,null,2));
+          console.log('V43_STAGING_REVIEW_QA_END');
+          console.log('V43_STAGING_REVIEW_FAILURES_BEGIN');
+          console.log(JSON.stringify(failures,null,2));
+          console.log('V43_STAGING_REVIEW_FAILURES_END');
+          if(failures.length)process.exit(1);
+          NODE
+
+      - name: Mark staging as review-ready only
+        run: |
+          echo 'STAGING_SMOKE_PASSED=1'
+          echo "APPROVED_CANDIDATE_SHA=$TALKSYS_SHA"
+          echo 'NO_PRODUCTION_DEPLOY_IN_THIS_WORKFLOW=1'
