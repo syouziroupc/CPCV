@@ -18,7 +18,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: 7aeff605a1fdabb00e5c2992b68e1cde905a1ad1
+      TALKSYS_SHA: a8cada8fb8df56c1eac28592fe806cd8b0db3877
       URL: https://talksys.syouziroupc.workers.dev
       EXPECTED: talksys-v42-search-judgment-persistent-logs
       LOG_DB: talksys-conversation-logs
@@ -112,7 +112,7 @@ jobs:
           NODE
           echo "$SID" >/tmp/talksys-general-sid
 
-      - name: Verify explicit budget lookup searches without invented constraints
+      - name: Verify explicit budget lookup is user-only and grounded
         run: |
           set -euo pipefail
           SID="deploy-v42-search-$(date +%s)"
@@ -122,7 +122,7 @@ jobs:
           PLAN="$plan" node <<'NODE'
           const d=JSON.parse(process.env.PLAN||'{}');
           if(!d.ok||d.search!==true||d.planner!=='phone-shopping-local-v42') throw new Error('explicit lookup missed v42 planner');
-          if(/Android 13|SIMフリー|保証付き/.test(d.resolvedQuestion||'')) throw new Error('assistant-invented constraint leaked');
+          if(/Android 13|SIMフリー|保証付き/.test(d.resolvedQuestion||'')) throw new Error('assistant-invented constraint leaked into plan');
           NODE
           turnPayload="$(PLAN="$plan" PAYLOAD="$payload" node -e "const b=JSON.parse(process.env.PAYLOAD);b.searchPlan=JSON.parse(process.env.PLAN);process.stdout.write(JSON.stringify(b))")"
           out="$(curl -fsS --max-time 90 -H 'content-type: application/json' -H "x-talksys-session: $SID" --data "$turnPayload" "$URL/api/turn")"
@@ -131,7 +131,13 @@ jobs:
           const d=JSON.parse(process.env.OUT||'{}');
           if(!d.ok||d.search!==true||d.route!=='resilient-search-v42') throw new Error('v42 resilient search route failed');
           if(Number(d.searchPasses||0)<1||Number(d.searchPasses||0)>5) throw new Error('bad search pass count');
-          if(/申し訳ありません.{0,80}(確認|情報|検索)|具体的な.{0,40}(ご案内|提案).{0,20}できません|自分で.{0,20}(検索|確認)|(?:店舗|通販サイト|商品ページ)で.{0,30}(?:検索|確認)して(?:ください|みて)/.test(d.answer||'')) throw new Error('old search give-up wording returned');
+          if(d.historyPolicy!=='user-only') throw new Error('search did not use user-only history');
+          const qs=(d.queries||[]).join(' | ');
+          if(/Android\s*13(?:\s*(?:以降|以上))?|SIM\s*フリー|保証付き/.test(qs)) throw new Error('assistant-invented constraint leaked into actual queries: '+qs);
+          const a=String(d.answer||'');
+          if(/申し訳ありません.{0,80}(確認|情報|検索)|具体的な.{0,40}(ご案内|提案).{0,20}できません|自分で.{0,20}(検索|確認)/.test(a)) throw new Error('old search give-up wording returned');
+          if(/(?:発売|登場|年式).{0,30}(?:新し|最近).{0,55}(?:Android|OS|有力|おすすめ|安心)|(?:新し|最近).{0,35}(?:ため|ので).{0,45}(?:Android|OS|有力|おすすめ)/.test(a)) throw new Error('release-year OS inference returned: '+a);
+          if(/(?:購入前|商品ページ|通販サイト|販売店|店舗).{0,55}(?:確認して|確認いただ|チェックして|見てください|調べてください)/.test(a)) throw new Error('search verification handed back to user: '+a);
           NODE
           echo "$SID" >/tmp/talksys-search-sid
 
@@ -151,7 +157,7 @@ jobs:
           if(!raw.includes(process.env.EXPECTED)) throw new Error('v42 revision missing from D1');
           NODE
 
-      - name: Verify server TTS remains disabled
+      - name: Verify server TTS remains disabled with 410 contract
         run: |
           set -euo pipefail
           code="$(curl -sS -o /tmp/tts.json -w '%{http_code}' -H 'content-type: application/json' --data '{\"text\":\"日本語テスト\"}' "$URL/api/tts")"
