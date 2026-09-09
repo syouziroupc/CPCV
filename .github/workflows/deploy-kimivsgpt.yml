@@ -50,6 +50,7 @@ jobs:
           npm install
           npm run audit
           npm run type-check
+          npm run test:concurrency
           npm run build-check
 
       - name: Deploy canonical GitHub-linked Worker
@@ -69,7 +70,11 @@ jobs:
           for i in 1 2 3 4 5 6; do
             body="$(curl --fail --silent --show-error https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
-            if printf '%s' "$body" | grep -q '"ok":true' && printf '%s' "$body" | grep -q '"version":"0.5.4"' && printf '%s' "$body" | grep -q '"pkce":"S256"'; then
+            if printf '%s' "$body" | grep -q '"ok":true' \
+              && printf '%s' "$body" | grep -q '"version":"0.5.5"' \
+              && printf '%s' "$body" | grep -q '"pkce":"S256"' \
+              && printf '%s' "$body" | grep -q '"refresh_replay_grace_seconds":30' \
+              && printf '%s' "$body" | grep -q '"batch_review_calls":true'; then
               break
             fi
             if [ "$i" = "6" ]; then exit 1; fi
