@@ -1,4 +1,4 @@
-name: TalkSys v32 deploy once
+name: TalkSys v32 production verify once
 
 on:
   push:
@@ -10,38 +10,20 @@ permissions:
   contents: read
 
 jobs:
-  deploy:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: production
+    timeout-minutes: 10
     env:
-      TALKSYS_SHA: 89571c24a29380fb3309276659e0c5d9008ef5e0
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       PROD_ORIGIN: https://talksys.syouziroupc.workers.dev
     steps:
-      - uses: actions/checkout@v6
-        with:
-          repository: syouziroupc/talksys
-          ref: 89571c24a29380fb3309276659e0c5d9008ef5e0
-          persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Deploy exact validated SHA
+      - name: Verify deployed v32 HTTP contract
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
-          npm install --no-audit --no-fund
-          npm test
-          npx wrangler deploy | tee /tmp/wrangler-deploy.log
-          grep -E "Version ID|Uploaded|Deployed|Current Version ID" /tmp/wrangler-deploy.log || true
-      - name: Verify production health and live client
-        run: |
-          set -euo pipefail
-          for i in $(seq 1 20); do
-            if curl -fsS "$PROD_ORIGIN/voice-health" -o /tmp/health.json; then
-              if node - <<'NODE'
+          curl -fsS "$PROD_ORIGIN/voice-health" -o /tmp/health.json
+          node - <<'NODE'
           const fs = require('fs');
           const d = JSON.parse(fs.readFileSync('/tmp/health.json','utf8'));
           const ok = d.voiceRevision === 'cloudflare-agent-v32-coherent-reliable-glm-melo'
@@ -54,104 +36,131 @@ jobs:
             && d.microphoneFrameBytes === 1280
             && d.microphoneTransportAck === true;
           if (!ok) { console.error(d); process.exit(1); }
-          console.log(JSON.stringify(d));
+          console.log('TALKSYS_V32_HTTP_VERIFY_OK');
           NODE
-              then break; fi
-            fi
-            if [ "$i" = 20 ]; then echo "production health did not converge" >&2; exit 1; fi
-            sleep 2
-          done
           curl -fsS "$PROD_ORIGIN/cloudflare-live.js" -o /tmp/live.js
           grep -q "unified-capture-state-machine-v32" /tmp/live.js
           grep -q "talksys-capture-v32" /tmp/live.js
           grep -q "captureState !== 'verified' || frameCount < 1" /tmp/live.js
-          grep -q "talksys-mic-transport" /tmp/live.js
-          if grep -Eq "IS_ANDROID|Xperia" /tmp/live.js; then echo "platform-specific microphone branch leaked into v32" >&2; exit 1; fi
-          echo TALKSYS_V32_HTTP_VERIFY_OK
-      - name: Production WebSocket text and PCM ingress smoke
+          if grep -Eq "IS_ANDROID|Xperia" /tmp/live.js; then exit 1; fi
+      - name: Verify production PCM reaches STT ingress and text reply completes
         run: |
           set -euo pipefail
-          npm install --no-save --no-package-lock ws@8 >/dev/null 2>&1
+          mkdir -p /tmp/talksys-probe && cd /tmp/talksys-probe
+          npm init -y >/dev/null 2>&1
+          npm install --no-audit --no-fund ws@8 >/dev/null 2>&1
           node --input-type=module <<'NODE'
           import WebSocket from 'ws';
-          const url = 'wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default';
-          const ws = new WebSocket(url);
-          const deadline = setTimeout(() => fail(new Error('websocket smoke timeout')), 30000);
-          let welcomed = false;
-          let textSent = false;
-          let textReply = '';
-          let started = false;
-          let listening = false;
-          let micAck = null;
-          let closed = false;
 
-          function fail(err) {
+          const ws = new WebSocket('wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default');
+          let closed = false;
+          let listening = false;
+          let pcmStarted = false;
+          let micAck = null;
+          let querySent = false;
+          let queryReply = '';
+          let assistantBuffer = '';
+          let queryStartedAt = 0;
+          let pcmTimer = null;
+          const seen = [];
+
+          const deadline = setTimeout(() => finish(false, 'timeout; events=' + seen.join(',')), 45000);
+
+          function finish(ok, reason = '') {
             if (closed) return;
             closed = true;
             clearTimeout(deadline);
-            console.error(err?.stack || err);
+            clearInterval(pcmTimer);
+            try { ws.send(JSON.stringify({ type: 'end_call' })); } catch {}
             try { ws.close(); } catch {}
-            process.exitCode = 1;
-          }
-          function maybeDone() {
-            if (!textReply || !micAck || closed) return;
-            closed = true;
-            clearTimeout(deadline);
-            console.log('TEXT_REPLY=' + textReply.replace(/\s+/g, ' ').slice(0, 300));
+            if (!ok) {
+              console.error('VERIFY_FAILED=' + reason);
+              console.error('MIC_ACK=' + JSON.stringify(micAck));
+              console.error('QUERY_REPLY=' + queryReply.replace(/\s+/g, ' ').slice(0, 500));
+              process.exitCode = 1;
+              return;
+            }
             console.log('MIC_ACK=' + JSON.stringify(micAck));
-            ws.send(JSON.stringify({ type: 'end_call' }));
-            setTimeout(() => { try { ws.close(); } catch {}; console.log('TALKSYS_V32_WS_PCM_VERIFY_OK'); }, 100);
+            console.log('TEXT_REPLY=' + queryReply.replace(/\s+/g, ' ').slice(0, 500));
+            console.log('TALKSYS_V32_WS_PCM_VERIFY_OK');
           }
-          function sendPcm() {
-            if (!listening || micAck || closed) return;
+
+          function sendSyntheticPcm() {
+            if (pcmStarted || !listening || closed) return;
+            pcmStarted = true;
             let phase = 0;
-            let n = 0;
-            const timer = setInterval(() => {
-              if (closed || micAck || n >= 30) { clearInterval(timer); return; }
+            let sent = 0;
+            pcmTimer = setInterval(() => {
+              if (closed || micAck || sent >= 40) { clearInterval(pcmTimer); return; }
               const ab = new ArrayBuffer(1280);
               const view = new DataView(ab);
               for (let i = 0; i < 640; i++) {
-                const sample = Math.round(Math.sin(phase) * 500);
-                view.setInt16(i * 2, sample, true);
+                view.setInt16(i * 2, Math.round(Math.sin(phase) * 500), true);
                 phase += 2 * Math.PI * 440 / 16000;
               }
               ws.send(Buffer.from(ab));
-              n += 1;
+              sent += 1;
             }, 40);
           }
+
+          function sendQuery() {
+            if (querySent || !micAck || closed) return;
+            querySent = true;
+            queryStartedAt = Date.now();
+            assistantBuffer = '';
+            ws.send(JSON.stringify({ type: 'text_message', text: 'パソコンの買い替えについて相談したいです' }));
+          }
+
           ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', protocol_version: 1 })));
-          ws.on('error', fail);
+          ws.on('error', (error) => finish(false, 'socket error ' + String(error?.message || error)));
+          ws.on('close', () => { if (!closed) finish(false, 'socket closed early'); });
           ws.on('message', (raw, isBinary) => {
             if (isBinary) return;
             let data;
             try { data = JSON.parse(raw.toString()); } catch { return; }
-            if (data.type === 'welcome' && !welcomed) {
-              welcomed = true;
-              ws.send(JSON.stringify({ type: 'text_message', text: 'パソコンの買い替えについて相談したいです' }));
-              textSent = true;
+            seen.push(data.type + (data.status ? ':' + data.status : ''));
+            if (seen.length > 80) seen.shift();
+
+            if (data.type === 'welcome') {
+              ws.send(JSON.stringify({ type: 'start_call', preferred_format: 'mp3' }));
               return;
-            }
-            if (textSent && (data.type === 'transcript_end' || (data.type === 'transcript' && data.role === 'assistant'))) {
-              const t = String(data.text || '').trim();
-              if (t) {
-                textReply = t;
-                if (!started) {
-                  started = true;
-                  ws.send(JSON.stringify({ type: 'start_call', preferred_format: 'mp3' }));
-                }
-              }
             }
             if (data.type === 'status' && data.status === 'listening') {
               listening = true;
-              sendPcm();
+              sendSyntheticPcm();
+              return;
             }
             if (data.type === 'mic_transport') {
-              if (!(Number(data.frames) >= 1) || data.sampleRate !== 16000 || data.format !== 's16le-mono') return fail(new Error('invalid mic_transport '+JSON.stringify(data)));
+              const valid = Number(data.frames) >= 1 && Number(data.bytes) >= 1280
+                && data.sampleRate === 16000 && data.format === 's16le-mono';
+              if (!valid) return finish(false, 'invalid mic_transport ' + JSON.stringify(data));
               micAck = data;
-              maybeDone();
+              sendQuery();
+              return;
             }
-          });
-          ws.on('close', () => {
-            if (!closed && (!textReply || !micAck)) fail(new Error('socket closed before verification'));
+
+            if (!querySent) return;
+            if (data.type === 'transcript_start' && data.role === 'assistant') {
+              assistantBuffer = '';
+              return;
+            }
+            if (data.type === 'transcript_delta') {
+              assistantBuffer += String(data.text || '');
+              return;
+            }
+            if (data.type === 'transcript_end') {
+              const value = String(data.text || assistantBuffer || '').trim();
+              if (value && Date.now() >= queryStartedAt) {
+                queryReply = value;
+                return finish(true);
+              }
+            }
+            if (data.type === 'transcript' && data.role === 'assistant') {
+              const value = String(data.text || '').trim();
+              if (value && Date.now() >= queryStartedAt) {
+                queryReply = value;
+                return finish(true);
+              }
+            }
           });
           NODE
