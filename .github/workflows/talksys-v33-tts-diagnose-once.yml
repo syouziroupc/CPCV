@@ -1,0 +1,32 @@
+name: TalkSys v33 TTS diagnose once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v33-tts-diagnose-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe production TTS repeatedly
+        run: |
+          set -u
+          for attempt in 1 2 3 4; do
+            rm -f /tmp/body /tmp/headers
+            code="$(curl -sS --max-time 45 -D /tmp/headers -o /tmp/body -w '%{http_code}' -H 'content-type: application/json' --data '{"text":"日本語の音声テストです。"}' 'https://talksys.syouziroupc.workers.dev/api/tts' || true)"
+            bytes="$(wc -c < /tmp/body 2>/dev/null || echo 0)"
+            echo "=== attempt $attempt code=$code bytes=$bytes ==="
+            cat /tmp/headers || true
+            if [ "$code" = "200" ]; then
+              file /tmp/body || true
+            else
+              cat /tmp/body || true
+            fi
+            sleep 1
+          done
