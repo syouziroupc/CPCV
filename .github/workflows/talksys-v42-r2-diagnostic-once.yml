@@ -1,4 +1,4 @@
-name: TalkSys v42 R2 diagnostic once
+name: TalkSys v42 storage diagnostic once
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-r2:
+  diagnose-storage:
     runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 10
@@ -24,33 +24,24 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --no-audit --no-fund
-      - name: Diagnose Cloudflare R2 REST and Wrangler
+      - name: Probe Cloudflare persistent storage permissions
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set +e
-          echo '=== REST list R2 buckets ==='
-          CODE=$(curl -sS -o /tmp/r2-list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=100")
-          echo "HTTP=$CODE"
-          cat /tmp/r2-list.json
+          echo '=== R2 ==='
+          npx wrangler r2 bucket list > /tmp/r2.txt 2>&1; R2=$?
+          echo "R2_RC=$R2"; cat /tmp/r2.txt
           echo
-
-          echo '=== Wrangler list R2 buckets ==='
-          npx wrangler r2 bucket list > /tmp/wrangler-r2.txt 2>&1
-          WRC=$?
-          echo "WRANGLER_RC=$WRC"
-          cat /tmp/wrangler-r2.txt
+          echo '=== KV ==='
+          npx wrangler kv namespace list > /tmp/kv.txt 2>&1; KV=$?
+          echo "KV_RC=$KV"; cat /tmp/kv.txt
           echo
-
-          echo '=== Token verify ==='
-          VCODE=$(curl -sS -o /tmp/token-verify.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/user/tokens/verify")
-          echo "TOKEN_HTTP=$VCODE"
-          cat /tmp/token-verify.json
+          echo '=== D1 ==='
+          npx wrangler d1 list > /tmp/d1.txt 2>&1; D1=$?
+          echo "D1_RC=$D1"; cat /tmp/d1.txt
           echo
-
-          echo '=== Diagnostic summary ==='
-          echo "REST_R2_HTTP=$CODE WRANGLER_R2_RC=$WRC TOKEN_VERIFY_HTTP=$VCODE"
-          if [ "$CODE" = "200" ]; then exit 0; fi
-          exit 2
+          echo "STORAGE_SUMMARY R2=$R2 KV=$KV D1=$D1"
+          exit 0
