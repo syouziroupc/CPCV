@@ -60,17 +60,7 @@ jobs:
           body=""
           for attempt in $(seq 1 20); do
             body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
-            ok="$(BODY="$body" node - <<'NODE'
-          let d={}; try { d=JSON.parse(process.env.BODY||'{}') } catch {}
-          process.stdout.write(String(
-            d.voiceRevision==='talksys-v44-default-exhaustive-search' &&
-            d.searchRevision==='deep-search-v44-question-first-evidence-loop' &&
-            d.searchQuestionFirstPlanning===true &&
-            d.searchGapDrivenFollowups===true &&
-            d.searchResearchStateMachine===true
-          ));
-          NODE
-          )"
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision==='talksys-v44-default-exhaustive-search'&&d.searchRevision==='deep-search-v44-question-first-evidence-loop'&&d.searchQuestionFirstPlanning===true&&d.searchGapDrivenFollowups===true&&d.searchResearchStateMachine===true))")"
             [ "$ok" = "true" ] && break
             [ "$attempt" -eq 20 ] && { echo "$body"; exit 1; }
             sleep 3
@@ -84,19 +74,7 @@ jobs:
           set -euo pipefail
           plan='{"text":"3万円以下の中古ノートPCを動画視聴用に選ぶなら何を確認して探すべき？","history":[]}'
           p="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data "$plan" "$URL/api/plan")"
-          P="$p" node - <<'NODE'
-          const d=JSON.parse(process.env.P||'{}');
-          if(!d.ok || d.search!==true || d.planner!=='deep-search-v44') throw new Error(JSON.stringify(d));
-          NODE
-
+          P="$p" node -e "const d=JSON.parse(process.env.P||'{}');if(!d.ok||d.search!==true||d.planner!=='deep-search-v44')throw new Error(JSON.stringify(d));"
           turn='{"text":"3万円以下の中古ノートPCを動画視聴用に選ぶなら何を確認して探すべき？","history":[],"searchPlan":{"planner":"deep-search-v44"}}'
           t="$(curl -fsS --max-time 55 -H 'content-type: application/json' --data "$turn" "$URL/api/turn")"
-          T="$t" node - <<'NODE'
-          const d=JSON.parse(process.env.T||'{}');
-          if(!d.ok || d.route!=='deep-search-v44') throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error}));
-          const x=d.searchDiagnostics||{};
-          if(x.searchRevision!=='deep-search-v44-question-first-evidence-loop') throw new Error(JSON.stringify(x));
-          if(x.questionFirstPlanning!==true || x.gapDrivenFollowups!==true) throw new Error(JSON.stringify(x));
-          if(!(Number(x.researchFacetCount)>=1)) throw new Error(JSON.stringify(x));
-          console.log(JSON.stringify({route:d.route,queries:d.queries,coverage:d.searchCoverage,diagnostics:x,sources:(d.sources||[]).slice(0,5).map(s=>({title:s.title,url:s.url}))}));
-          NODE
+          T="$t" node -e "const d=JSON.parse(process.env.T||'{}');const x=d.searchDiagnostics||{};if(!d.ok||d.route!=='deep-search-v44'||x.searchRevision!=='deep-search-v44-question-first-evidence-loop'||x.questionFirstPlanning!==true||x.gapDrivenFollowups!==true||!(Number(x.researchFacetCount)>=1))throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error,diagnostics:x}));console.log(JSON.stringify({route:d.route,queries:d.queries,coverage:d.searchCoverage,diagnostics:x,sources:(d.sources||[]).slice(0,5).map(s=>({title:s.title,url:s.url}))}));"
