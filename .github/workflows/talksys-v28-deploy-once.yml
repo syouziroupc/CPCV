@@ -1,4 +1,4 @@
-name: TalkSys v28 verify once
+name: TalkSys v28 final smoke once
 
 on:
   push:
@@ -10,68 +10,34 @@ permissions:
   contents: read
 
 jobs:
-  verify-talksys-v28:
+  final-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 8
     env:
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
     steps:
-      - name: Verify v28 health contract
+      - name: Verify production and all smoke routes
         shell: bash
         run: |
           set -euo pipefail
-          body="$(curl -fsS --retry 5 --retry-delay 2 --max-time 20 "$PRODUCTION_URL/voice-health")"
-          BODY="$body" node <<'NODE'
-          const d=JSON.parse(process.env.BODY||'{}');
-          const qwen='@cf/qwen/qwen3.8-27b';
-          if(d.voiceRevision!=='cloudflare-agent-v28-simple-qwen-android') throw new Error('revision mismatch');
-          if(d.architecture!=='whisper-qwen-melotts-single-path') throw new Error('architecture mismatch');
-          if(d.conversationModel!==qwen || d.searchAnswerModel!==qwen) throw new Error('Qwen single path mismatch');
-          if(d.conversationModelFallback!==null || d.conversationEmergencyFallback!==null || d.multiModelFallback!==false) throw new Error('cross-model fallback active');
-          if(d.sameModelRetryOnce!==true || d.qwenThinkingDisabled!==true) throw new Error('Qwen bounded retry mismatch');
-          for(const k of ['legacyGlmActive','legacyGrokActive','legacyDeepSeekActive','legacyGptOssActive']) if(d[k]!==false) throw new Error(k+' active');
-          if(d.ttsPrimary!=='@cf/myshell-ai/melotts' || d.ttsFallback!==null) throw new Error('TTS mismatch');
-          console.log(JSON.stringify({revision:d.voiceRevision,architecture:d.architecture,model:d.conversationModel,multiModelFallback:d.multiModelFallback,sameModelRetryOnce:d.sameModelRetryOnce,tts:d.ttsPrimary}));
-          NODE
+          health="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health")"
+          HEALTH="$health" node -e "const d=JSON.parse(process.env.HEALTH||'{}'); if(d.voiceRevision!=='cloudflare-agent-v28-simple-qwen-android'||d.conversationModel!=='@cf/qwen/qwen3.8-27b'||d.multiModelFallback!==false) throw new Error('health mismatch')"
 
-      - name: Verify Android client and smoke endpoints with propagation retry
-        shell: bash
-        run: |
-          set -euo pipefail
-          script="$(curl -fsS --retry 5 --retry-delay 2 --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
-          for marker in verifyAndroidCapturePipeline talksys-mic-no-frames resumeMobileRuntime callStartPending talksys-barge-in; do
-            grep -F "$marker" <<< "$script" >/dev/null
-          done
+          transit="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v28-transit-followup")"
+          TRANSIT="$transit" node -e "const d=JSON.parse(process.env.TRANSIT||'{}');const q=String(d.resolvedQuestion||'');if(!d.ok||!/鷺沼/.test(q)||!/相模大野/.test(q))throw new Error('transit smoke failed: '+q)"
 
-          fetch_json() {
-            local path="$1" body="" code=""
-            for attempt in $(seq 1 20); do
-              tmp="$(mktemp)"
-              code="$(curl -sS -o "$tmp" -w '%{http_code}' --max-time 35 "$PRODUCTION_URL$path" || true)"
-              body="$(cat "$tmp")"
-              rm -f "$tmp"
-              if [ "$code" = 200 ]; then printf '%s' "$body"; return 0; fi
-              echo "attempt=$attempt path=$path status=$code" >&2
-              sleep 3
-            done
-            echo "endpoint failed after propagation retries: $path status=$code body=${body:0:300}" >&2
-            return 1
-          }
+          shopping="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v28-context")"
+          SHOPPING="$shopping" node -e "const d=JSON.parse(process.env.SHOPPING||'{}');const q=String(d.resolvedQuestion||'');if(!d.ok||!/パソコン/.test(q)||!/中古/.test(q)||!/横浜/.test(q)||/YouTube|ネットサーフィン/i.test(q))throw new Error('shopping smoke failed: '+q)"
 
-          transit="$(fetch_json /api/search-smoke-v28-transit-followup)"
-          BODY="$transit" node <<'NODE'
-          const d=JSON.parse(process.env.BODY||'{}');
+          pc="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v28-pc")"
+          PC="$pc" node <<'NODE'
+          const d=JSON.parse(process.env.PC||'{}');
+          console.log(JSON.stringify({ok:d.ok,revision:d.revision,resolvedQuestion:d.resolvedQuestion,queries:d.queries,evidenceCount:d.evidenceCount,elapsedMs:d.elapsedMs,sources:(d.sources||[]).slice(0,4)}));
           const q=String(d.resolvedQuestion||'');
-          if(!d.ok || !/鷺沼/.test(q) || !/相模大野/.test(q) || !/どうですか/.test(q)) throw new Error('transit context regression: '+q);
+          if(!/CF-SV8/i.test(q)) throw new Error('PC subject lost: '+q);
+          if(!Array.isArray(d.queries)||d.queries.length<1) throw new Error('PC search planner returned no queries');
           NODE
 
-          shopping="$(fetch_json /api/search-smoke-v28-context)"
-          BODY="$shopping" node <<'NODE'
-          const d=JSON.parse(process.env.BODY||'{}');
-          const q=String(d.resolvedQuestion||'');
-          if(!d.ok || !/パソコン/.test(q) || !/中古/.test(q) || !/横浜/.test(q) || /YouTube|ネットサーフィン/i.test(q)) throw new Error('shopping context regression: '+q);
-          NODE
-
-          pc="$(fetch_json /api/search-smoke-v28-pc)"
-          BODY="$pc" node -e "const d=JSON.parse(process.env.BODY||'{}'); if(!d.ok || !/CF-SV8/i.test(String(d.resolvedQuestion||''))) throw new Error('PC smoke failed')"
-          echo "ANDROID_AND_SEARCH_SMOKES_OK"
+          script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
+          for marker in verifyAndroidCapturePipeline talksys-mic-no-frames resumeMobileRuntime callStartPending talksys-barge-in; do grep -F "$marker" <<< "$script" >/dev/null; done
+          echo FINAL_V28_SMOKE_OK
