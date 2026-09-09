@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy TalkSys question-first search
+    name: Deploy TalkSys sequential evidence search
     if: contains(github.event.head_commit.message, '[deploy-talksys]')
     runs-on: ubuntu-24.04
     timeout-minutes: 25
@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: ee1958b3fbd4de40090607e9ac24496b1b1fa8a8
+          ref: 60b05838e3dae9d4076e95dda819267d8757c7aa
           path: talksys
 
       - name: Setup Node.js
@@ -35,9 +35,13 @@ jobs:
         working-directory: talksys
         run: |
           npm install --no-audit --no-fund
+          node --check src/query-result-gate-v44.js
+          node --check src/research-sequence-v44.js
           node --check src/research-plan-v44.js
+          node --check src/search-probes-v44.js
           node --check src/search-v44.js
           node --check src/worker-v44.js
+          node --test tests/v44-search-sequencing.test.mjs
           node --test tests/v44-query-quality.test.mjs
           node --test tests/v44-deep-search-default.test.mjs
           npx wrangler deploy --dry-run
@@ -57,7 +61,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
 
-      - name: Verify production question-first architecture
+      - name: Verify production sequential architecture
         env:
           URL: https://talksys.syouziroupc.workers.dev
         run: |
@@ -65,18 +69,19 @@ jobs:
           body=""
           for attempt in $(seq 1 20); do
             body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
-            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision==='talksys-v44-default-exhaustive-search'&&d.searchRevision==='deep-search-v44-question-first-evidence-loop'&&d.searchQuestionFirstPlanning===true&&d.searchGapDrivenFollowups===true&&d.searchResearchStateMachine===true))")"
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision==='talksys-v44-default-exhaustive-search'&&d.searchRevision==='deep-search-v44-sequential-evidence-search'&&d.searchQuestionFirstPlanning===true&&d.searchGapDrivenFollowups===true&&d.searchResearchStateMachine===true&&d.searchSequentialDiscovery===true&&d.searchQueryResultGate===true&&d.searchAuthorityAfterRelevance===true))")"
             [ "$ok" = "true" ] && break
             [ "$attempt" -eq 20 ] && { echo "$body"; exit 1; }
             sleep 3
           done
           echo "$body"
 
-      - name: Smoke test real adaptive research turn
+      - name: Smoke test real sequential research turn
         env:
           URL: https://talksys.syouziroupc.workers.dev
         run: |
           set -euo pipefail
           turn='{"text":"3万円以下の中古ノートPCを動画視聴用に選ぶなら何を確認して探すべき？","history":[],"searchPlan":{"planner":"deep-search-v44"}}'
-          out="$(curl -fsS --max-time 55 -H 'content-type: application/json' --data "$turn" "$URL/api/turn")"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const x=d.searchDiagnostics||{};if(!d.ok||d.route!=='deep-search-v44'||x.searchRevision!=='deep-search-v44-question-first-evidence-loop'||x.questionFirstPlanning!==true||x.gapDrivenFollowups!==true||!(Number(x.researchFacetCount)>=1))throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error,diagnostics:x}));console.log(JSON.stringify({route:d.route,queries:d.queries,coverage:d.searchCoverage,diagnostics:x,sources:(d.sources||[]).slice(0,5).map(s=>({title:s.title,url:s.url}))}));"
+          out="$(curl -fsS --max-time 75 -H 'content-type: application/json' --data "$turn" "$URL/api/turn")"
+          echo "$out"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const x=d.searchDiagnostics||{};const src=d.sources||[];const bad=src.filter(s=>/results\.vote\.wa\.gov|accounts\.google\.com|youtube\.com\/.*(?:login|signin)|microsoft\.com\/.*(?:login|signin)/i.test(String(s.url||'')));if(!d.ok||d.route!=='deep-search-v44'||x.searchRevision!=='deep-search-v44-sequential-evidence-search'||x.questionFirstPlanning!==true||x.gapDrivenFollowups!==true||x.sequentialDiscovery!==true||x.queryResultGate!==true||x.authorityAfterRelevance!==true||!(Number(x.researchFacetCount)>=1)||bad.length)throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error,diagnostics:x,badSources:bad,queries:d.queries,sources:src.slice(0,8)}));console.log(JSON.stringify({route:d.route,queries:d.queries,coverage:d.searchCoverage,diagnostics:x,candidateCount:x.candidateCount,candidateNames:x.candidateNames,sources:src.slice(0,8).map(s=>({title:s.title,url:s.url}))}));"
