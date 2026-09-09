@@ -47,45 +47,89 @@ jobs:
           node --check src/search-v26.js
           npm test
           npx wrangler deploy --dry-run
-      - name: Probe Grok Japanese TTS through Cloudflare Workers AI
+      - name: Probe Grok Japanese TTS through an ephemeral Worker AI binding
         run: |
           set -euo pipefail
-          http_code="$(curl -sS --max-time 25 -o /tmp/grok-tts.json -w '%{http_code}' \
-            -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H 'Content-Type: application/json' \
-            --data-binary '{"model":"xai/grok-tts","input":{"text":"TalkSysの日本語音声テストです。","language":"ja","voice_id":"ara","text_normalization":true,"output_format":{"codec":"mp3","sample_rate":24000,"bit_rate":64000}}}')"
-          if [ "$http_code" != "200" ]; then
-            echo "Grok TTS HTTP status: $http_code"
-            node -e "const fs=require('fs');let b={};try{b=JSON.parse(fs.readFileSync('/tmp/grok-tts.json','utf8'))}catch{};console.log(JSON.stringify({success:b.success,state:b.state,errors:b.errors||b.error||null}))"
-            exit 1
-          fi
+          PROBE_DIR="$(mktemp -d)"
+          PROBE_WORKER="talksys-grok-probe-${GITHUB_RUN_ID}"
+          PROBE_TOKEN="$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('hex'))")"
+          export PROBE_DIR PROBE_WORKER PROBE_TOKEN
+
+          cleanup() {
+            npx wrangler delete --config "$PROBE_DIR/wrangler.jsonc" --force >/tmp/grok-probe-delete.log 2>&1 || true
+            rm -rf "$PROBE_DIR"
+          }
+          trap cleanup EXIT
+
           node <<'NODE'
           const fs = require('fs');
-          const body = JSON.parse(fs.readFileSync('/tmp/grok-tts.json', 'utf8'));
-          if (body.success === false) throw new Error('Cloudflare Grok TTS API returned success=false');
-          const root = body.result ?? body;
-          const audio = root?.audio ?? root?.result?.audio ?? root?.response?.audio ?? root?.output?.audio ?? root?.data?.audio;
-          if (typeof audio !== 'string' || audio.length < 8) throw new Error('Grok TTS returned no audio reference');
-          const kind = /^https:\/\//i.test(audio) ? 'url' : 'base64';
-          fs.writeFileSync('/tmp/grok-audio-ref.txt', audio, { mode: 0o600 });
-          fs.writeFileSync('/tmp/grok-audio-kind.txt', kind);
-          console.log(`Grok TTS runtime probe returned ${kind} audio.`);
+          const path = require('path');
+          const dir = process.env.PROBE_DIR;
+          fs.writeFileSync(path.join(dir, 'wrangler.jsonc'), JSON.stringify({
+            name: process.env.PROBE_WORKER,
+            main: './worker.mjs',
+            compatibility_date: '2026-08-30',
+            workers_dev: true,
+            ai: { binding: 'AI' },
+            vars: { PROBE_TOKEN: process.env.PROBE_TOKEN },
+          }, null, 2));
+          fs.writeFileSync(path.join(dir, 'worker.mjs'), `
+          function decodeBase64(value) {
+            const raw = String(value || '').replace(/^data:audio\\/[^;]+;base64,/i, '');
+            if (!raw) return 0;
+            try { return Uint8Array.from(atob(raw), c => c.charCodeAt(0)).byteLength; } catch { return 0; }
+          }
+          export default {
+            async fetch(request, env) {
+              if (request.headers.get('authorization') !== 'Bearer ' + env.PROBE_TOKEN) return new Response('not found', { status: 404 });
+              try {
+                const result = await env.AI.run('xai/grok-tts', {
+                  text: 'TalkSysの日本語音声テストです。',
+                  language: 'ja',
+                  voice_id: 'ara',
+                  text_normalization: true,
+                  output_format: { codec: 'mp3', sample_rate: 24000, bit_rate: 64000 },
+                });
+                const root = result?.result ?? result;
+                const audio = root?.audio ?? root?.result?.audio ?? root?.response?.audio ?? root?.output?.audio ?? root?.data?.audio;
+                let bytes = 0;
+                let kind = '';
+                if (typeof audio === 'string' && /^https:\\/\\//i.test(audio)) {
+                  kind = 'url';
+                  const response = await fetch(audio);
+                  if (!response.ok) throw new Error('generated audio URL returned ' + response.status);
+                  bytes = (await response.arrayBuffer()).byteLength;
+                } else if (typeof audio === 'string') {
+                  kind = 'base64';
+                  bytes = decodeBase64(audio);
+                }
+                const ok = bytes > 500;
+                return Response.json({
+                  ok,
+                  bytes,
+                  kind,
+                  state: result?.state || root?.state || '',
+                  keySource: result?.gatewayMetadata?.keySource || root?.gatewayMetadata?.keySource || '',
+                }, { status: ok ? 200 : 502 });
+              } catch (error) {
+                return Response.json({ ok: false, error: String(error?.message || error).slice(0, 300) }, { status: 500 });
+              }
+            },
+          };
+          `);
           NODE
-          kind="$(cat /tmp/grok-audio-kind.txt)"
-          if [ "$kind" = "url" ]; then
-            url="$(cat /tmp/grok-audio-ref.txt)"
-            curl -fsS --max-time 25 "$url" -o /tmp/grok-test.mp3
-          else
-            AUDIO="$(cat /tmp/grok-audio-ref.txt)" node <<'NODE'
-            const fs = require('fs');
-            const raw = String(process.env.AUDIO || '').replace(/^data:audio\/[^;]+;base64,/i, '');
-            fs.writeFileSync('/tmp/grok-test.mp3', Buffer.from(raw, 'base64'));
-            NODE
-          fi
-          bytes="$(wc -c < /tmp/grok-test.mp3)"
-          test "$bytes" -gt 500
-          echo "Grok TTS runtime probe passed: non-empty MP3 (${bytes} bytes)."
+
+          npx wrangler deploy --config "$PROBE_DIR/wrangler.jsonc" 2>&1 | tee /tmp/grok-probe-deploy.log
+          PROBE_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/grok-probe-deploy.log | tail -1)"
+          test -n "$PROBE_URL"
+          body="$(curl -fsS --max-time 30 -H "Authorization: Bearer $PROBE_TOKEN" "$PROBE_URL")"
+          echo "$body"
+          BODY="$body" node <<'NODE'
+          const d = JSON.parse(process.env.BODY || '{}');
+          if (!d.ok) throw new Error(`Grok TTS binding probe failed: ${d.error || 'no playable audio'}`);
+          if (!(Number(d.bytes) > 500)) throw new Error(`Grok TTS audio too small: ${d.bytes}`);
+          console.log(`Grok TTS runtime probe passed: ${d.bytes} audio bytes via ${d.kind || 'unknown'}; keySource=${d.keySource || 'unknown'}`);
+          NODE
       - name: Deploy TalkSys v26 to Cloudflare production
         run: |
           set -o pipefail
