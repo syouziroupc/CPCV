@@ -20,7 +20,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: c7bbaea422f878432b00ce229840c0d16a93335d
+          ref: e316133057c87d094aadeb7107a0bb6beb186b41
 
       - uses: actions/setup-node@v5
         with:
@@ -119,8 +119,13 @@ jobs:
           console.log('PHONE_SEARCH',JSON.stringify(phone,null,2));
           if(phone.route!=='resilient-search-v41'||phone.search!==true)throw new Error('resilient phone search route not used');
           if(!Array.isArray(phone.sources)||phone.sources.length<1)throw new Error('resilient phone search found no evidence');
-          if(!Array.isArray(phone.queries)||!phone.queries.some(q=>/iosys\.co\.jp|janpara\.co\.jp|geo-online\.co\.jp/i.test(q)))throw new Error('trusted phone search queries were not attempted');
-          if(phone.queries.some(q=>/(所要時間|運賃|時刻表|停車駅|直通 路線)/.test(q)))throw new Error('smartphone replacement was polluted by railway transit search');
+          const queriedTrusted=Array.isArray(phone.queries)&&phone.queries.some(q=>/iosys\.co\.jp|janpara\.co\.jp|geo-online\.co\.jp/i.test(q));
+          if(!(Number(phone.trustedDirectEvidence)>=1||queriedTrusted))throw new Error('trusted seller evidence path was not used');
+          if(phone.concreteShoppingEvidence!==true)throw new Error('shopping search ended without concrete evidence');
+          if(Number(phone.androidRequirement)<12||phone.androidRequirementEvidence!==true)throw new Error('old-Android replacement ended without Android requirement evidence');
+          if(Array.isArray(phone.queries)&&phone.queries.some(q=>/(所要時間|運賃|時刻表|停車駅|直通 路線)/.test(q)))throw new Error('smartphone replacement was polluted by railway transit search');
+          if(!/Android/i.test(phone.answer))throw new Error('answer ignored the Android-version reason for replacement');
+          if(/新しいので.{0,20}おすすめ/.test(phone.answer)&&!/Android/i.test(phone.answer))throw new Error('answer recommended only by device age without OS evidence');
           if(/今回スマホの中古在庫や実売価格を確認できる情報が得られず|具体的な機種名や価格のご案内はできませんでした|通販サイトで.*検索して/i.test(phone.answer))throw new Error('old give-up boilerplate returned');
 
           const tts=await fetch(base+'/api/tts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'こんにちは'})});
