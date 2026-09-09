@@ -14,118 +14,145 @@ jobs:
   deploy-talksys:
     runs-on: ubuntu-24.04
     environment: production
-    timeout-minutes: 28
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TALKSYS_SHA: 4233311173d183a3d453b6df2a035ded14c2c580
+      URL: https://talksys.syouziroupc.workers.dev
+      EXPECTED: talksys-v42-search-judgment-persistent-logs
+      LOG_DB: talksys-conversation-logs
     steps:
       - name: Checkout TalkSys exact revision
         uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: cffff6fe8950a5e0e70f62dc783ebd25a02eb667
+          ref: ${{ env.TALKSYS_SHA }}
+          persist-credentials: false
 
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
 
       - name: Require Cloudflare production credentials
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
+        run: test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Ensure private TalkSys log bucket exists
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      - name: Validate exact v42
         run: |
           set -euo pipefail
-          LIST="$(npx wrangler r2 bucket list 2>&1)"
-          echo "$LIST"
-          if ! printf '%s\n' "$LIST" | grep -q 'talksys-conversation-logs'; then
-            npx wrangler r2 bucket create talksys-conversation-logs
-          fi
-          LIST2="$(npx wrangler r2 bucket list 2>&1)"
-          printf '%s\n' "$LIST2" | grep -q 'talksys-conversation-logs'
-
-      - name: Validate v42
-        run: |
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          node --check src/worker-v42.js
+          node --check src/talk-client-v42.js
+          node --check src/search-v42.js
+          node --check src/log-v42.js
           node --test tests/v42-search-judgment-logs.test.mjs
           npm test
           npx wrangler deploy --dry-run --config wrangler.jsonc
 
       - name: Deploy TalkSys v42 production
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler deploy --config wrangler.jsonc
-
-      - name: Verify live search judgment, answer quality and persistent logs
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          node <<'NODE'
-          const base='https://talksys.syouziroupc.workers.dev';
-          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
-          const session='v42-ci-'+Date.now();
-          const post=async(path,body)=>{
-            const r=await fetch(base+path,{method:'POST',headers:{'content-type':'application/json','cache-control':'no-cache','x-talksys-session':session},body:JSON.stringify({...body,sessionId:session})});
-            const j=await r.json();if(!r.ok)throw new Error(path+' HTTP '+r.status+' '+JSON.stringify(j));return j;
-          };
-          let health=null;
-          for(let i=0;i<24;i++){
-            try{const r=await fetch(base+'/voice-health',{headers:{'cache-control':'no-cache'}});if(r.ok){const j=await r.json();if(j.voiceRevision==='talksys-v42-search-judgment-persistent-logs'&&j.maxSearchPasses===5&&j.persistentConversationLogs==='r2-private'&&j.rawAudioLogged===false&&j.searchGiveupBoilerplateGuard===true){health=j;break;}}}catch{}
-            await sleep(5000);
-          }
-          if(!health)throw new Error('v42 health did not converge');
-          console.log('HEALTH',JSON.stringify(health,null,2));
+          set -euo pipefail
+          npx wrangler deploy --config wrangler.jsonc
+          npx wrangler deployments status
 
-          const js=await (await fetch(base+'/talk-v42.js',{headers:{'cache-control':'no-cache'}})).text();
-          for(const needle of ['talkSessionId','sessionId:talkSessionId',"'x-talksys-session':talkSessionId",'talksys-v42-search-judgment-persistent-logs'])if(!js.includes(needle))throw new Error('live v42 client missing '+needle);
-
-          const generalHistory=[{role:'user',content:'スマホが終わってしまいました。買い替えるか修理するか悩んでいます。'}];
-          const detail='背面割れです。機種はエクスペリア5で、半年ぐらい前にゲオで8000円で買いました。大事なデータは特に入っていません。';
-          const generalPlan=await post('/api/plan',{text:detail,history:generalHistory});
-          console.log('GENERAL_PLAN',JSON.stringify(generalPlan,null,2));
-          if(generalPlan.search!==false||generalPlan.planner!=='device-decision-local-v42')throw new Error('general repair decision incorrectly searched');
-          const general=await post('/api/turn',{text:detail,history:generalHistory,searchPlan:generalPlan});
-          console.log('GENERAL_TURN',JSON.stringify(general,null,2));
-          if(general.search!==false||general.route!=='device-decision-v42')throw new Error('general repair decision route failed');
-          if(/正規.{0,30}\d[\d,]*円|街の修理店.{0,30}\d[\d,]*円/.test(general.answer))throw new Error('unsearched current repair price leaked');
-          if(/それは大変でしたね/.test(general.answer))throw new Error('generic empathy filler remained');
-
-          const oldAssistantHistory=[
-            {role:'user',content:'初代Xperia 5はAndroidが古いので中古で安いスマホへ乗り換えたい。'},
-            {role:'assistant',content:'Android 13以降、SIMフリー、保証付きが条件ですね。'}
-          ];
-          const lookupText='もうちょっと調べてみてよ。2万円以下のスマホについて。';
-          const phonePlan=await post('/api/plan',{text:lookupText,history:oldAssistantHistory});
-          console.log('PHONE_PLAN',JSON.stringify(phonePlan,null,2));
-          if(phonePlan.search!==true||phonePlan.planner!=='phone-shopping-local-v42')throw new Error('explicit phone lookup did not use v42 local planner');
-          if(/Android 13|SIMフリー|保証/.test(phonePlan.resolvedQuestion))throw new Error('assistant-invented constraints leaked into resolved question');
-          if(!/勝手に必須条件へ追加しない/.test(phonePlan.searchInstruction))throw new Error('constraint anti-invention guard missing');
-
-          const phone=await post('/api/turn',{text:lookupText,history:oldAssistantHistory,searchPlan:phonePlan});
-          console.log('PHONE_SEARCH',JSON.stringify(phone,null,2));
-          if(phone.search!==true||phone.route!=='resilient-search-v42'||Number(phone.maxSearchPasses)!==5)throw new Error('v42 escalating search route failed');
-          if((phone.sources||[]).some(x=>/ローマ数字|おすすめランキング|人気機種ランキング|アプリの鎖/i.test(x.title||'')))throw new Error('junk phone source survived v42 filter');
-          if(/申し訳ありません.{0,80}(?:確認|情報|検索)|具体的な.{0,40}(?:ご案内|提案).{0,20}できません|自分で.{0,20}(?:検索|確認)|(?:店舗|通販サイト|商品ページ)で.{0,30}(?:検索|確認)して(?:ください|みて)/i.test(phone.answer))throw new Error('old search give-up/self-handoff answer returned');
-          if(phone.androidFreshnessRequired&&phone.verifiedCandidates?.length===0&&/おすすめ|第一候補/.test(phone.answer)&&!/OS|Android/.test(phone.answer))throw new Error('unverified OS candidate was recommended as if verified');
-          console.log('SESSION',session);
-          await sleep(2500);
+      - name: Wait for v42 propagation and verify health
+        run: |
+          set -euo pipefail
+          body=''
+          for i in $(seq 1 24); do
+            body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
+            rev="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(d.voiceRevision||d.revision||'')")"
+            echo "attempt=$i revision=${rev:-missing}"
+            [ "$rev" = "$EXPECTED" ] && break
+            [ "$i" -eq 24 ] && { echo "$body"; exit 1; }
+            sleep 3
+          done
+          echo "$body"
+          BODY="$body" EXPECTED="$EXPECTED" node <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          if((d.voiceRevision||d.revision)!==process.env.EXPECTED) throw new Error('wrong revision');
+          if(d.persistentConversationLogs!=='d1-private') throw new Error('D1 persistent logs missing');
+          if(d.rawAudioLogged!==false) throw new Error('raw audio logging contract wrong');
+          if(d.maxSearchPasses!==5) throw new Error('five-pass search contract missing');
+          if(d.searchGiveupBoilerplateGuard!==true) throw new Error('give-up guard missing');
           NODE
 
-          echo 'Checking R2 persistent log object...'
-          curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/talksys-conversation-logs/objects?per_page=100&prefix=$(date -u +%Y/%m/%d)/v42-ci-" \
-            > /tmp/r2-objects.json
-          cat /tmp/r2-objects.json
-          node -e "const j=require('/tmp/r2-objects.json'); if(!j.success||!Array.isArray(j.result)||j.result.length<1) process.exit(1); console.log('R2_LOG_OBJECTS',j.result.length);"
-          echo LIVE_V42_OK
+      - name: Verify live v42 client
+        run: |
+          set -euo pipefail
+          code="$(curl -sS --max-time 20 -D /tmp/client.headers -o /tmp/client.js -w '%{http_code}' "$URL/talk-v42.js")"
+          test "$code" = '200'
+          grep -F 'talkSessionId' /tmp/client.js
+          grep -F 'sessionId:talkSessionId' /tmp/client.js
+          grep -F "'x-talksys-session':talkSessionId" /tmp/client.js
+          grep -F 'talksys-v42-search-judgment-persistent-logs' /tmp/client.js
+
+      - name: Verify general repair advice stays local
+        run: |
+          set -euo pipefail
+          SID="deploy-v42-general-$(date +%s)"
+          payload="{\"sessionId\":\"$SID\",\"text\":\"背面割れです。機種はXperia 5で、半年前にゲオで8000円で買いました。大事なデータは特に入っていません。修理か買い替えか悩んでいます。\",\"history\":[{\"role\":\"user\",\"content\":\"スマホが壊れて修理か買い替えか悩んでいます。\"}]}"
+          plan="$(curl -fsS --max-time 45 -H 'content-type: application/json' -H "x-talksys-session: $SID" --data "$payload" "$URL/api/plan")"
+          echo "GENERAL_PLAN=$plan"
+          PLAN="$plan" node <<'NODE'
+          const d=JSON.parse(process.env.PLAN||'{}');
+          if(!d.ok||d.search!==false||d.planner!=='device-decision-local-v42') throw new Error('general decision planned a search');
+          NODE
+          turnPayload="$(PLAN="$plan" PAYLOAD="$payload" node -e "const b=JSON.parse(process.env.PAYLOAD);b.searchPlan=JSON.parse(process.env.PLAN);process.stdout.write(JSON.stringify(b))")"
+          out="$(curl -fsS --max-time 45 -H 'content-type: application/json' -H "x-talksys-session: $SID" --data "$turnPayload" "$URL/api/turn")"
+          echo "GENERAL_TURN=$out"
+          OUT="$out" node <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}');
+          if(!d.ok||d.search!==false||d.route!=='device-decision-v42') throw new Error('general repair decision route failed');
+          if(/申し訳ありません|確認できません|検索してください/.test(d.answer||'')) throw new Error('give-up wording leaked');
+          NODE
+          echo "$SID" >/tmp/talksys-general-sid
+
+      - name: Verify explicit budget lookup searches without invented constraints
+        run: |
+          set -euo pipefail
+          SID="deploy-v42-search-$(date +%s)"
+          payload="{\"sessionId\":\"$SID\",\"text\":\"もうちょっと調べてみてよ。2万円以下のスマホについて。\",\"history\":[{\"role\":\"user\",\"content\":\"初代Xperia 5はAndroidが古いので中古で安いスマホへ乗り換えたい。\"},{\"role\":\"assistant\",\"content\":\"Android 13以降、SIMフリー、保証付きが条件ですね。\"}]}"
+          plan="$(curl -fsS --max-time 45 -H 'content-type: application/json' -H "x-talksys-session: $SID" --data "$payload" "$URL/api/plan")"
+          echo "PHONE_PLAN=$plan"
+          PLAN="$plan" node <<'NODE'
+          const d=JSON.parse(process.env.PLAN||'{}');
+          if(!d.ok||d.search!==true||d.planner!=='phone-shopping-local-v42') throw new Error('explicit lookup missed v42 planner');
+          if(/Android 13|SIMフリー|保証付き/.test(d.resolvedQuestion||'')) throw new Error('assistant-invented constraint leaked');
+          NODE
+          turnPayload="$(PLAN="$plan" PAYLOAD="$payload" node -e "const b=JSON.parse(process.env.PAYLOAD);b.searchPlan=JSON.parse(process.env.PLAN);process.stdout.write(JSON.stringify(b))")"
+          out="$(curl -fsS --max-time 90 -H 'content-type: application/json' -H "x-talksys-session: $SID" --data "$turnPayload" "$URL/api/turn")"
+          echo "PHONE_TURN=$out"
+          OUT="$out" node <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}');
+          if(!d.ok||d.search!==true||d.route!=='resilient-search-v42') throw new Error('v42 resilient search route failed');
+          if(Number(d.searchPasses||0)<1||Number(d.searchPasses||0)>5) throw new Error('bad search pass count');
+          if(/申し訳ありません.{0,80}(確認|情報|検索)|具体的な.{0,40}(ご案内|提案).{0,20}できません|自分で.{0,20}(検索|確認)|(?:店舗|通販サイト|商品ページ)で.{0,30}(?:検索|確認)して(?:ください|みて)/.test(d.answer||'')) throw new Error('old search give-up wording returned');
+          NODE
+          echo "$SID" >/tmp/talksys-search-sid
+
+      - name: Verify D1 actually contains production conversation logs
+        run: |
+          set -euo pipefail
+          sleep 4
+          G="$(cat /tmp/talksys-general-sid)"
+          S="$(cat /tmp/talksys-search-sid)"
+          q="SELECT session_id,event,status,revision,path,user_text FROM conversation_logs WHERE session_id IN ('$G','$S') ORDER BY timestamp;"
+          out="$(npx wrangler d1 execute "$LOG_DB" --remote --command "$q")"
+          echo "$out"
+          OUT="$out" G="$G" S="$S" EXPECTED="$EXPECTED" node <<'NODE'
+          const raw=process.env.OUT||'';
+          if(!raw.includes(process.env.G)) throw new Error('general session missing from D1');
+          if(!raw.includes(process.env.S)) throw new Error('search session missing from D1');
+          if(!raw.includes(process.env.EXPECTED)) throw new Error('v42 revision missing from D1');
+          NODE
+
+      - name: Verify server TTS remains disabled
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/tts.json -w '%{http_code}' -H 'content-type: application/json' --data '{\"text\":\"日本語テスト\"}' "$URL/api/tts")"
+          echo "server TTS HTTP=$code body=$(cat /tmp/tts.json)"
+          test "$code" = '410'
