@@ -47,6 +47,41 @@ jobs:
           node --check src/search-v26.js
           npm test
           npx wrangler deploy --dry-run
+      - name: Probe Grok Japanese TTS through Cloudflare Workers AI
+        run: |
+          set -euo pipefail
+          http_code="$(curl -sS --max-time 25 -o /tmp/grok-tts.json -w '%{http_code}' \
+            -X POST "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run/xai/grok-tts" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            -H 'Content-Type: application/json' \
+            --data-binary '{"text":"TalkSysの日本語音声テストです。","language":"ja","voice_id":"ara","text_normalization":true,"output_format":{"codec":"mp3","sample_rate":24000,"bit_rate":64000}}')"
+          test "$http_code" = "200"
+          node <<'NODE'
+          const fs = require('fs');
+          const body = JSON.parse(fs.readFileSync('/tmp/grok-tts.json', 'utf8'));
+          if (body.success === false) throw new Error('Cloudflare Grok TTS API returned success=false');
+          const root = body.result ?? body;
+          const audio = root?.audio ?? root?.result?.audio ?? root?.response?.audio ?? root?.output?.audio ?? root?.data?.audio;
+          if (typeof audio !== 'string' || audio.length < 8) throw new Error('Grok TTS returned no audio reference');
+          const kind = /^https:\/\//i.test(audio) ? 'url' : 'base64';
+          fs.writeFileSync('/tmp/grok-audio-ref.txt', audio, { mode: 0o600 });
+          fs.writeFileSync('/tmp/grok-audio-kind.txt', kind);
+          console.log(`Grok TTS runtime probe returned ${kind} audio.`);
+          NODE
+          kind="$(cat /tmp/grok-audio-kind.txt)"
+          if [ "$kind" = "url" ]; then
+            url="$(cat /tmp/grok-audio-ref.txt)"
+            curl -fsS --max-time 25 "$url" -o /tmp/grok-test.mp3
+          else
+            AUDIO="$(cat /tmp/grok-audio-ref.txt)" node <<'NODE'
+            const fs = require('fs');
+            const raw = String(process.env.AUDIO || '').replace(/^data:audio\/[^;]+;base64,/i, '');
+            fs.writeFileSync('/tmp/grok-test.mp3', Buffer.from(raw, 'base64'));
+            NODE
+          fi
+          bytes="$(wc -c < /tmp/grok-test.mp3)"
+          test "$bytes" -gt 500
+          echo "Grok TTS runtime probe passed: non-empty MP3 (${bytes} bytes)."
       - name: Deploy TalkSys v26 to Cloudflare production
         run: |
           set -o pipefail
