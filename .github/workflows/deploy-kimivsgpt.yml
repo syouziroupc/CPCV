@@ -69,7 +69,7 @@ jobs:
           for i in 1 2 3 4 5 6; do
             body="$(curl --fail --silent --show-error https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
-            if printf '%s' "$body" | grep -q '"ok":true' && printf '%s' "$body" | grep -q '"version":"0.5.2"' && printf '%s' "$body" | grep -q '"pkce":"S256"'; then
+            if printf '%s' "$body" | grep -q '"ok":true' && printf '%s' "$body" | grep -q '"version":"0.5.3"' && printf '%s' "$body" | grep -q '"pkce":"S256"'; then
               exit 0
             fi
             sleep 3
