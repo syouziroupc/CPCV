@@ -1,0 +1,102 @@
+name: TalkSys v28 deploy once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v28-deploy-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys-v28:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TALKSYS_SHA: 95a658ccc7b7ed74aa2f14c2c139acaab2c05f7d
+      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
+      EXPECTED_VOICE_REVISION: cloudflare-agent-v28-simple-qwen-android
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: 95a658ccc7b7ed74aa2f14c2c139acaab2c05f7d
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Require production credentials
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Install and validate exact source
+        run: |
+          npm install --no-audit --no-fund
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          node --check src/worker-v28-production.js
+          node --check src/worker-v28.js
+          node --check src/qwen-conversation-v28.js
+          node --check src/cloudflare-live-client-v26.js
+          node --check src/search-v26.js
+          npm test
+          npx wrangler deploy --dry-run
+      - name: Deploy exact v28 SHA
+        run: |
+          npx wrangler deploy
+          npx wrangler deployments status
+      - name: Verify production v28 contract
+        run: |
+          body=""
+          for attempt in $(seq 1 18); do
+            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
+            current="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
+            if [ "$current" = "$EXPECTED_VOICE_REVISION" ]; then break; fi
+            if [ "$attempt" -eq 18 ]; then
+              echo "::error::Production did not reach $EXPECTED_VOICE_REVISION"
+              exit 1
+            fi
+            sleep 3
+          done
+          BODY="$body" node <<'NODE'
+          const d = JSON.parse(process.env.BODY || '{}');
+          const qwen = '@cf/qwen/qwen3.8-27b';
+          if (d.voiceRevision !== 'cloudflare-agent-v28-simple-qwen-android') throw new Error('revision mismatch');
+          if (d.architecture !== 'whisper-qwen-melotts-single-path') throw new Error('architecture mismatch');
+          if (d.conversationModel !== qwen || d.searchAnswerModel !== qwen) throw new Error('Qwen single-model route mismatch');
+          if (d.conversationModelFallback !== null || d.conversationEmergencyFallback !== null) throw new Error('cross-model fallback still active');
+          if (d.multiModelFallback !== false || d.sameModelRetryOnce !== true || d.qwenThinkingDisabled !== true) throw new Error('Qwen retry contract mismatch');
+          for (const key of ['legacyGlmActive','legacyGrokActive','legacyDeepSeekActive','legacyGptOssActive']) if (d[key] !== false) throw new Error(`${key} must be false`);
+          if (d.ttsPrimary !== '@cf/myshell-ai/melotts' || d.ttsFallback !== null) throw new Error('TTS route mismatch');
+          for (const key of ['mobileAudioPipelineV26','androidAudioWorkletPreferred','androidScriptProcessorFallback','androidPcmFrameProbeBeforeCall','androidCaptureBackendFailover','androidLifecycleResume','mobileWebSocketHardRecovery','microphoneDiagnostics','inFlightUserContext','directTransitEvidenceFallback','contextualSearchSubjectOnlyCarryover']) if (d[key] !== true) throw new Error(`${key} missing`);
+          console.log(JSON.stringify({voiceRevision:d.voiceRevision,architecture:d.architecture,conversationModel:d.conversationModel,multiModelFallback:d.multiModelFallback,sameModelRetryOnce:d.sameModelRetryOnce,ttsPrimary:d.ttsPrimary}));
+          NODE
+      - name: Verify live Android client and context regressions
+        run: |
+          script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
+          grep -F "verifyAndroidCapturePipeline" <<< "$script"
+          grep -F "talksys-mic-no-frames" <<< "$script"
+          grep -F "resumeMobileRuntime" <<< "$script"
+          grep -F "callStartPending" <<< "$script"
+          grep -F "talksys-barge-in" <<< "$script"
+
+          transit="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v28-transit-followup")"
+          BODY="$transit" node <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          const q=String(d.resolvedQuestion||'');
+          if(!d.ok || !/鷺沼/.test(q) || !/相模大野/.test(q) || !/どうですか/.test(q)) throw new Error(`transit regression: ${q}`);
+          if (!(d.sources || []).some(s => /鷺沼/.test(JSON.stringify(s)) && /相模大野/.test(JSON.stringify(s)))) throw new Error('transit evidence lacks endpoints');
+          NODE
+
+          shopping="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v28-context")"
+          BODY="$shopping" node <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          const q=String(d.resolvedQuestion||'');
+          if(!d.ok || !/パソコン/.test(q) || !/中古/.test(q) || !/横浜/.test(q) || /YouTube|ネットサーフィン/i.test(q)) throw new Error(`shopping regression: ${q}`);
+          NODE
+
+          pc="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v28-pc")"
+          BODY="$pc" node -e "const d=JSON.parse(process.env.BODY||'{}');if(!d.ok||!/CF-SV8/i.test(String(d.resolvedQuestion||'')))throw new Error('PC search smoke failed')"
