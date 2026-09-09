@@ -1,0 +1,87 @@
+name: TalkSys v39 deploy once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/talksys-v39-deploy-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 18
+    steps:
+      - name: Checkout TalkSys exact revision
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: 722875ccd0b5ab7c595b743024a684a6273aba46
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Require Cloudflare production credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Install and validate v39
+        run: |
+          npm install --no-audit --no-fund
+          node --test tests/v39-japanese-only-grok-tts.test.mjs
+          npm test
+          npx wrangler deploy --dry-run --config wrangler.jsonc
+
+      - name: Deploy TalkSys v39 production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.jsonc
+
+      - name: Verify live Japanese-only contract and Grok TTS
+        shell: bash
+        run: |
+          node <<'NODE'
+          const base='https://talksys.syouziroupc.workers.dev';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          let health=null;
+          for(let i=0;i<24;i++){
+            try{
+              const r=await fetch(base+'/voice-health',{headers:{'cache-control':'no-cache'}});
+              if(r.ok){
+                const j=await r.json();
+                if(j.voiceRevision==='talksys-v39-japanese-only-grok-tts'&&j.languageMode==='ja-only'&&j.englishConversationEnabled===false&&j.ttsFallback==='xai/grok-tts'&&j.melottsFallback===false){health=j;break;}
+              }
+            }catch{}
+            await sleep(5000);
+          }
+          if(!health)throw new Error('v39 health did not converge');
+          console.log('HEALTH',JSON.stringify(health,null,2));
+
+          const js=await (await fetch(base+'/talk-v39.js',{headers:{'cache-control':'no-cache'}})).text();
+          for(const needle of ['Grok TTS 日本語 fallback','Grok TTS日本語へフォールバック','日本語専用（端末→Grok）'])if(!js.includes(needle))throw new Error('live client missing '+needle);
+          if(js.includes('Cloudflare MeloTTS fallback'))throw new Error('live client still contains active Melo fallback label');
+
+          const englishTurn=await fetch(base+'/api/turn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'Where is Beppu Onsen in Japan?',history:[]})});
+          const ej=await englishTurn.json();console.log('ENGLISH_GUARD',JSON.stringify(ej,null,2));
+          if(!englishTurn.ok||ej.answer!=='日本語でお話しください。'||ej.search!==false)throw new Error('English input escaped Japanese-only guard');
+
+          const japaneseTurn=await fetch(base+'/api/turn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'こんにちは',history:[]})});
+          const jj=await japaneseTurn.json();console.log('JAPANESE_TURN',JSON.stringify(jj,null,2));
+          if(!japaneseTurn.ok||!jj.ok||!/[ぁ-んァ-ヶ一-龠々]/u.test(String(jj.answer||'')))throw new Error('Japanese reply missing');
+
+          const ttsRes=await fetch(base+'/api/tts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'こんにちは。日本語の音声品質を確認しています。別府温泉は大分県別府市にあります。'})});
+          const audio=await ttsRes.arrayBuffer();
+          console.log('TTS',ttsRes.status,ttsRes.headers.get('content-type'),ttsRes.headers.get('x-talksys-tts-model'),ttsRes.headers.get('x-talksys-tts-language'),ttsRes.headers.get('x-talksys-tts-voice'),audio.byteLength);
+          if(!ttsRes.ok||audio.byteLength<1000||ttsRes.headers.get('x-talksys-tts-model')!=='xai/grok-tts'||ttsRes.headers.get('x-talksys-tts-language')!=='ja')throw new Error('Grok Japanese TTS fallback failed');
+          NODE
