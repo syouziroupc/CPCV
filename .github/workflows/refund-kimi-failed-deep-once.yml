@@ -1,0 +1,73 @@
+name: Refund failed Kimi deep audits once
+
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/refund-kimi-failed-deep-once.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  refund:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Create temporary quota refund Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/kimi-refund
+          cat >/tmp/kimi-refund/worker.mjs <<'JS'
+          export default {
+            async fetch(request, env) {
+              const stub = env.AUTH_STATE.getByName("owner");
+              const results = [];
+              for (let i = 0; i < 3; i++) results.push(await stub.releaseUsage("deep"));
+              return Response.json({ ok: true, refunded: 3, results });
+            }
+          };
+          JS
+          cat >/tmp/kimi-refund/wrangler.jsonc <<'JSON'
+          {
+            "name": "kimivsgpt-refund-20260909",
+            "main": "worker.mjs",
+            "compatibility_date": "2026-09-09",
+            "durable_objects": {
+              "bindings": [
+                {
+                  "name": "AUTH_STATE",
+                  "class_name": "AuthState",
+                  "script_name": "kimivsgpt"
+                }
+              ]
+            }
+          }
+          JSON
+          cd /tmp/kimi-refund
+          npx --yes wrangler@4.129.1 deploy --config wrangler.jsonc
+
+      - name: Refund exactly three legacy failed deep calls
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5 6; do
+            code="$(curl -sS -o /tmp/refund-result.json -w '%{http_code}' https://kimivsgpt-refund-20260909.syouziroupc.workers.dev/ || true)"
+            cat /tmp/refund-result.json || true
+            if [ "$code" = "200" ] && grep -q '"ok":true' /tmp/refund-result.json && grep -q '"refunded":3' /tmp/refund-result.json; then
+              exit 0
+            fi
+            sleep 3
+          done
+          exit 1
+
+      - name: Delete temporary quota refund Worker
+        if: always()
+        shell: bash
+        run: |
+          cd /tmp/kimi-refund 2>/dev/null || exit 0
+          npx --yes wrangler@4.129.1 delete --config wrangler.jsonc --name kimivsgpt-refund-20260909 --force || \
+          npx --yes wrangler@4.129.1 delete --config wrangler.jsonc --name kimivsgpt-refund-20260909 || true
