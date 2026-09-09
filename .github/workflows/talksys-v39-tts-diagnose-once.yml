@@ -1,0 +1,36 @@
+name: TalkSys v39 TTS diagnose once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/talksys-v39-tts-diagnose-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe live v39 Grok TTS
+        shell: bash
+        run: |
+          node <<'NODE'
+          const r=await fetch('https://talksys.syouziroupc.workers.dev/api/tts',{
+            method:'POST',headers:{'content-type':'application/json','cache-control':'no-cache'},
+            body:JSON.stringify({text:'こんにちは。日本語の音声品質を確認しています。別府温泉は大分県別府市にあります。'})
+          });
+          const ct=r.headers.get('content-type')||'';
+          console.log('STATUS',r.status);
+          console.log('CONTENT_TYPE',ct);
+          console.log('MODEL',r.headers.get('x-talksys-tts-model'));
+          console.log('LANGUAGE',r.headers.get('x-talksys-tts-language'));
+          console.log('VOICE',r.headers.get('x-talksys-tts-voice'));
+          const b=Buffer.from(await r.arrayBuffer());
+          console.log('BYTES',b.length);
+          if(ct.includes('json')||!r.ok)console.log('BODY',b.toString('utf8'));
+          else console.log('MAGIC',b.subarray(0,16).toString('hex'));
+          NODE
