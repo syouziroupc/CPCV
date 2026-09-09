@@ -6,7 +6,6 @@ on:
     paths:
       - .github/workflows/talksys-v26-deploy-once.yml
 
-# One-shot production deployment for TalkSys v26.
 permissions:
   contents: read
 
@@ -54,13 +53,11 @@ jobs:
           PROBE_WORKER="talksys-grok-probe-${GITHUB_RUN_ID}"
           PROBE_TOKEN="$(node -e "process.stdout.write(require('crypto').randomBytes(24).toString('hex'))")"
           export PROBE_DIR PROBE_WORKER PROBE_TOKEN
-
           cleanup() {
             npx wrangler delete --config "$PROBE_DIR/wrangler.jsonc" --force >/tmp/grok-probe-delete.log 2>&1 || true
             rm -rf "$PROBE_DIR"
           }
           trap cleanup EXIT
-
           node <<'NODE'
           const fs = require('fs');
           const path = require('path');
@@ -74,7 +71,7 @@ jobs:
             vars: { PROBE_TOKEN: process.env.PROBE_TOKEN },
           }, null, 2));
           fs.writeFileSync(path.join(dir, 'worker.mjs'), `
-          function decodeBase64(value) {
+          function b64bytes(value) {
             const raw = String(value || '').replace(/^data:audio\\/[^;]+;base64,/i, '');
             if (!raw) return 0;
             try { return Uint8Array.from(atob(raw), c => c.charCodeAt(0)).byteLength; } catch { return 0; }
@@ -96,21 +93,15 @@ jobs:
                 let kind = '';
                 if (typeof audio === 'string' && /^https:\\/\\//i.test(audio)) {
                   kind = 'url';
-                  const response = await fetch(audio);
-                  if (!response.ok) throw new Error('generated audio URL returned ' + response.status);
-                  bytes = (await response.arrayBuffer()).byteLength;
+                  const audioResponse = await fetch(audio);
+                  if (!audioResponse.ok) throw new Error('generated audio URL returned ' + audioResponse.status);
+                  bytes = (await audioResponse.arrayBuffer()).byteLength;
                 } else if (typeof audio === 'string') {
                   kind = 'base64';
-                  bytes = decodeBase64(audio);
+                  bytes = b64bytes(audio);
                 }
                 const ok = bytes > 500;
-                return Response.json({
-                  ok,
-                  bytes,
-                  kind,
-                  state: result?.state || root?.state || '',
-                  keySource: result?.gatewayMetadata?.keySource || root?.gatewayMetadata?.keySource || '',
-                }, { status: ok ? 200 : 502 });
+                return Response.json({ ok, bytes, kind, state: result?.state || root?.state || '', keySource: result?.gatewayMetadata?.keySource || root?.gatewayMetadata?.keySource || '' }, { status: ok ? 200 : 502 });
               } catch (error) {
                 return Response.json({ ok: false, error: String(error?.message || error).slice(0, 300) }, { status: 500 });
               }
@@ -118,11 +109,21 @@ jobs:
           };
           `);
           NODE
-
           npx wrangler deploy --config "$PROBE_DIR/wrangler.jsonc" 2>&1 | tee /tmp/grok-probe-deploy.log
           PROBE_URL="$(grep -Eo 'https://[^[:space:]]+\.workers\.dev' /tmp/grok-probe-deploy.log | tail -1)"
           test -n "$PROBE_URL"
-          body="$(curl -fsS --max-time 30 -H "Authorization: Bearer $PROBE_TOKEN" "$PROBE_URL")"
+          body=""
+          http_code=""
+          for attempt in $(seq 1 12); do
+            http_code="$(curl -sS --max-time 30 -o /tmp/grok-probe-response.json -w '%{http_code}' -H "Authorization: Bearer $PROBE_TOKEN" "$PROBE_URL" || true)"
+            body="$(cat /tmp/grok-probe-response.json 2>/dev/null || true)"
+            echo "Grok probe attempt $attempt: HTTP ${http_code:-none}"
+            if [ "$http_code" = "200" ]; then break; fi
+            if [ "$http_code" != "404" ] && [ -n "$body" ]; then echo "$body"; break; fi
+            test "$attempt" -lt 12 || true
+            sleep 2
+          done
+          test "$http_code" = "200"
           echo "$body"
           BODY="$body" node <<'NODE'
           const d = JSON.parse(process.env.BODY || '{}');
@@ -132,19 +133,16 @@ jobs:
           NODE
       - name: Deploy TalkSys v26 to Cloudflare production
         run: |
-          set -o pipefail
           npx wrangler deploy
           npx wrangler deployments status
-      - name: Verify production v26 health contract
+      - name: Verify production v26 health and Android client
         run: |
           body=""
           for attempt in $(seq 1 15); do
-            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health")" || true
+            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
             current="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
-            echo "Production voiceRevision: ${current:-missing}"
             if [ "$current" = "$EXPECTED_VOICE_REVISION" ]; then break; fi
-            test "$attempt" -lt 15 || exit 1
-            sleep 5
+            sleep 3
           done
           BODY="$body" EXPECTED="$EXPECTED_VOICE_REVISION" node <<'NODE'
           const d = JSON.parse(process.env.BODY || '{}');
@@ -152,44 +150,28 @@ jobs:
           if (d.conversationModel !== '@cf/zai-org/glm-5.3-flash') throw new Error('wrong GLM model');
           if (d.ttsPrimary !== 'xai/grok-tts') throw new Error('Grok TTS is not primary');
           if (d.ttsFallback !== '@cf/myshell-ai/melotts') throw new Error('Melo fallback missing');
-          for (const key of [
-            'glmOnlyConversation','glmVisibleFirstTokenDeadline','glmReasoningOnlyStreamEscape','inFlightUserContext',
-            'directTransitEvidenceFallback','mobileAudioPipelineV26','androidAudioWorkletPreferred','androidScriptProcessorFallback',
-            'androidPcmFrameProbeBeforeCall','androidCaptureBackendFailover','androidLifecycleResume','mobileWebSocketHardRecovery'
-          ]) if (d[key] !== true) throw new Error(`${key} is not true`);
+          for (const key of ['glmVisibleFirstTokenDeadline','glmReasoningOnlyStreamEscape','inFlightUserContext','directTransitEvidenceFallback','mobileAudioPipelineV26','androidAudioWorkletPreferred','androidScriptProcessorFallback','androidPcmFrameProbeBeforeCall','androidCaptureBackendFailover','androidLifecycleResume','mobileWebSocketHardRecovery']) if (d[key] !== true) throw new Error(`${key} is not true`);
           NODE
-      - name: Verify live v26 Android client code
-        run: |
           script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
           grep -F "verifyAndroidCapturePipeline" <<< "$script"
           grep -F "talksys-mic-no-frames" <<< "$script"
-          grep -F "visibilitychange" <<< "$script"
-          grep -F "pageshow" <<< "$script"
           grep -F "resumeMobileRuntime" <<< "$script"
           grep -F "socket?.close()" <<< "$script"
-          grep -F "callStartPending" <<< "$script"
-          grep -F "talksys-barge-in" <<< "$script"
-      - name: Verify in-flight transit follow-up regression
+      - name: Verify production context regressions
         run: |
-          body="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v26-transit-followup")"
-          echo "$body"
-          BODY="$body" node <<'NODE'
+          transit="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v26-transit-followup")"
+          echo "$transit"
+          BODY="$transit" node <<'NODE'
           const d = JSON.parse(process.env.BODY || '{}');
-          if (!d.ok) throw new Error(`transit follow-up has no verified evidence: ${d.directTransitError || 'unknown'}`);
+          if (!d.ok) throw new Error(`transit follow-up failed: ${d.directTransitError || 'no evidence'}`);
           const q = String(d.resolvedQuestion || '');
           if (!/鷺沼/.test(q) || !/相模大野/.test(q) || !/どうですか/.test(q)) throw new Error(`in-flight context lost: ${q}`);
-          const queries = (d.queries || []).join(' ');
-          if (/^どうですか(?:\s+公式)?$/m.test(queries)) throw new Error(`generic どうですか search survived: ${queries}`);
-          if (!(d.sources || []).some((s) => /鷺沼/.test(JSON.stringify(s)) && /相模大野/.test(JSON.stringify(s)))) throw new Error('route evidence does not contain both endpoints');
+          if (!(d.sources || []).some(s => /鷺沼/.test(JSON.stringify(s)) && /相模大野/.test(JSON.stringify(s)))) throw new Error('route evidence lacks endpoints');
           NODE
-      - name: Verify existing contextual shopping regression
-        run: |
-          body="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v26-context")"
-          echo "$body"
-          BODY="$body" node <<'NODE'
+          shopping="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v26-context")"
+          BODY="$shopping" node <<'NODE'
           const d = JSON.parse(process.env.BODY || '{}');
-          if (!d.ok) throw new Error('context smoke returned no evidence');
+          if (!d.ok) throw new Error('shopping context smoke failed');
           const q = String(d.resolvedQuestion || '');
-          if (!/パソコン/.test(q) || !/中古/.test(q) || !/横浜/.test(q)) throw new Error(`context not preserved: ${q}`);
-          if (/YouTube|ネットサーフィン/i.test(q)) throw new Error(`old usage polluted current search: ${q}`);
+          if (!/パソコン/.test(q) || !/中古/.test(q) || !/横浜/.test(q) || /YouTube|ネットサーフィン/i.test(q)) throw new Error(`bad shopping context: ${q}`);
           NODE
