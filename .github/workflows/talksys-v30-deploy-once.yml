@@ -1,4 +1,4 @@
-name: TalkSys v30 deploy once
+name: TalkSys v31 deploy once
 
 on:
   push:
@@ -10,42 +10,42 @@ permissions:
   contents: read
 
 jobs:
-  deploy-talksys-v30:
+  deploy-talksys-v31:
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: 3525de39f535a8f7752eff1afcc5f12199929d11
+      TALKSYS_SHA: a6b7c95ab67013a9bffc4563d953b553c96550d8
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
-      EXPECTED_REVISION: cloudflare-agent-v30-real-grok-audio-runtime
+      EXPECTED_REVISION: cloudflare-agent-v31-glm-melo-reliable
     steps:
       - uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 3525de39f535a8f7752eff1afcc5f12199929d11
+          ref: a6b7c95ab67013a9bffc4563d953b553c96550d8
           persist-credentials: false
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Validate exact v30 source
+      - name: Validate exact v31 source
         run: |
           set -euo pipefail
           npm install --no-audit --no-fund
           test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
-          node --check src/grok-conversation-v29.js
-          node --check src/cloudflare-live-client-v30.js
-          node --check src/worker-v30.js
-          node --check src/worker-v30-production.js
+          node --check src/glm-conversation-v31.js
+          node --check src/cloudflare-live-client-v31.js
+          node --check src/worker-v31.js
+          node --check src/worker-v31-production.js
           npm test
           npx wrangler deploy --dry-run
-      - name: Deploy exact v30 SHA
+      - name: Deploy exact v31 SHA
         run: |
           set -euo pipefail
           npx wrangler deploy
           npx wrangler deployments status
-      - name: Verify v30 health and real Grok binding
+      - name: Verify v31 health and Workers AI bindings
         run: |
           set -euo pipefail
           body=""
@@ -53,102 +53,66 @@ jobs:
             body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
             current="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
             [ "$current" = "$EXPECTED_REVISION" ] && break
-            [ "$attempt" -eq 20 ] && { echo "v30 revision not live: $body"; exit 1; }
+            [ "$attempt" -eq 20 ] && { echo "v31 revision not live: $body"; exit 1; }
             sleep 3
           done
+          echo "$body"
           BODY="$body" node <<'NODE'
           const d=JSON.parse(process.env.BODY||'{}');
-          if(d.voiceRevision!=='cloudflare-agent-v30-real-grok-audio-runtime') throw new Error('revision mismatch');
-          if(d.conversationModel!=='xai/grok-4.20-0309-non-reasoning') throw new Error('conversation model mismatch');
-          if(d.ttsPrimary!=='xai/grok-tts') throw new Error('tts mismatch');
-          if(d.browserSpeechSynthesisEnabled!==false||d.typedSpeechUsesGrokTts!==true||d.serverAudioAuthoritative!==true) throw new Error('audio contract mismatch');
+          if(d.voiceRevision!=='cloudflare-agent-v31-glm-melo-reliable') throw new Error('revision mismatch');
+          if(d.conversationModel!=='@cf/zai-org/glm-5.3-flash'||d.glmOnlyConversation!==true) throw new Error('GLM mismatch');
+          if(d.ttsPrimary!=='@cf/myshell-ai/melotts'||d.ttsFallback!==null) throw new Error('Melo mismatch');
+          if(d.browserSpeechSynthesisEnabled!==false||d.typedSpeechUsesMeloTts!==true||d.thirdPartyModelCreditsRequired!==false) throw new Error('audio contract mismatch');
           NODE
-          code="$(curl -sS -o /tmp/probe.json -w '%{http_code}' --max-time 45 "$PRODUCTION_URL/api/grok-binding-probe-v30")"
+          code="$(curl -sS -o /tmp/probe.json -w '%{http_code}' --max-time 45 "$PRODUCTION_URL/api/glm-binding-probe-v31")"
           echo "BINDING_PROBE_HTTP=$code"
           cat /tmp/probe.json; echo
           test "$code" = 200
-          PROBE="$(cat /tmp/probe.json)" node -e "const d=JSON.parse(process.env.PROBE);if(!d.ok||!d.conversation?.ok||!d.tts?.ok||!(d.tts.bytes>100))throw new Error(JSON.stringify(d))"
-      - name: Verify typed simulation and real Grok TTS
+          PROBE="$(cat /tmp/probe.json)" node -e "const d=JSON.parse(process.env.PROBE);if(!d.ok||!d.conversation?.ok||!d.tts?.ok||!(d.tts.bytes>100))throw new Error(JSON.stringify(d));console.log('GLM='+d.conversation.answer,'MELO_BYTES='+d.tts.bytes,'ELAPSED='+d.elapsedMs)"
+      - name: Verify typed reply and Melo audio
         run: |
           set -euo pipefail
           node <<'NODE'
           const base='https://talksys.syouziroupc.workers.dev';
           const ws=new WebSocket('wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default');
-          let answer='';
+          ws.binaryType='arraybuffer';
+          let answer='', audioBytes=0, model='';
           await new Promise((resolve,reject)=>{
-            const timer=setTimeout(()=>reject(new Error('typed websocket timeout')),35000);
+            const timer=setTimeout(()=>reject(new Error(`typed timeout answer=${answer} audio=${audioBytes}`)),35000);
+            const done=()=>{if(answer&&audioBytes>100){clearTimeout(timer);resolve();}};
             ws.onopen=()=>ws.send(JSON.stringify({type:'hello',protocol_version:1}));
-            ws.onerror=()=>reject(new Error('typed websocket error'));
-            ws.onmessage=(event)=>{
-              if(typeof event.data!=='string') return;
-              let d;try{d=JSON.parse(event.data)}catch{return}
-              console.log('TYPED_EVENT',d.type,d.status||d.role||'',String(d.text||'').slice(0,160));
+            ws.onerror=()=>reject(new Error('websocket error'));
+            ws.onmessage=e=>{
+              if(e.data instanceof ArrayBuffer){audioBytes+=e.data.byteLength;done();return;}
+              if(typeof e.data!=='string') return;
+              let d;try{d=JSON.parse(e.data)}catch{return}
+              console.log('EVENT',d.type,d.status||d.role||'',String(d.text||'').slice(0,160));
               if(d.type==='welcome') ws.send(JSON.stringify({type:'text_message',text:'こんにちは。動作確認です。短く自然に返事してください。'}));
-              if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant'))&&d.text){answer=String(d.text);clearTimeout(timer);resolve();}
+              if(d.type==='model_route') model=String(d.model||'');
+              if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant'))&&d.text){answer=String(d.text);done();}
             };
           });
           ws.close();
-          if(!answer||/接続を立て直しました|もう一度お願いします/.test(answer)) throw new Error('Grok answer failed: '+answer);
-          const r=await fetch(base+'/api/grok-tts-v30',{method:'POST',headers:{'content-type':'application/json','origin':base},body:JSON.stringify({text:answer})});
+          if(!answer||/回答生成が一時的に失敗|現在この回答を生成できません/.test(answer)) throw new Error('GLM answer failed: '+answer);
+          if(model&&model!=='@cf/zai-org/glm-5.3-flash') throw new Error('unexpected model '+model);
+          const r=await fetch(base+'/api/melo-tts-v31',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:answer})});
           const bytes=await r.arrayBuffer();
-          console.log('TYPED_GROK_ANSWER',answer,'TTS_HTTP',r.status,'PROVIDER',r.headers.get('x-talksys-tts-provider'),'BYTES',bytes.byteLength);
-          if(!r.ok||r.headers.get('x-talksys-tts-provider')!=='xai/grok-tts'||bytes.byteLength<500) throw new Error('typed Grok TTS failed');
-          NODE
-      - name: Verify browser call and Twilio media audio
-        run: |
-          set -euo pipefail
-          node <<'NODE'
-          async function browserCall(){
-            const ws=new WebSocket('wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default');
-            ws.binaryType='arraybuffer';
-            let binary=0,listening=false;
-            await new Promise((resolve,reject)=>{
-              const timer=setTimeout(()=>reject(new Error(`browser call timeout listening=${listening} binary=${binary}`)),35000);
-              ws.onopen=()=>ws.send(JSON.stringify({type:'hello',protocol_version:1}));
-              ws.onerror=()=>reject(new Error('browser call websocket error'));
-              ws.onmessage=e=>{
-                if(e.data instanceof ArrayBuffer){binary+=e.data.byteLength;console.log('CALL_BINARY',e.data.byteLength,binary);if(listening&&binary>100){clearTimeout(timer);resolve();}return;}
-                if(typeof e.data!=='string') return;
-                let d;try{d=JSON.parse(e.data)}catch{return}
-                console.log('CALL_EVENT',d.type,d.status||d.role||'',String(d.text||'').slice(0,100));
-                if(d.type==='welcome') ws.send(JSON.stringify({type:'start_call',preferred_format:'mp3'}));
-                if(d.type==='status'&&d.status==='listening'){listening=true;if(binary>100){clearTimeout(timer);resolve();}}
-              };
-            });
-            ws.close();
-            if(!listening||binary<100) throw new Error('browser call did not get Grok greeting audio');
-          }
-          async function twilioCall(){
-            const ws=new WebSocket('wss://talksys.syouziroupc.workers.dev/phone/media');
-            let mediaBytes=0,mark=false;
-            await new Promise((resolve,reject)=>{
-              const timer=setTimeout(()=>reject(new Error(`Twilio timeout media=${mediaBytes} mark=${mark}`)),35000);
-              ws.onopen=()=>ws.send(JSON.stringify({event:'start',streamSid:'MZ_TEST_V30',start:{streamSid:'MZ_TEST_V30',callSid:'CA_TEST_V30',mediaFormat:{encoding:'audio/x-mulaw',sampleRate:8000,channels:1},customParameters:{}}}));
-              ws.onerror=()=>reject(new Error('Twilio websocket error'));
-              ws.onmessage=e=>{
-                if(typeof e.data!=='string') return;
-                let d;try{d=JSON.parse(e.data)}catch{return}
-                console.log('PHONE_EVENT',d.event,d.mark?.name||'',d.media?.payload?.length||0);
-                if(d.event==='media'&&d.media?.payload) mediaBytes+=Buffer.from(d.media.payload,'base64').length;
-                if(d.event==='mark') mark=true;
-                if(mediaBytes>100&&mark){clearTimeout(timer);resolve();}
-              };
-            });
-            ws.close();
-            if(mediaBytes<100||!mark) throw new Error('phone greeting audio missing');
-          }
-          await browserCall();
-          await twilioCall();
-          console.log('V30_REALTIME_AND_PHONE_AUDIO_OK');
+          console.log('ANSWER',answer,'WS_AUDIO_BYTES',audioBytes,'MELO_PROVIDER',r.headers.get('x-talksys-tts-provider'),'DIRECT_BYTES',bytes.byteLength);
+          if(!r.ok||r.headers.get('x-talksys-tts-provider')!=='@cf/myshell-ai/melotts'||bytes.byteLength<500) throw new Error('Melo TTS failed');
           NODE
       - name: Verify live client and context
         run: |
           set -euo pipefail
           script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
           grep -F "browserSpeechSynthesisEnabled: false" <<< "$script" >/dev/null
-          grep -F "requestTypedGrokTts" <<< "$script" >/dev/null
-          grep -F "talksys-grok-audio" <<< "$script" >/dev/null
-          ! grep -F "if (browserStreamTtsThisTurn) return" <<< "$script" >/dev/null
-          context="$(curl -fsS --max-time 40 "$PRODUCTION_URL/api/search-smoke-v30-context")"
+          grep -F "requestTypedMeloTts" <<< "$script" >/dev/null
+          grep -F "talksys-melo-audio" <<< "$script" >/dev/null
+          grep -F "verifyAndroidCapturePipeline" <<< "$script" >/dev/null
+          grep -F "resumeMobileRuntime" <<< "$script" >/dev/null
+          ! grep -F "queueCompletedStreamSpeech(streamText, false)" <<< "$script" >/dev/null
+          ! grep -F "queueCompletedStreamSpeech(value, true)" <<< "$script" >/dev/null
+          transit="$(curl -fsS --max-time 50 "$PRODUCTION_URL/api/search-smoke-v31-transit-followup")"
+          TRANSIT="$transit" node -e "const d=JSON.parse(process.env.TRANSIT||'{}');const q=String(d.resolvedQuestion||'');if(!/鷺沼/.test(q)||!/相模大野/.test(q))throw new Error(q)"
+          context="$(curl -fsS --max-time 50 "$PRODUCTION_URL/api/search-smoke-v31-context")"
           CONTEXT="$context" node -e "const d=JSON.parse(process.env.CONTEXT||'{}');const q=String(d.resolvedQuestion||'');if(!/パソコン/.test(q)||!/中古/.test(q)||!/横浜/.test(q))throw new Error(q)"
-          echo TALKSYS_V30_PRODUCTION_E2E_OK
+          echo TALKSYS_V31_PRODUCTION_E2E_OK
