@@ -50,5 +50,7 @@ jobs:
           cat /tmp/token-verify.json
           echo
 
+          echo '=== Diagnostic summary ==='
+          echo "REST_R2_HTTP=$CODE WRANGLER_R2_RC=$WRC TOKEN_VERIFY_HTTP=$VCODE"
           if [ "$CODE" = "200" ]; then exit 0; fi
           exit 2
