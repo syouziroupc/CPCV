@@ -1,4 +1,4 @@
-name: TalkSys v42 storage diagnostic once
+name: TalkSys v42 D1 log database once
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-storage:
+  create-talksys-log-db:
     runs-on: ubuntu-24.04
     environment: production
     timeout-minutes: 10
@@ -24,24 +24,21 @@ jobs:
         with:
           node-version: '22'
       - run: npm install --no-audit --no-fund
-      - name: Probe Cloudflare persistent storage permissions
+      - name: Create and initialize TalkSys D1 logs
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          set +e
-          echo '=== R2 ==='
-          npx wrangler r2 bucket list > /tmp/r2.txt 2>&1; R2=$?
-          echo "R2_RC=$R2"; cat /tmp/r2.txt
-          echo
-          echo '=== KV ==='
-          npx wrangler kv namespace list > /tmp/kv.txt 2>&1; KV=$?
-          echo "KV_RC=$KV"; cat /tmp/kv.txt
-          echo
-          echo '=== D1 ==='
-          npx wrangler d1 list > /tmp/d1.txt 2>&1; D1=$?
-          echo "D1_RC=$D1"; cat /tmp/d1.txt
-          echo
-          echo "STORAGE_SUMMARY R2=$R2 KV=$KV D1=$D1"
-          exit 0
+          set -euo pipefail
+          LIST="$(npx wrangler d1 list)"
+          echo "$LIST"
+          if ! printf '%s\n' "$LIST" | grep -q 'talksys-conversation-logs'; then
+            npx wrangler d1 create talksys-conversation-logs --location=apac
+          fi
+          echo '=== D1 INFO ==='
+          npx wrangler d1 info talksys-conversation-logs
+          echo '=== CREATE SCHEMA ==='
+          npx wrangler d1 execute talksys-conversation-logs --remote --command "CREATE TABLE IF NOT EXISTS conversation_logs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, event TEXT NOT NULL, timestamp TEXT NOT NULL, jst TEXT NOT NULL, revision TEXT, path TEXT, status INTEGER, user_text TEXT, history_json TEXT, search_plan_json TEXT, result_json TEXT, audio_bytes INTEGER DEFAULT 0); CREATE INDEX IF NOT EXISTS idx_conversation_logs_session_time ON conversation_logs(session_id, timestamp); CREATE INDEX IF NOT EXISTS idx_conversation_logs_time ON conversation_logs(timestamp);"
+          echo '=== VERIFY SCHEMA ==='
+          npx wrangler d1 execute talksys-conversation-logs --remote --command "SELECT name, type FROM sqlite_master WHERE name IN ('conversation_logs','idx_conversation_logs_session_time','idx_conversation_logs_time') ORDER BY name;"
