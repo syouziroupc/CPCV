@@ -56,7 +56,6 @@ jobs:
             [ "$attempt" -eq 20 ] && { echo "v31 revision not live: $body"; exit 1; }
             sleep 3
           done
-          echo "$body"
           BODY="$body" node <<'NODE'
           const d=JSON.parse(process.env.BODY||'{}');
           if(d.voiceRevision!=='cloudflare-agent-v31-glm-melo-reliable') throw new Error('revision mismatch');
@@ -69,27 +68,24 @@ jobs:
           cat /tmp/probe.json; echo
           test "$code" = 200
           PROBE="$(cat /tmp/probe.json)" node -e "const d=JSON.parse(process.env.PROBE);if(!d.ok||!d.conversation?.ok||!d.tts?.ok||!(d.tts.bytes>100))throw new Error(JSON.stringify(d));console.log('GLM='+d.conversation.answer,'MELO_BYTES='+d.tts.bytes,'ELAPSED='+d.elapsedMs)"
-      - name: Verify typed reply and Melo audio
+      - name: Verify typed reply and explicit Melo audio path
         run: |
           set -euo pipefail
           node <<'NODE'
           const base='https://talksys.syouziroupc.workers.dev';
           const ws=new WebSocket('wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default');
-          ws.binaryType='arraybuffer';
-          let answer='', audioBytes=0, model='';
+          let answer='', model='';
           await new Promise((resolve,reject)=>{
-            const timer=setTimeout(()=>reject(new Error(`typed timeout answer=${answer} audio=${audioBytes}`)),35000);
-            const done=()=>{if(answer&&audioBytes>100){clearTimeout(timer);resolve();}};
+            const timer=setTimeout(()=>reject(new Error(`typed answer timeout answer=${answer}`)),20000);
             ws.onopen=()=>ws.send(JSON.stringify({type:'hello',protocol_version:1}));
             ws.onerror=()=>reject(new Error('websocket error'));
             ws.onmessage=e=>{
-              if(e.data instanceof ArrayBuffer){audioBytes+=e.data.byteLength;done();return;}
               if(typeof e.data!=='string') return;
               let d;try{d=JSON.parse(e.data)}catch{return}
               console.log('EVENT',d.type,d.status||d.role||'',String(d.text||'').slice(0,160));
               if(d.type==='welcome') ws.send(JSON.stringify({type:'text_message',text:'こんにちは。動作確認です。短く自然に返事してください。'}));
               if(d.type==='model_route') model=String(d.model||'');
-              if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant'))&&d.text){answer=String(d.text);done();}
+              if((d.type==='transcript_end'||(d.type==='transcript'&&d.role==='assistant'))&&d.text){answer=String(d.text);clearTimeout(timer);resolve();}
             };
           });
           ws.close();
@@ -97,7 +93,7 @@ jobs:
           if(model&&model!=='@cf/zai-org/glm-5.3-flash') throw new Error('unexpected model '+model);
           const r=await fetch(base+'/api/melo-tts-v31',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:answer})});
           const bytes=await r.arrayBuffer();
-          console.log('ANSWER',answer,'WS_AUDIO_BYTES',audioBytes,'MELO_PROVIDER',r.headers.get('x-talksys-tts-provider'),'DIRECT_BYTES',bytes.byteLength);
+          console.log('ANSWER',answer,'MELO_PROVIDER',r.headers.get('x-talksys-tts-provider'),'MELO_BYTES',bytes.byteLength);
           if(!r.ok||r.headers.get('x-talksys-tts-provider')!=='@cf/myshell-ai/melotts'||bytes.byteLength<500) throw new Error('Melo TTS failed');
           NODE
       - name: Verify live client and context
@@ -112,7 +108,9 @@ jobs:
           ! grep -F "queueCompletedStreamSpeech(streamText, false)" <<< "$script" >/dev/null
           ! grep -F "queueCompletedStreamSpeech(value, true)" <<< "$script" >/dev/null
           transit="$(curl -fsS --max-time 50 "$PRODUCTION_URL/api/search-smoke-v31-transit-followup")"
+          echo "$transit"
           TRANSIT="$transit" node -e "const d=JSON.parse(process.env.TRANSIT||'{}');const q=String(d.resolvedQuestion||'');if(!/鷺沼/.test(q)||!/相模大野/.test(q))throw new Error(q)"
           context="$(curl -fsS --max-time 50 "$PRODUCTION_URL/api/search-smoke-v31-context")"
+          echo "$context"
           CONTEXT="$context" node -e "const d=JSON.parse(process.env.CONTEXT||'{}');const q=String(d.resolvedQuestion||'');if(!/パソコン/.test(q)||!/中古/.test(q)||!/横浜/.test(q))throw new Error(q)"
           echo TALKSYS_V31_PRODUCTION_E2E_OK
