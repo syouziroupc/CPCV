@@ -1,0 +1,26 @@
+name: TalkSys v34 conversation probe once
+on:
+  push:
+    branches: [master]
+    paths: [.github/workflows/talksys-v34-conversation-probe-once.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reproduce reported PC consultation
+        run: |
+          set -euo pipefail
+          URL='https://talksys.syouziroupc.workers.dev'
+          health="$(curl -fsS "$URL/voice-health")"; echo "HEALTH=$health"
+          one="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data '{"text":"パソコンの買い替えについて相談したいんだけども。","history":[]}' "$URL/api/turn")"; echo "TURN1=$one"
+          answer1="$(ONE="$one" node -e "const d=JSON.parse(process.env.ONE); if(d.search) process.exit(2); process.stdout.write(d.answer||'')")"
+          payload="$(ANSWER1="$answer1" node -e "process.stdout.write(JSON.stringify({text:'ネットサーフィンができて安いやつがいいな。あんまり複雑な作業しないから簡単なやつでいい。',history:[{role:'user',content:'パソコンの買い替えについて相談したいんだけども。'},{role:'assistant',content:process.env.ANSWER1}]}))")"
+          two="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"; echo "TURN2=$two"
+          TWO="$two" node <<'NODE'
+          const d=JSON.parse(process.env.TWO);
+          if(d.search) throw new Error('second advice turn unexpectedly searched');
+          if(/価格\.com|ランキングや価格比較/.test(d.answer||'')) throw new Error('search-result-style answer regressed');
+          if(/具体的な内容を/.test(d.answer||'')) throw new Error('generic clarification regressed');
+          NODE
