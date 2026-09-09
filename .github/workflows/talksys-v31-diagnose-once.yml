@@ -1,4 +1,4 @@
-name: TalkSys v32 validate once
+name: TalkSys v32 deploy once
 
 on:
   push:
@@ -10,11 +10,15 @@ permissions:
   contents: read
 
 jobs:
-  validate:
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    environment: production
     env:
       TALKSYS_SHA: 89571c24a29380fb3309276659e0c5d9008ef5e0
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROD_ORIGIN: https://talksys.syouziroupc.workers.dev
     steps:
       - uses: actions/checkout@v6
         with:
@@ -24,16 +28,130 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-      - name: Validate v32 source and tests
+      - name: Deploy exact validated SHA
         run: |
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
           npm install --no-audit --no-fund
-          node --check src/glm-conversation-v32.js
-          node --check src/search-trace-client-v32.js
-          node --check src/cloudflare-live-client-v32.js
-          node --check src/worker-v32.js
-          node --check src/worker-v32-production.js
           npm test
-          npx wrangler deploy --dry-run
-          echo TALKSYS_V32_VALIDATION_OK
+          npx wrangler deploy | tee /tmp/wrangler-deploy.log
+          grep -E "Version ID|Uploaded|Deployed|Current Version ID" /tmp/wrangler-deploy.log || true
+      - name: Verify production health and live client
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 20); do
+            if curl -fsS "$PROD_ORIGIN/voice-health" -o /tmp/health.json; then
+              if node - <<'NODE'
+          const fs = require('fs');
+          const d = JSON.parse(fs.readFileSync('/tmp/health.json','utf8'));
+          const ok = d.voiceRevision === 'cloudflare-agent-v32-coherent-reliable-glm-melo'
+            && d.conversationModel === '@cf/zai-org/glm-5.3-flash'
+            && d.ttsPrimary === '@cf/myshell-ai/melotts'
+            && d.microphoneArchitecture === 'unified-capture-state-machine-v32'
+            && d.microphonePlatformBranches === false
+            && d.microphoneStartRequiresRealPcm === true
+            && d.microphoneFrameSamples === 640
+            && d.microphoneFrameBytes === 1280
+            && d.microphoneTransportAck === true;
+          if (!ok) { console.error(d); process.exit(1); }
+          console.log(JSON.stringify(d));
+          NODE
+              then break; fi
+            fi
+            if [ "$i" = 20 ]; then echo "production health did not converge" >&2; exit 1; fi
+            sleep 2
+          done
+          curl -fsS "$PROD_ORIGIN/cloudflare-live.js" -o /tmp/live.js
+          grep -q "unified-capture-state-machine-v32" /tmp/live.js
+          grep -q "talksys-capture-v32" /tmp/live.js
+          grep -q "captureState !== 'verified' || frameCount < 1" /tmp/live.js
+          grep -q "talksys-mic-transport" /tmp/live.js
+          if grep -Eq "IS_ANDROID|Xperia" /tmp/live.js; then echo "platform-specific microphone branch leaked into v32" >&2; exit 1; fi
+          echo TALKSYS_V32_HTTP_VERIFY_OK
+      - name: Production WebSocket text and PCM ingress smoke
+        run: |
+          set -euo pipefail
+          npm install --no-save --no-package-lock ws@8 >/dev/null 2>&1
+          node --input-type=module <<'NODE'
+          import WebSocket from 'ws';
+          const url = 'wss://talksys.syouziroupc.workers.dev/agents/talk-sys-voice-agent/default';
+          const ws = new WebSocket(url);
+          const deadline = setTimeout(() => fail(new Error('websocket smoke timeout')), 30000);
+          let welcomed = false;
+          let textSent = false;
+          let textReply = '';
+          let started = false;
+          let listening = false;
+          let micAck = null;
+          let closed = false;
+
+          function fail(err) {
+            if (closed) return;
+            closed = true;
+            clearTimeout(deadline);
+            console.error(err?.stack || err);
+            try { ws.close(); } catch {}
+            process.exitCode = 1;
+          }
+          function maybeDone() {
+            if (!textReply || !micAck || closed) return;
+            closed = true;
+            clearTimeout(deadline);
+            console.log('TEXT_REPLY=' + textReply.replace(/\s+/g, ' ').slice(0, 300));
+            console.log('MIC_ACK=' + JSON.stringify(micAck));
+            ws.send(JSON.stringify({ type: 'end_call' }));
+            setTimeout(() => { try { ws.close(); } catch {}; console.log('TALKSYS_V32_WS_PCM_VERIFY_OK'); }, 100);
+          }
+          function sendPcm() {
+            if (!listening || micAck || closed) return;
+            let phase = 0;
+            let n = 0;
+            const timer = setInterval(() => {
+              if (closed || micAck || n >= 30) { clearInterval(timer); return; }
+              const ab = new ArrayBuffer(1280);
+              const view = new DataView(ab);
+              for (let i = 0; i < 640; i++) {
+                const sample = Math.round(Math.sin(phase) * 500);
+                view.setInt16(i * 2, sample, true);
+                phase += 2 * Math.PI * 440 / 16000;
+              }
+              ws.send(Buffer.from(ab));
+              n += 1;
+            }, 40);
+          }
+          ws.on('open', () => ws.send(JSON.stringify({ type: 'hello', protocol_version: 1 })));
+          ws.on('error', fail);
+          ws.on('message', (raw, isBinary) => {
+            if (isBinary) return;
+            let data;
+            try { data = JSON.parse(raw.toString()); } catch { return; }
+            if (data.type === 'welcome' && !welcomed) {
+              welcomed = true;
+              ws.send(JSON.stringify({ type: 'text_message', text: 'パソコンの買い替えについて相談したいです' }));
+              textSent = true;
+              return;
+            }
+            if (textSent && (data.type === 'transcript_end' || (data.type === 'transcript' && data.role === 'assistant'))) {
+              const t = String(data.text || '').trim();
+              if (t) {
+                textReply = t;
+                if (!started) {
+                  started = true;
+                  ws.send(JSON.stringify({ type: 'start_call', preferred_format: 'mp3' }));
+                }
+              }
+            }
+            if (data.type === 'status' && data.status === 'listening') {
+              listening = true;
+              sendPcm();
+            }
+            if (data.type === 'mic_transport') {
+              if (!(Number(data.frames) >= 1) || data.sampleRate !== 16000 || data.format !== 's16le-mono') return fail(new Error('invalid mic_transport '+JSON.stringify(data)));
+              micAck = data;
+              maybeDone();
+            }
+          });
+          ws.on('close', () => {
+            if (!closed && (!textReply || !micAck)) fail(new Error('socket closed before verification'));
+          });
+          NODE
