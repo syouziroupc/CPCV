@@ -1,0 +1,42 @@
+name: TalkSys Grok provider debug once
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-grok-provider-debug-once.yml
+permissions:
+  contents: read
+jobs:
+  probe-grok:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Probe Grok text and TTS via Cloudflare REST
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          chat_body='{"model":"xai/grok-4.20-0309-non-reasoning","messages":[{"role":"user","content":"日本語で OK とだけ答えて"}],"max_tokens":16,"stream":false}'
+          chat_code="$(curl -sS -o /tmp/chat.json -w '%{http_code}' --max-time 30 "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/v1/chat/completions" -H "$auth" -H 'Content-Type: application/json' --data "$chat_body")"
+          echo "CHAT_HTTP=$chat_code"
+          cat /tmp/chat.json
+          echo
+          tts_body='{"model":"xai/grok-tts","input":{"text":"音声テストです。","voice_id":"ara","language":"ja"}}'
+          tts_code="$(curl -sS -o /tmp/tts.json -w '%{http_code}' --max-time 30 "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai/run" -H "$auth" -H 'Content-Type: application/json' --data "$tts_body")"
+          echo "TTS_HTTP=$tts_code"
+          cat /tmp/tts.json
+          echo
+          node - <<'NODE'
+          const fs=require('fs');
+          for(const [name,path] of [['chat','/tmp/chat.json'],['tts','/tmp/tts.json']]){
+            let d={};try{d=JSON.parse(fs.readFileSync(path,'utf8'))}catch{}
+            const error=d?.errors?.[0]?.message||d?.error?.message||d?.message||'';
+            const success=d.success ?? (d.state==='Completed');
+            console.log(`${name.toUpperCase()}_SUMMARY success=${success} error=${String(error).slice(0,500)}`);
+          }
+          NODE
