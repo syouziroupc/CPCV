@@ -1,0 +1,81 @@
+name: TalkSys v40 deploy once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/talksys-v40-deploy-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 18
+    steps:
+      - name: Checkout TalkSys exact revision
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: 8e34862e664e8739bd898f0c8923007963f97d78
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Require Cloudflare production credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Install and validate v40
+        run: |
+          npm install --no-audit --no-fund
+          node --test tests/v40-japanese-native-fallback.test.mjs
+          npm test
+          npx wrangler deploy --dry-run --config wrangler.jsonc
+
+      - name: Deploy TalkSys v40 production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy --config wrangler.jsonc
+
+      - name: Verify live Japanese-only native TTS contract
+        shell: bash
+        run: |
+          node <<'NODE'
+          const base='https://talksys.syouziroupc.workers.dev';
+          const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+          let health=null;
+          for(let i=0;i<24;i++){
+            try{const r=await fetch(base+'/voice-health',{headers:{'cache-control':'no-cache'}});if(r.ok){const j=await r.json();if(j.voiceRevision==='talksys-v40-japanese-native-fallback'&&j.languageMode==='ja-only'&&j.serverTtsEnabled===false&&j.grokTtsActive===false&&j.melottsFallback===false){health=j;break;}}}catch{}
+            await sleep(5000);
+          }
+          if(!health)throw new Error('v40 health did not converge');
+          console.log('HEALTH',JSON.stringify(health,null,2));
+
+          const js=await (await fetch(base+'/talk-v40.js',{headers:{'cache-control':'no-cache'}})).text();
+          for(const needle of ['lang=ja-JPで端末の自動選択を使用',"u.lang='ja-JP'",'auto-lang-ja-JP','英語発話を日本語専用モードで遮断（履歴へ保存しません）'])if(!js.includes(needle))throw new Error('live client missing '+needle);
+          const speak=js.slice(js.indexOf('async function speak(text,options={})'),js.indexOf('function interruptSpeechForBargeIn'));
+          if(speak.includes('playServerTtsChunk')||speak.includes('/api/tts'))throw new Error('server TTS still active in live speak path');
+
+          const english=await fetch(base+'/api/turn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'Where is Beppu Onsen in Japan?',history:[]})});
+          const ej=await english.json();console.log('ENGLISH_GUARD',JSON.stringify(ej,null,2));
+          if(!english.ok||ej.answer!=='日本語でお話しください。'||ej.search!==false)throw new Error('English guard failed');
+
+          const tech=await fetch(base+'/api/turn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'Windows 11',history:[]})});
+          const tj=await tech.json();console.log('TECH_TERM',JSON.stringify(tj,null,2));
+          if(!tech.ok||tj.route==='ja-only-input-guard-v40')throw new Error('technical term falsely blocked');
+
+          const tts=await fetch(base+'/api/tts',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:'こんにちは'})});
+          const tt=await tts.json();console.log('SERVER_TTS_DISABLED',tts.status,JSON.stringify(tt));
+          if(tts.status!==503)throw new Error('server TTS should be disabled');
+          NODE
