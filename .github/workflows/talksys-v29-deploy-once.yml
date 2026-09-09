@@ -1,0 +1,93 @@
+name: TalkSys v29 deploy once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/talksys-v29-deploy-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys-v29:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 18
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TALKSYS_SHA: abfa16128b95bab0624ddbf93826d7abd22ba0f6
+      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
+      EXPECTED_VOICE_REVISION: cloudflare-agent-v29-grok-tts-phone
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: abfa16128b95bab0624ddbf93826d7abd22ba0f6
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Require production credentials
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+      - name: Validate exact Grok v29 source
+        run: |
+          npm install --no-audit --no-fund
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
+          node --check src/grok-conversation-v29.js
+          node --check src/grok-japanese-tts-v29.js
+          node --check src/grok-phone-v29.js
+          node --check src/worker-v29.js
+          node --check src/worker-v29-production.js
+          node --check src/cloudflare-live-client-v26.js
+          npm test
+          npx wrangler deploy --dry-run
+      - name: Deploy exact v29 SHA
+        run: |
+          npx wrangler deploy
+          npx wrangler deployments status
+      - name: Verify production Grok v29 contract
+        run: |
+          body=""
+          for attempt in $(seq 1 18); do
+            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
+            current="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||''))")"
+            if [ "$current" = "$EXPECTED_VOICE_REVISION" ]; then break; fi
+            if [ "$attempt" -eq 18 ]; then
+              echo "::error::Production did not reach $EXPECTED_VOICE_REVISION"
+              exit 1
+            fi
+            sleep 3
+          done
+          BODY="$body" node <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          if(d.voiceRevision!=='cloudflare-agent-v29-grok-tts-phone') throw new Error('revision mismatch');
+          if(d.architecture!=='grok-centered-browser-and-pstn') throw new Error('architecture mismatch');
+          if(d.conversationModel!=='xai/grok-4.20-0309-non-reasoning'||d.searchAnswerModel!=='xai/grok-4.20-0309-non-reasoning') throw new Error('Grok conversation mismatch');
+          if(d.conversationModelFallback!==null||d.conversationEmergencyFallback!==null||d.multiModelFallback!==false) throw new Error('cross-model fallback still active');
+          for(const k of ['qwenActive','glmActive','deepSeekActive','gptOssActive']) if(d[k]!==false) throw new Error(k+' active');
+          if(d.ttsPrimary!=='xai/grok-tts'||d.ttsFallback!==null) throw new Error('Grok TTS mismatch');
+          if(d.phoneEnabled!==true||d.phoneStt!=='xai/grok-stt'||d.phoneInputCodec!=='mulaw'||d.phoneOutputCodec!=='mulaw'||d.phoneSampleRate!==8000||d.phoneBargeInClear!==true) throw new Error('phone contract mismatch');
+          console.log(JSON.stringify({revision:d.voiceRevision,model:d.conversationModel,tts:d.ttsPrimary,phoneStt:d.phoneStt,codec:d.phoneInputCodec,sampleRate:d.phoneSampleRate}));
+          NODE
+      - name: Verify phone gateway Android client and search context
+        run: |
+          phone="$(curl -fsS --max-time 20 "$PRODUCTION_URL/phone/health")"
+          PHONE="$phone" node -e "const d=JSON.parse(process.env.PHONE||'{}');if(!d.ok||d.transport!=='twilio-bidirectional-media-stream'||d.sttModel!=='xai/grok-stt'||d.ttsModel!=='xai/grok-tts'||d.sampleRate!==8000)throw new Error('phone health failed')"
+
+          twiml="$(curl -fsS --max-time 20 "$PRODUCTION_URL/phone/incoming")"
+          grep -F '<Connect><Stream url="wss://talksys.syouziroupc.workers.dev/phone/media">' <<< "$twiml" >/dev/null
+          code="$(curl -sS -o /tmp/phone-media.txt -w '%{http_code}' --max-time 20 "$PRODUCTION_URL/phone/media")"
+          test "$code" = "426"
+
+          script="$(curl -fsS --max-time 20 "$PRODUCTION_URL/cloudflare-live.js")"
+          for marker in verifyAndroidCapturePipeline talksys-mic-no-frames resumeMobileRuntime callStartPending talksys-barge-in; do grep -F "$marker" <<< "$script" >/dev/null; done
+
+          transit="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v29-transit-followup")"
+          TRANSIT="$transit" node -e "const d=JSON.parse(process.env.TRANSIT||'{}');const q=String(d.resolvedQuestion||'');if(!/鷺沼/.test(q)||!/相模大野/.test(q))throw new Error('transit context failed: '+q)"
+          shopping="$(curl -fsS --max-time 35 "$PRODUCTION_URL/api/search-smoke-v29-context")"
+          SHOPPING="$shopping" node -e "const d=JSON.parse(process.env.SHOPPING||'{}');const q=String(d.resolvedQuestion||'');if(!/パソコン/.test(q)||!/中古/.test(q)||!/横浜/.test(q)||/YouTube|ネットサーフィン/i.test(q))throw new Error('shopping context failed: '+q)"
+          echo GROK_V29_PRODUCTION_OK
