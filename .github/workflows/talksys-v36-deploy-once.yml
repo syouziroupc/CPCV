@@ -18,7 +18,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: 0d0f6d47146923d7e4f6cb3c755e4e2cec6ff0ff
+      TALKSYS_SHA: 6b5a4ca6e751a4e303dc660ed25660169617afbb
       URL: https://talksys.syouziroupc.workers.dev
       EXPECTED: talksys-v36-search-voice-barge
     steps:
