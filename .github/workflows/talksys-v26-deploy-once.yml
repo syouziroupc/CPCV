@@ -18,7 +18,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      TALKSYS_SHA: ff1d93813636e378536b8219e3a55b04de5dcbce
+      TALKSYS_SHA: 67264ffb5276e7456592bb934ea235b228613f76
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
       EXPECTED_VOICE_REVISION: cloudflare-agent-v26-grok-tts-android-realtime
     steps:
@@ -44,6 +44,7 @@ jobs:
           node --check src/cloudflare-live-client-v26.js
           node --check src/grok-japanese-tts-v26.js
           node --check src/glm-conversation-v25.js
+          node --check src/search-v26.js
           npm test
           npx wrangler deploy --dry-run
       - name: Deploy TalkSys v26 to Cloudflare production
@@ -70,7 +71,7 @@ jobs:
           if (d.ttsFallback !== '@cf/myshell-ai/melotts') throw new Error('Melo fallback missing');
           for (const key of [
             'glmOnlyConversation','glmVisibleFirstTokenDeadline','glmReasoningOnlyStreamEscape','inFlightUserContext',
-            'mobileAudioPipelineV26','androidAudioWorkletPreferred','androidScriptProcessorFallback',
+            'directTransitEvidenceFallback','mobileAudioPipelineV26','androidAudioWorkletPreferred','androidScriptProcessorFallback',
             'androidPcmFrameProbeBeforeCall','androidCaptureBackendFailover','androidLifecycleResume','mobileWebSocketHardRecovery'
           ]) if (d[key] !== true) throw new Error(`${key} is not true`);
           NODE
@@ -91,11 +92,12 @@ jobs:
           echo "$body"
           BODY="$body" node <<'NODE'
           const d = JSON.parse(process.env.BODY || '{}');
-          if (!d.ok) throw new Error('transit follow-up smoke returned no evidence');
+          if (!d.ok) throw new Error(`transit follow-up has no verified evidence: ${d.directTransitError || 'unknown'}`);
           const q = String(d.resolvedQuestion || '');
           if (!/鷺沼/.test(q) || !/相模大野/.test(q) || !/どうですか/.test(q)) throw new Error(`in-flight context lost: ${q}`);
           const queries = (d.queries || []).join(' ');
           if (/^どうですか(?:\s+公式)?$/m.test(queries)) throw new Error(`generic どうですか search survived: ${queries}`);
+          if (!(d.sources || []).some((s) => /鷺沼/.test(JSON.stringify(s)) && /相模大野/.test(JSON.stringify(s)))) throw new Error('route evidence does not contain both endpoints');
           NODE
       - name: Verify existing contextual shopping regression
         run: |
