@@ -1,0 +1,54 @@
+name: TalkSys v42 R2 diagnostic once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/talksys-v42-r2-diagnostic-once.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose-r2:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: cffff6fe8950a5e0e70f62dc783ebd25a02eb667
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - run: npm install --no-audit --no-fund
+      - name: Diagnose Cloudflare R2 REST and Wrangler
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set +e
+          echo '=== REST list R2 buckets ==='
+          CODE=$(curl -sS -o /tmp/r2-list.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets?per_page=100")
+          echo "HTTP=$CODE"
+          cat /tmp/r2-list.json
+          echo
+
+          echo '=== Wrangler list R2 buckets ==='
+          npx wrangler r2 bucket list > /tmp/wrangler-r2.txt 2>&1
+          WRC=$?
+          echo "WRANGLER_RC=$WRC"
+          cat /tmp/wrangler-r2.txt
+          echo
+
+          echo '=== Token verify ==='
+          VCODE=$(curl -sS -o /tmp/token-verify.json -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/user/tokens/verify")
+          echo "TOKEN_HTTP=$VCODE"
+          cat /tmp/token-verify.json
+          echo
+
+          if [ "$CODE" = "200" ]; then exit 0; fi
+          exit 2
