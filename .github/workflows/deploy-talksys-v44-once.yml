@@ -1,0 +1,99 @@
+name: Deploy TalkSys v44 once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/deploy-talksys-v44-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 20
+    steps:
+      - name: Checkout TalkSys main
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: main
+          path: talksys
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+
+      - name: Install TalkSys dependencies
+        working-directory: talksys
+        run: npm install --no-audit --no-fund
+
+      - name: Validate TalkSys v44 before production deploy
+        working-directory: talksys
+        run: |
+          set -euo pipefail
+          node --check src/search-probes-v44.js
+          node --check src/search-v44.js
+          node --check src/worker-v44.js
+          node --test tests/v44-deep-search-default.test.mjs
+          npx wrangler deploy --dry-run
+
+      - name: Require Cloudflare production credentials
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+
+      - name: Deploy TalkSys v44 to Cloudflare Workers
+        working-directory: talksys
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler deploy
+
+      - name: Verify TalkSys v44 production
+        shell: bash
+        env:
+          URL: https://talksys.syouziroupc.workers.dev
+        run: |
+          set -euo pipefail
+          body=""
+          revision=""
+          for attempt in $(seq 1 20); do
+            body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
+            revision="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision||d.revision||''))")"
+            [ "$revision" = "talksys-v44-default-exhaustive-search" ] && break
+            [ "$attempt" -eq 20 ] && { echo "$body"; echo "Expected v44 but got ${revision:-none}"; exit 1; }
+            sleep 3
+          done
+          BODY="$body" node <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          if(d.voiceRevision!=='talksys-v44-default-exhaustive-search') throw new Error('wrong revision');
+          if(d.webSearch!==true) throw new Error('web search disabled');
+          if(d.searchDefault!=='all-substantive-turns') throw new Error('search default mismatch');
+          if(d.searchEngineRotation!==true || d.searchEngineRetry!==true) throw new Error('search resilience missing');
+          if(d.searchHostDiversity!==true) throw new Error('host diversity missing');
+          console.log(JSON.stringify({revision:d.voiceRevision, webSearch:d.webSearch, searchDefault:d.searchDefault, searchEngineRotation:d.searchEngineRotation, searchEngineRetry:d.searchEngineRetry, searchHostDiversity:d.searchHostDiversity}));
+          NODE
+
+      - name: Smoke test deep search planning
+        shell: bash
+        run: |
+          set -euo pipefail
+          payload='{"text":"Cloudflare Workersとは何？","history":[]}'
+          out="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data "$payload" https://talksys.syouziroupc.workers.dev/api/plan)"
+          OUT="$out" node <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}');
+          if(!d.ok || d.search!==true || d.planner!=='deep-search-v44') throw new Error(JSON.stringify(d));
+          console.log(JSON.stringify({ok:d.ok,search:d.search,planner:d.planner,searchMode:d.searchMode}));
+          NODE
