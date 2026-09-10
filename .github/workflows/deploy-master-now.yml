@@ -66,7 +66,7 @@ jobs:
           if(d.bingRssEnabled!==false||d.generalWebScraping!==false) throw new Error('legacy web path '+JSON.stringify(d));
           if(d.webSearch!==false||d.webRetrieval!==true) throw new Error('web metadata '+JSON.stringify(d));
           if(d.searchDirectPrimaryResolver!==true||d.shoppingApiFirst!==true) throw new Error('resolver/api metadata '+JSON.stringify(d));
-          if(!d.shoppingApiRegistry||!d.shoppingApiRegistry.yahoo_shopping||!d.shoppingApiRegistry.rakuten_ichiba) throw new Error('shopping registry '+JSON.stringify(d));
+          if(!d.shoppingApiRegistry||!d.shoppingApiRegistry.yahoo_jp_shopping||!d.shoppingApiRegistry.rakuten_ichiba) throw new Error('shopping registry '+JSON.stringify(d));
           if(d.searchDirectorModel!=='@cf/qwen/qwen3-30b-a3b-fp8') throw new Error('director '+JSON.stringify(d));
           if(d.weatherDirect!=='jma-api-first-with-met-norway-fallback'||d.openMeteoExcluded!==true) throw new Error('weather metadata '+JSON.stringify(d));
           NODE
