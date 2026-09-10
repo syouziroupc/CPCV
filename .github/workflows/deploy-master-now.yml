@@ -13,37 +13,34 @@ concurrency:
 
 jobs:
   deploy:
-    name: Deploy TalkSys sequential evidence search
+    name: Deploy TalkSys API-first v45
     if: contains(github.event.head_commit.message, '[deploy-talksys]')
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
     environment: production
     steps:
       - name: Checkout TalkSys exact revision
         uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 60b05838e3dae9d4076e95dda819267d8757c7aa
+          ref: 27894fff678dbe3898bd0c940190a0e7728003de
           path: talksys
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v6
         with:
           node-version: 22
 
-      - name: Install and validate TalkSys
+      - name: Install and validate exact TalkSys revision
         working-directory: talksys
         run: |
-          npm install --no-audit --no-fund
-          node --check src/query-result-gate-v44.js
-          node --check src/research-sequence-v44.js
-          node --check src/research-plan-v44.js
-          node --check src/search-probes-v44.js
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm test
+          node --check src/free-api-tools-v45.js
+          node --check src/free-api-knowledge-v45.js
           node --check src/search-v44.js
           node --check src/worker-v44.js
-          node --test tests/v44-search-sequencing.test.mjs
-          node --test tests/v44-query-quality.test.mjs
-          node --test tests/v44-deep-search-default.test.mjs
           npx wrangler deploy --dry-run
 
       - name: Verify Cloudflare production credentials
@@ -51,17 +48,18 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          set -euo pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           test -n "$CLOUDFLARE_ACCOUNT_ID"
 
-      - name: Deploy TalkSys exact revision
+      - name: Deploy exact TalkSys revision
         working-directory: talksys
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
 
-      - name: Verify production sequential architecture
+      - name: Verify production v45 architecture
         env:
           URL: https://talksys.syouziroupc.workers.dev
         run: |
@@ -69,19 +67,39 @@ jobs:
           body=""
           for attempt in $(seq 1 20); do
             body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
-            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(d.voiceRevision==='talksys-v44-default-exhaustive-search'&&d.searchRevision==='deep-search-v44-sequential-evidence-search'&&d.searchQuestionFirstPlanning===true&&d.searchGapDrivenFollowups===true&&d.searchResearchStateMachine===true&&d.searchSequentialDiscovery===true&&d.searchQueryResultGate===true&&d.searchAuthorityAfterRelevance===true))")"
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};const r=d.freeApiRegistry||{};process.stdout.write(String(d.voiceRevision==='talksys-v45-api-first-parallel-free-tools-knowledge'&&d.apiFirst===true&&d.apiParallel===true&&d.openMeteoExcluded===true&&d.searchDirectorModel==='@cf/qwen/qwen3-30b-a3b-fp8'&&r.jma_weather&&r.frankfurter&&r.usgs_earthquake&&r.nager_holidays&&r.crossref&&r.world_bank_wdi))")"
             [ "$ok" = "true" ] && break
             [ "$attempt" -eq 20 ] && { echo "$body"; exit 1; }
             sleep 3
           done
           echo "$body"
 
-      - name: Smoke test real sequential research turn
+      - name: Smoke test free structured APIs
         env:
           URL: https://talksys.syouziroupc.workers.dev
         run: |
           set -euo pipefail
-          turn='{"text":"3万円以下の中古ノートPCを動画視聴用に選ぶなら何を確認して探すべき？","history":[],"searchPlan":{"planner":"deep-search-v44"}}'
-          out="$(curl -fsS --max-time 75 -H 'content-type: application/json' --data "$turn" "$URL/api/turn")"
+          smoke() {
+            local label="$1"
+            local text="$2"
+            local expected="$3"
+            local payload out
+            payload="$(node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$text")"
+            out="$(curl -fsS --max-time 75 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
+            echo "[$label] $out"
+            OUT="$out" EXPECTED="$expected" node -e "const d=JSON.parse(process.env.OUT||'{}');const expected=process.env.EXPECTED;const tools=(d.apiSources||[]).map(x=>x.tool);if(!d.ok||d.route!=='api-first-v45'||d.apiFirst!==true||!tools.includes(expected))throw new Error(JSON.stringify({label:'$label',ok:d.ok,route:d.route,apiFirst:d.apiFirst,apiSources:d.apiSources,apiDiagnostics:d.apiDiagnostics,error:d.error}));console.log(JSON.stringify({label:'$label',tool:expected,search:d.search,mode:d.searchMode,apiDiagnostics:d.apiDiagnostics}));"
+          }
+          smoke weather '別府市の今日の天気は？' jma_weather
+          smoke fx '100米ドルは日本円でいくら？' frankfurter
+          smoke macro '日本の一人当たりGDPは？' world_bank_wdi
+          smoke scholarly 'DOI 10.1038/s41586-020-2649-2 の論文情報を教えて' crossref
+
+      - name: Smoke test Qwen-directed web fallback
+        env:
+          URL: https://talksys.syouziroupc.workers.dev
+        run: |
+          set -euo pipefail
+          turn='{"text":"3万円以下の中古ノートPCを動画視聴用に選ぶなら何を確認して探すべき？","history":[]}'
+          out="$(curl -fsS --max-time 90 -H 'content-type: application/json' --data "$turn" "$URL/api/turn")"
           echo "$out"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const x=d.searchDiagnostics||{};const src=d.sources||[];const bad=src.filter(s=>/results\.vote\.wa\.gov|accounts\.google\.com|youtube\.com\/.*(?:login|signin)|microsoft\.com\/.*(?:login|signin)/i.test(String(s.url||'')));if(!d.ok||d.route!=='deep-search-v44'||x.searchRevision!=='deep-search-v44-sequential-evidence-search'||x.questionFirstPlanning!==true||x.gapDrivenFollowups!==true||x.sequentialDiscovery!==true||x.queryResultGate!==true||x.authorityAfterRelevance!==true||!(Number(x.researchFacetCount)>=1)||bad.length)throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error,diagnostics:x,badSources:bad,queries:d.queries,sources:src.slice(0,8)}));console.log(JSON.stringify({route:d.route,queries:d.queries,coverage:d.searchCoverage,diagnostics:x,candidateCount:x.candidateCount,candidateNames:x.candidateNames,sources:src.slice(0,8).map(s=>({title:s.title,url:s.url}))}));"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const x=d.searchDiagnostics||{};const src=d.sources||[];const bad=src.filter(s=>/results\.vote\.wa\.gov|accounts\.google\.com|youtube\.com\/.*(?:login|signin)|microsoft\.com\/.*(?:login|signin)/i.test(String(s.url||'')));if(!d.ok||d.route!=='api-first-v45'||d.search!==true||x.searchDirectorModel!=='@cf/qwen/qwen3-30b-a3b-fp8'||x.queryResultGate!==true||x.authorityAfterRelevance!==true||bad.length)throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error,diagnostics:x,badSources:bad,queries:d.queries,sources:src.slice(0,8)}));console.log(JSON.stringify({route:d.route,queries:d.queries,coverage:d.searchCoverage,diagnostics:x,sources:src.slice(0,8).map(s=>({title:s.title,url:s.url}))}));"
