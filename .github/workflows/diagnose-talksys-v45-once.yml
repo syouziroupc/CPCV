@@ -1,0 +1,35 @@
+name: Diagnose TalkSys v45 production timeout
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: contains(github.event.head_commit.message, '[diagnose-talksys]')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Probe production turn classes separately
+        shell: bash
+        env:
+          URL: https://talksys.syouziroupc.workers.dev
+        run: |
+          set +e
+          probe() {
+            label="$1"; text="$2"; limit="$3"
+            payload="$(node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$text")"
+            echo "=== $label ==="
+            start=$(date +%s)
+            body=$(curl -sS --max-time "$limit" -w '\n__HTTP__:%{http_code}\n__TIME__:%{time_total}\n' -H 'content-type: application/json' --data "$payload" "$URL/api/turn" 2>&1)
+            rc=$?
+            end=$(date +%s)
+            echo "rc=$rc wall=$((end-start))s"
+            echo "$body"
+          }
+          probe calc '12345÷15' 12
+          probe clarify '42' 12
+          probe stable 'RAMとSSDの違いを短く説明して' 35
+          probe noexternal 'Web検索は使わないで。RAMとSSDの違いを短く説明して' 35
