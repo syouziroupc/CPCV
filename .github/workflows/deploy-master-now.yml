@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: b71ffeaef17d1571f44520832250c39f94a4bb84
+          ref: 0e7ef6b3eebb582c8a0f2a424945ea9c67c090df
           path: talksys
 
       - name: Setup Node.js
@@ -68,30 +68,34 @@ jobs:
           body=""
           for attempt in $(seq 1 20); do
             body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
-            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(Boolean(d.voiceRevision==='talksys-v45-unified-router-no-v43-turn-delegation'&&d.unifiedTurnRouter===true&&d.legacyV43TurnDelegation===false&&d.localDeterministic===true&&d.ambiguityGate===true&&d.explicitNoExternalGuard===true&&d.apiFirst===true&&d.apiParallel===true&&d.searchDirectorModel==='@cf/qwen/qwen3-30b-a3b-fp8'&&d.searchDefault==='intent-routed-v45'&&d.specializedSearchRoutesPreserved===false)))")"
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(Boolean(d.voiceRevision==='talksys-v45-unified-router-no-v43-turn-delegation'&&d.unifiedTurnRouter===true&&d.legacyV43TurnDelegation===false&&d.localDeterministic===true&&d.modelTimeoutMs===12000&&d.modelTimeoutFallback===true&&d.ambiguityGate===true&&d.explicitNoExternalGuard===true&&d.apiFirst===true&&d.apiParallel===true&&d.searchDirectorModel==='@cf/qwen/qwen3-30b-a3b-fp8'&&d.searchDefault==='intent-routed-v45'&&d.specializedSearchRoutesPreserved===false)))")"
             [ "$ok" = "true" ] && break
             [ "$attempt" -eq 20 ] && { echo "$body"; exit 1; }
             sleep 3
           done
           echo "$body"
 
-      - name: Smoke test local deterministic and no-search routing
+      - name: Smoke test local routes separately
         env:
           URL: https://talksys.syouziroupc.workers.dev
         run: |
           set -euo pipefail
           turn() {
-            local text="$1"
-            local payload
+            local label="$1" text="$2" max="$3"
+            local payload out
             payload="$(node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$text")"
-            curl -fsS --max-time 45 -H 'content-type: application/json' --data "$payload" "$URL/api/turn"
+            out="$(curl -fsS --max-time "$max" -w '\n__TIME__:%{time_total}' -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
+            echo "[$label] $out" >&2
+            printf '%s' "$out" | sed '/^__TIME__:/d'
           }
-          calc="$(turn '12345÷15')"
+          calc="$(turn calc '12345÷15' 15)"
           CALC="$calc" node -e "const d=JSON.parse(process.env.CALC||'{}');if(!d.ok||d.route!=='deterministic-v45'||d.search!==false||!String(d.answer||'').includes('823'))throw new Error(process.env.CALC);"
-          clarify="$(turn '42')"
+          clarify="$(turn clarify '42' 15)"
           CLARIFY="$clarify" node -e "const d=JSON.parse(process.env.CLARIFY||'{}');if(!d.ok||d.route!=='clarification-v45'||d.search!==false||d.clarificationRequired!==true)throw new Error(process.env.CLARIFY);"
-          stable="$(turn 'RAMとSSDの違いを短く説明して')"
-          STABLE="$stable" node -e "const d=JSON.parse(process.env.STABLE||'{}');if(!d.ok||d.route!=='local-conversation-v45'||d.search!==false)throw new Error(process.env.STABLE);"
+          stable="$(turn stable 'RAMとSSDの違いを短く説明して' 20)"
+          STABLE="$stable" node -e "const d=JSON.parse(process.env.STABLE||'{}');if(!d.ok||d.search!==false||!['local-conversation-v45','local-mechanical-fallback-v45'].includes(d.route))throw new Error(process.env.STABLE);"
+          noexternal="$(turn noexternal 'Web検索は使わないで。RAMとSSDの違いを短く説明して' 20)"
+          NOEXTERNAL="$noexternal" node -e "const d=JSON.parse(process.env.NOEXTERNAL||'{}');if(!d.ok||d.search!==false||!['local-conversation-v45','local-mechanical-fallback-v45'].includes(d.route))throw new Error(process.env.NOEXTERNAL);"
 
       - name: Smoke test structured APIs
         env:
@@ -99,14 +103,12 @@ jobs:
         run: |
           set -euo pipefail
           smoke() {
-            local label="$1"
-            local text="$2"
-            local expected="$3"
+            local label="$1" text="$2" expected="$3"
             local payload out
             payload="$(node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$text")"
             out="$(curl -fsS --max-time 75 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
             echo "[$label] $out"
-            OUT="$out" EXPECTED="$expected" node -e "const d=JSON.parse(process.env.OUT||'{}');const expected=process.env.EXPECTED;const tools=(d.apiSources||[]).map(x=>x.tool);if(!d.ok||d.route!=='api-first-v45'||d.apiFirst!==true||!tools.includes(expected))throw new Error(JSON.stringify({label:'$label',ok:d.ok,route:d.route,apiFirst:d.apiFirst,apiSources:d.apiSources,apiDiagnostics:d.apiDiagnostics,error:d.error}));"
+            OUT="$out" EXPECTED="$expected" node -e "const d=JSON.parse(process.env.OUT||'{}');const expected=process.env.EXPECTED;const tools=(d.apiSources||[]).map(x=>x.tool);if(!d.ok||d.route!=='api-first-v45'||d.apiFirst!==true||!tools.includes(expected))throw new Error(JSON.stringify({label:'$label',ok:d.ok,route:d.route,apiFirst:d.apiFirst,apiSources:d.apiSources,apiDiagnostics:d.apiDiagnostics,error:d.error,localError:d.localError}));"
           }
           smoke weather '別府市の今日の天気は？' jma_weather
           smoke fx '100米ドルは日本円でいくら？' frankfurter
@@ -120,4 +122,4 @@ jobs:
           turn='{"text":"3万円以下の中古ノートPCを動画視聴用に選ぶなら何を確認して探すべき？","history":[]}'
           out="$(curl -fsS --max-time 90 -H 'content-type: application/json' --data "$turn" "$URL/api/turn")"
           echo "$out"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const x=d.searchDiagnostics||{};const src=d.sources||[];const bad=src.filter(s=>/results\.vote\.wa\.gov|accounts\.google\.com|gamewith\.jp/i.test(String(s.url||'')));if(!d.ok||d.route!=='api-first-v45'||d.search!==true||x.searchDirectorModel!=='@cf/qwen/qwen3-30b-a3b-fp8'||x.queryResultGate!==true||x.authorityAfterRelevance!==true||bad.length)throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error,diagnostics:x,badSources:bad,queries:d.queries,sources:src.slice(0,8)}));"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const x=d.searchDiagnostics||{};const src=d.sources||[];const bad=src.filter(s=>/results\.vote\.wa\.gov|accounts\.google\.com|gamewith\.jp/i.test(String(s.url||'')));if(!d.ok||d.route!=='api-first-v45'||d.search!==true||x.searchDirectorModel!=='@cf/qwen/qwen3-30b-a3b-fp8'||x.queryResultGate!==true||x.authorityAfterRelevance!==true||bad.length)throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error,localError:d.localError,diagnostics:x,badSources:bad,queries:d.queries,sources:src.slice(0,8)}));"
