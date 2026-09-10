@@ -1,0 +1,57 @@
+name: Smoke TalkSys semantic fuzz v45
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/smoke-talksys-semantic-fuzz-v45.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: contains(github.event.head_commit.message, '[smoke-talksys-fuzz]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Run semantic fuzz matrix
+        env:
+          URL: https://talksys.syouziroupc.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >/tmp/fuzz.mjs <<'NODE'
+          const base=process.env.URL;
+          const cases=[
+            {id:'no_web_1',text:'Web検索は使わないで。RAMとSSDの違いを説明して',search:false},
+            {id:'no_web_2',text:'外部アクセス禁止。2進数1010は10進数でいくつ？',search:false,must:/10/},
+            {id:'no_web_3',text:'検索禁止で答えて。HTTP 404って何？',search:false},
+            {id:'subjective_2',text:'遠足ならバナナっておやつ扱い？',search:false},
+            {id:'casual_2',text:'あーもう眠いしだるい',search:false},
+            {id:'memory_2',text:'今まで何の話してたっけ？',history:[{role:'user',content:'X79のBIOS更新について話そう'},{role:'assistant',content:'了解です'}],search:false,must:/X79|BIOS/i},
+            {id:'math_div',text:'12345÷15はいくつ？',search:false,must:/823/},
+            {id:'math_pct',text:'24800円を15%引きするといくら？',search:false,must:/21080|21,080/},
+            {id:'leap_invalid',text:'2025年2月29日は存在する？',search:false,must:/存在しない|ありません|ない/},
+            {id:'unit_temp',text:'華氏86度は摂氏何度？',search:false,must:/30/},
+            {id:'bare_number',text:'42',search:false},
+            {id:'ambiguous_chuo',text:'中央区の中古PC店を探して。ただしどの中央区か分からないなら勝手に都市を決めないで',search:false,must:/どの|都市|市|区.*確認|場所/},
+            {id:'spoken_weather_2',text:'べっぷのきょうのてんきおしえて',api:'jma_weather',search:false},
+            {id:'mixed_weather_en_2',text:'今日のBeppu weather教えて',api:'jma_weather',search:false},
+            {id:'estat_city_2',text:'別府市だけの人口。大分県全体じゃなく市の人口を教えて',api:'e_stat_dashboard',search:false,forbid:/大分県全体の総人口|大分県全体の数値/},
+            {id:'estat_city_3',text:'別府市の世帯数だけ。県の数字は要らない',api:'e_stat_dashboard',search:false},
+            {id:'multi_fx_2',text:'100米ドルを円とユーロの両方に換算して。片方だけはだめ',api:'frankfurter'},
+            {id:'multi_fx_3',text:'50ユーロを円、ドル、ポンドに全部換算して',api:'frankfurter'},
+            {id:'holiday_pair_2',text:'2027年と2028年の成人の日を両方、推測じゃなくデータで教えて',api:'nager_holidays'},
+            {id:'model_unicode_2',text:'Ｐａｎａｓｏｎｉｃ ＣＦ－ＳＶ８の公式仕様を調べて。メーカーを間違えないで',search:true,forbid:/Sony|Lenovo/i},
+            {id:'model_typo_2',text:'パナのcf sv8、中古で今いくらぐらい？',search:true},
+            {id:'bios_exact',text:'MSI X79A-GD45のBIOSで公式に確認できる最新バージョンだけ教えて',search:true},
+            {id:'route_truth',text:'今この瞬間に別府駅からAPUへ行ける次の便を教えて。時刻を確認できないなら走っていると断定しないで',search:true,forbid:/今の時間帯でも.*動いて|今.*動いています/},
+            {id:'transit_exact',text:'大分駅から別府駅の次の電車を、今の時刻基準で1本だけ教えて',search:true},
+            {id:'fiction_entity',text:'架空かもしれない「CF-ZZ99」というレッツノートの中古価格を調べて。実在確認を先にして',search:true},
+            {id:'contradictory_time',text:'今日の天気を昨日の予報として教えて',search:false},
+          ];
+          const run=async c=>{let d={},status=0,err='',ms=0;const t=Date.now();try{const ctl=new AbortController();const tt=setTimeout(()=>ctl.abort(),90000);const r=await fetch(base+'/api/turn',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:c.text,history:c.history||[]}),signal:ctl.signal});clearTimeout(tt);status=r.status;d=await r.json()}catch(e){err=String(e)}ms=Date.now()-t;const ans=String(d?.answer||'');const tools=(d?.apiSources||[]).map(x=>x?.tool);const issues=[];if(status!==200||d?.ok!==true)issues.push('request_failure');if(!ans)issues.push('empty');if(c.search===false&&d?.search===true)issues.push('unexpected_search');if(c.search===true&&d?.search!==true)issues.push('missing_search');if(c.api&&!tools.includes(c.api))issues.push('missing_api:'+c.api);if(c.must&&!c.must.test(ans))issues.push('must_pattern_missing');if(c.forbid&&c.forbid.test(ans))issues.push('forbidden_pattern');if(/(?:もう一度|改めて).*?(?:調べ|確認)|後ほど.*?調べ|ご自身で.*?確認|確認してください/.test(ans))issues.push('handoff_or_retry');if(ms>35000)issues.push('slow_gt35s');return{id:c.id,status,ms,search:d?.search===true,route:d?.route||'',tools,issues,answer:ans.slice(0,900),queries:(d?.queries||[]).slice(0,10),sources:(d?.sources||[]).slice(0,6)};};
+          const out=[];let n=0;async function w(){while(n<cases.length){const i=n++;out[i]=await run(cases[i]);}}await Promise.all(Array.from({length:4},w));const bad=out.filter(x=>x.issues.length);const summary={total:out.length,clean:out.length-bad.length,flagged:bad.length,avgMs:Math.round(out.reduce((s,x)=>s+x.ms,0)/out.length),slow:out.filter(x=>x.ms>35000).length};console.log('SUMMARY',JSON.stringify(summary));for(const r of bad)console.log('FLAG',JSON.stringify(r));console.log('ALL',JSON.stringify(out));
+          NODE
+          node /tmp/fuzz.mjs | tee /tmp/fuzz.log
