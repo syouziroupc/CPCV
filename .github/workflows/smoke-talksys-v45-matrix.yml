@@ -1,0 +1,57 @@
+name: Smoke TalkSys v45 matrix
+
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: talksys-v45-smoke-matrix
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Broad production question matrix
+    if: contains(github.event.head_commit.message, '[smoke-talksys-v45]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout smoke runner
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: 8bcb8d96403cc173a53ab6bca0429f6b4d2b2982
+          path: talksys
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Verify production revision
+        env:
+          URL: https://talksys.syouziroupc.workers.dev
+        run: |
+          set -euo pipefail
+          body="$(curl -fsS --max-time 20 "$URL/voice-health")"
+          echo "$body"
+          BODY="$body" node -e "const d=JSON.parse(process.env.BODY);if(d.voiceRevision!=='talksys-v45-api-first-parallel-free-tools-knowledge'||d.apiFirst!==true)process.exit(1)"
+
+      - name: Run broad LLM smoke matrix
+        working-directory: talksys
+        env:
+          TALKSYS_URL: https://talksys.syouziroupc.workers.dev
+          SMOKE_CONCURRENCY: 3
+          SMOKE_TIMEOUT_MS: 90000
+        run: node scripts/smoke-production-v45-matrix.mjs
+
+      - name: Upload smoke report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: talksys-v45-smoke-report
+          path: talksys/smoke-v45-report.json
+          if-no-files-found: warn
+          retention-days: 7
