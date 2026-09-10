@@ -1,143 +1,128 @@
-name: Deploy CPCV production from master
+name: Deploy TalkSys Search Director fix
 
 on:
   push:
-    branches:
-      - master
-  workflow_dispatch:
+    branches: [master]
 
 permissions:
   contents: read
 
 concurrency:
-  group: cpcv-production
+  group: talksys-production-direct
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Deploy CPCV production
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy-cpcv]')
+    if: contains(github.event.head_commit.message, '[deploy-talksys]')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production
     steps:
-      - name: Checkout master
+      - name: Checkout exact TalkSys revision
         uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: 59015c1c6ae500579f10e4e5e0c4fe23e121bc60
+          path: talksys
 
-      - name: Verify required secrets are present
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install and validate exact revision
+        working-directory: talksys
         shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f package-lock.json ]]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+          find src -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+          npm test
+          npx wrangler deploy --dry-run
+
+      - name: Verify production credentials
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
         run: |
           set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
 
-      - name: Run local validation
-        shell: bash
-        run: |
-          set -euo pipefail
-          npm run validate
-
-      - name: Resolve current production version
-        id: current
-        shell: bash
+      - name: Deploy exact validated revision
+        working-directory: talksys
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          CURRENT_VERSION="$(
-            npx --yes wrangler versions view 2>&1 |
-              sed -n 's/^Version ID: //p' |
-              tail -1 |
-              tr -d '\r'
-          )"
-          if [[ -z "$CURRENT_VERSION" ]]; then
-            echo "::error::Could not resolve the current production version."
-            exit 1
-          fi
-          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Current production version: $CURRENT_VERSION"
+        run: npx wrangler deploy
 
-      - name: Upload validated candidate version
-        id: candidate
-        shell: bash
+      - name: Verify production health and local routes
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-          OUTPUT="$(npx --yes wrangler versions upload 2>&1 | tee /tmp/cpcv-versions-upload.log)"
-          CANDIDATE_VERSION="$(
-            printf '%s\n' "$OUTPUT" |
-              sed -n 's/^Worker Version ID: //p' |
-              tail -1 |
-              tr -d '\r'
-          )"
-          if [[ -z "$CANDIDATE_VERSION" ]]; then
-            echo "::error::Could not resolve uploaded candidate version."
-            cat /tmp/cpcv-versions-upload.log
-            exit 1
-          fi
-          echo "candidate_version=$CANDIDATE_VERSION" >> "$GITHUB_OUTPUT"
-          echo "Uploaded candidate version: $CANDIDATE_VERSION"
-
-      - name: Smoke test candidate build locally
+          URL: https://talksys.syouziroupc.workers.dev
         shell: bash
         run: |
           set -euo pipefail
-          PORT=8790
-          npx --yes wrangler dev --local --port "$PORT" > /tmp/cpcv-local-smoke.log 2>&1 &
-          WRANGLER_PID=$!
-          trap 'kill "$WRANGLER_PID" 2>/dev/null || true' EXIT
-
-          LOCAL_URL="http://127.0.0.1:${PORT}"
-          READY=0
-          for _ in $(seq 1 45); do
-            if curl --fail --silent --show-error --max-time 4 "${LOCAL_URL}/api/manifest" >/tmp/cpcv-local-manifest.json 2>/tmp/cpcv-local-manifest.err; then
-              READY=1
-              break
-            fi
-            sleep 1
+          body=""
+          for attempt in $(seq 1 20); do
+            body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(Boolean(d.voiceRevision==='talksys-v45-unified-router-no-v43-turn-delegation'&&d.unifiedTurnRouter===true&&d.legacyV43TurnDelegation===false&&d.apiFirst===true&&d.apiParallel===true&&d.groundedEvidenceFallback===true&&d.externalFailureUsesCasualModel===false&&d.modelTimeoutMs===12000&&d.searchDirectorModel==='@cf/qwen/qwen3-30b-a3b-fp8'&&d.searchDefault==='intent-routed-v45')))" )"
+            [[ "$ok" == "true" ]] && break
+            [[ "$attempt" -eq 20 ]] && { echo "$body"; exit 1; }
+            sleep 3
           done
+          echo "$body"
 
-          if [[ "$READY" != "1" ]]; then
-            echo "::error::Local Wrangler smoke server did not become ready."
-            cat /tmp/cpcv-local-smoke.log
-            exit 1
-          fi
+          call() {
+            local text="$1" max="$2"
+            local payload
+            payload="$(node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$text")"
+            curl -fsS --max-time "$max" -H 'content-type: application/json' --data "$payload" "$URL/api/turn"
+          }
+          out="$(call '12345÷15' 20)"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.route!=='deterministic-v45'||d.search!==false||!String(d.answer||'').includes('823'))throw new Error(process.env.OUT);"
+          out="$(call '42' 20)"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.route!=='clarification-v45'||d.search!==false||d.clarificationRequired!==true)throw new Error(process.env.OUT);"
+          out="$(call 'Web検索は使わないで。RAMとSSDの違いを短く説明して' 25)"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.search!==false||!['local-conversation-v45','local-mechanical-fallback-v45'].includes(d.route))throw new Error(process.env.OUT);"
 
-          node ./scripts/smoke-production.mjs "$LOCAL_URL"
-
-      - name: Deploy exact validated candidate to 100 percent
-        shell: bash
+      - name: Verify structured API routes
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          URL: https://talksys.syouziroupc.workers.dev
+        shell: bash
         run: |
           set -euo pipefail
-          npx --yes wrangler versions deploy "${{ steps.candidate.outputs.candidate_version }}@100%" --yes
+          smoke() {
+            local text="$1" expected="$2"
+            local payload out
+            payload="$(node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$text")"
+            out="$(curl -fsS --max-time 80 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
+            echo "$out"
+            OUT="$out" EXPECTED="$expected" node -e "const d=JSON.parse(process.env.OUT||'{}');const t=(d.apiSources||[]).map(x=>x.tool);if(!d.ok||d.route!=='api-first-v45'||d.apiFirst!==true||!t.includes(process.env.EXPECTED))throw new Error(JSON.stringify({route:d.route,apiSources:d.apiSources,apiDiagnostics:d.apiDiagnostics,answer:d.answer,error:d.error}));"
+          }
+          smoke '別府市の今日の天気は？' jma_weather
+          smoke '100米ドルは日本円でいくら？' frankfurter
+          smoke '日本の一人当たりGDPは？' world_bank_wdi
 
-      - name: Verify deployed version and production smoke
-        shell: bash
+      - name: Verify Search Director is genuinely active and useful
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          URL: https://talksys.syouziroupc.workers.dev
+        shell: bash
         run: |
           set -euo pipefail
-          PRODUCTION_VERSION="$(
-            npx --yes wrangler versions view 2>&1 |
-              sed -n 's/^Version ID: //p' |
-              tail -1 |
-              tr -d '\r'
-          )"
-          CANDIDATE_VERSION="${{ steps.candidate.outputs.candidate_version }}"
-          if [[ "$PRODUCTION_VERSION" != "$CANDIDATE_VERSION" ]]; then
-            echo "::error::Production version '$PRODUCTION_VERSION' does not match validated candidate '$CANDIDATE_VERSION'."
-            exit 1
-          fi
-
-          echo "Production now serves validated candidate: $PRODUCTION_VERSION"
-          node ./scripts/smoke-production.mjs
+          payload='{"text":"3万円以下の中古ノートPCを動画視聴用に選ぶなら何を確認して探すべき？","history":[]}'
+          out="$(curl -fsS --max-time 105 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
+          echo "$out"
+          OUT="$out" node <<'NODE'
+          const d = JSON.parse(process.env.OUT || '{}');
+          const x = d.searchDiagnostics || {};
+          const qs = d.queries || [];
+          const src = d.sources || [];
+          const bad = src.filter(s => /results\.vote\.wa\.gov|accounts\.google\.com|gamewith\.jp/i.test(String(s.url || '')));
+          if (!d.ok || d.route !== 'api-first-v45' || d.search !== true) throw new Error('web route failed: ' + JSON.stringify({route:d.route,error:d.error}));
+          if (x.plannerPlanned !== true) throw new Error('Qwen planner did not produce a valid plan: ' + JSON.stringify(x));
+          if (x.plannerTransport !== 'tool_call') throw new Error('Qwen planner did not use tool call: ' + JSON.stringify(x));
+          if (x.plannerError) throw new Error('planner error: ' + x.plannerError);
+          if (qs.some(q => String(q).includes('何を確認して探すべき'))) throw new Error('long-question fallback query leaked: ' + JSON.stringify(qs));
+          if (!src.length || x.searchUseful !== true) throw new Error('search still produced no useful evidence: ' + JSON.stringify({queries:qs,diagnostics:x,sources:src}));
+          if (bad.length) throw new Error('known garbage source admitted: ' + JSON.stringify(bad));
+          NODE
