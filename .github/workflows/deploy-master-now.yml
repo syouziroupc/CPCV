@@ -1,4 +1,4 @@
-name: Deploy TalkSys final v45 search fixes
+name: Deploy TalkSys v45 direct primary resolver
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
       - uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: b4d815e7142b9fae2cf3d6dec18364c1db0f0140
+          ref: cb6711417e42b931e080d8557ad32695fc376eca
           path: talksys
       - uses: actions/setup-node@v6
         with:
@@ -31,6 +31,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          test "$(git rev-parse HEAD)" = "cb6711417e42b931e080d8557ad32695fc376eca"
           if [[ -f package-lock.json ]]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
           find src -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
           npm test
@@ -40,6 +41,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
       - name: Deploy exact revision
@@ -55,9 +57,12 @@ jobs:
         run: |
           set -euo pipefail
           health="$(curl -fsS --max-time 20 "$URL/voice-health")"
+          echo "HEALTH=$health"
           HEALTH="$health" node - <<'NODE'
           const d=JSON.parse(process.env.HEALTH||'{}');
-          if(d.voiceRevision!=='talksys-v45-api-first-single-search-provider'||d.searchSingleProvider!==true||d.searchProvider!=='bing-rss-keyless-single-index'||d.searchEngineRotation!==false||d.searchEngineRetry!==false) throw new Error(process.env.HEALTH);
+          if(d.voiceRevision!=='talksys-v45-api-first-single-search-provider') throw new Error('revision '+JSON.stringify(d));
+          if(d.searchSingleProvider!==true||d.searchProvider!=='bing-rss-keyless-single-index'||d.searchEngineRotation!==false||d.searchEngineRetry!==false) throw new Error('search topology '+JSON.stringify(d));
+          if(d.searchDirectPrimaryResolver!==true||d.searchPartialEvidenceAnswering!==true) throw new Error('primary resolver health '+JSON.stringify(d));
           NODE
 
           call() { node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$1" | curl -fsS --max-time "$2" -H 'content-type: application/json' --data-binary @- "$URL/api/turn"; }
@@ -69,17 +74,19 @@ jobs:
           OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='jma_weather'))throw new Error(process.env.OUT)"
 
           out="$(call 'MSI X79A-GD45の最新BIOSを公式で確認して' 25)"
-          echo "$out"
+          echo "BIOS=$out"
           OUT="$out" node - <<'NODE'
           const d=JSON.parse(process.env.OUT||'{}'), x=d.searchDiagnostics||{};
-          if(!d.ok||d.search!==true||x.plannerPlanned===true) throw new Error('simple route');
+          if(!d.ok||d.search!==true||x.plannerPlanned===true) throw new Error('simple route '+process.env.OUT);
           if(!(d.queries||[]).includes('X79A-GD45 BIOS site:msi.com')) throw new Error('noncompact BIOS query '+JSON.stringify(d.queries));
+          if(!Array.isArray(x.directPrimaryTargets)||!x.directPrimaryTargets.some(t=>String(t.url||'').includes('jp.msi.com/Motherboard/X79A-GD45/support'))) throw new Error('missing direct target '+JSON.stringify(x));
+          if(!Array.isArray(x.directPrimaryDiagnostics)||!x.directPrimaryDiagnostics.some(p=>String(p.engine||'').includes('direct-primary:msi-motherboard'))) throw new Error('direct resolver not executed '+JSON.stringify(x));
           if(/検索機能.*(?:無効|禁止|使えない)|外部検索を使わない設定/.test(String(d.answer||''))) throw new Error('false capability statement '+d.answer);
           if(Number(d.timings?.searchMs||0)>9000) throw new Error('budget '+JSON.stringify(d.timings));
           NODE
 
           out="$(call '3万円以下で動画視聴用の中古ノートPCを候補から比較して選んで' 30)"
-          echo "$out"
+          echo "SHOPPING=$out"
           OUT="$out" node - <<'NODE'
           const d=JSON.parse(process.env.OUT||'{}'), x=d.searchDiagnostics||{};
           if(!d.ok||d.search!==true) throw new Error('complex route');
