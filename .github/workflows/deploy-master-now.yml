@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 27894fff678dbe3898bd0c940190a0e7728003de
+          ref: 9fa20e7404a2e6a2ccb5faf74bdca7845da17f55
           path: talksys
 
       - name: Setup Node.js
@@ -39,6 +39,7 @@ jobs:
           npm test
           node --check src/free-api-tools-v45.js
           node --check src/free-api-knowledge-v45.js
+          node --check src/free-api-knowledge-extra-v45.js
           node --check src/search-v44.js
           node --check src/worker-v44.js
           npx wrangler deploy --dry-run
@@ -67,14 +68,14 @@ jobs:
           body=""
           for attempt in $(seq 1 20); do
             body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
-            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};const r=d.freeApiRegistry||{};process.stdout.write(String(Boolean(d.voiceRevision==='talksys-v45-api-first-parallel-free-tools-knowledge'&&d.apiFirst===true&&d.apiParallel===true&&d.openMeteoExcluded===true&&d.searchDirectorModel==='@cf/qwen/qwen3-30b-a3b-fp8'&&r.jma_weather&&r.frankfurter&&r.usgs_earthquake&&r.nager_holidays&&r.crossref&&r.world_bank_wdi)))")"
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};const r=d.freeApiRegistry||{};process.stdout.write(String(Boolean(d.voiceRevision==='talksys-v45-api-first-parallel-free-tools-knowledge'&&d.apiFirst===true&&d.apiParallel===true&&d.openMeteoExcluded===true&&d.searchDirectorModel==='@cf/qwen/qwen3-30b-a3b-fp8'&&d.weatherDirect==='jma-api-first-with-met-norway-fallback'&&d.searchTypedResearchStrategy===true&&d.searchSourceRoleAware===true&&r.jma_weather&&r.frankfurter&&r.usgs_earthquake&&r.nager_holidays&&r.crossref&&r.world_bank_wdi&&r.e_stat_dashboard&&r.eurostat&&r.wikidata)))")"
             [ "$ok" = "true" ] && break
             [ "$attempt" -eq 20 ] && { echo "$body"; exit 1; }
             sleep 3
           done
           echo "$body"
 
-      - name: Smoke test free structured APIs
+      - name: Smoke test structured APIs
         env:
           URL: https://talksys.syouziroupc.workers.dev
         run: |
@@ -93,6 +94,9 @@ jobs:
           smoke fx '100米ドルは日本円でいくら？' frankfurter
           smoke macro '日本の一人当たりGDPは？' world_bank_wdi
           smoke scholarly 'DOI 10.1038/s41586-020-2649-2 の論文情報を教えて' crossref
+          smoke estat '大分県別府市の人口は？' e_stat_dashboard
+          smoke eurostat 'EU27の人口は？' eurostat
+          smoke wikidata '富士山の標高は？' wikidata
 
       - name: Smoke test Qwen-directed web fallback
         env:
@@ -102,4 +106,4 @@ jobs:
           turn='{"text":"3万円以下の中古ノートPCを動画視聴用に選ぶなら何を確認して探すべき？","history":[]}'
           out="$(curl -fsS --max-time 90 -H 'content-type: application/json' --data "$turn" "$URL/api/turn")"
           echo "$out"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const x=d.searchDiagnostics||{};const src=d.sources||[];const bad=src.filter(s=>/results\.vote\.wa\.gov|accounts\.google\.com|youtube\.com\/.*(?:login|signin)|microsoft\.com\/.*(?:login|signin)/i.test(String(s.url||'')));if(!d.ok||d.route!=='api-first-v45'||d.search!==true||x.searchDirectorModel!=='@cf/qwen/qwen3-30b-a3b-fp8'||x.queryResultGate!==true||x.authorityAfterRelevance!==true||bad.length)throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error,diagnostics:x,badSources:bad,queries:d.queries,sources:src.slice(0,8)}));console.log(JSON.stringify({route:d.route,queries:d.queries,coverage:d.searchCoverage,diagnostics:x,sources:src.slice(0,8).map(s=>({title:s.title,url:s.url}))}));"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const x=d.searchDiagnostics||{};const src=d.sources||[];const bad=src.filter(s=>/results\.vote\.wa\.gov|accounts\.google\.com|youtube\.com\/.*(?:login|signin)|microsoft\.com\/.*(?:login|signin)|gamewith\.jp/i.test(String(s.url||'')));if(!d.ok||d.route!=='api-first-v45'||d.search!==true||x.searchDirectorModel!=='@cf/qwen/qwen3-30b-a3b-fp8'||x.queryResultGate!==true||x.authorityAfterRelevance!==true||bad.length)throw new Error(JSON.stringify({ok:d.ok,route:d.route,error:d.error,diagnostics:x,badSources:bad,queries:d.queries,sources:src.slice(0,8)}));console.log(JSON.stringify({route:d.route,queries:d.queries,coverage:d.searchCoverage,diagnostics:x,sources:src.slice(0,8).map(s=>({title:s.title,url:s.url}))}));"
