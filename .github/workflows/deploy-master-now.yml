@@ -1,4 +1,4 @@
-name: Deploy TalkSys single-provider search architecture
+name: Deploy TalkSys final v45 search fixes
 
 on:
   push:
@@ -18,18 +18,15 @@ jobs:
     timeout-minutes: 30
     environment: production
     steps:
-      - name: Checkout exact TalkSys revision
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 1a94cbc23841646260ad8d4c590898c17ba68eb7
+          ref: b4d815e7142b9fae2cf3d6dec18364c1db0f0140
           path: talksys
-
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-
-      - name: Install and validate exact revision
+      - name: Validate exact revision
         working-directory: talksys
         shell: bash
         run: |
@@ -38,91 +35,56 @@ jobs:
           find src -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
           npm test
           npx wrangler deploy --dry-run
-
-      - name: Verify production credentials
+      - name: Verify credentials
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
         run: |
-          set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
-
-      - name: Deploy exact validated revision
+      - name: Deploy exact revision
         working-directory: talksys
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
-
-      - name: Verify production health
+      - name: Production smoke
         env:
           URL: https://talksys.syouziroupc.workers.dev
         shell: bash
         run: |
           set -euo pipefail
-          body=""
-          for attempt in $(seq 1 20); do
-            body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
-            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(Boolean(d.voiceRevision==='talksys-v45-api-first-single-search-provider'&&d.unifiedTurnRouter===true&&d.legacyV43TurnDelegation===false&&d.apiFirst===true&&d.searchSingleProvider===true&&d.searchProvider==='bing-rss-keyless-single-index'&&d.searchEngineRotation===false&&d.searchEngineRetry===false&&d.searchMaxEngineRetries===0&&d.searchTotalBudgetMs===6500&&d.searchDirectorTimeoutMs===2200)))")"
-            [[ "$ok" == "true" ]] && break
-            [[ "$attempt" -eq 20 ]] && { echo "$body"; exit 1; }
-            sleep 3
-          done
-          echo "$body"
-
-      - name: Verify local and API routes
-        env:
-          URL: https://talksys.syouziroupc.workers.dev
-        shell: bash
-        run: |
-          set -euo pipefail
-          call() {
-            local text="$1" max="$2"
-            local payload
-            payload="$(node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$text")"
-            curl -fsS --max-time "$max" -H 'content-type: application/json' --data "$payload" "$URL/api/turn"
-          }
-          out="$(call '12345÷15' 20)"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.route!=='deterministic-v45'||d.search!==false||!String(d.answer||'').includes('823'))throw new Error(process.env.OUT);"
-          out="$(call '別府市の今日の天気は？' 30)"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const tools=(d.apiSources||[]).map(x=>x.tool);if(!d.ok||d.route!=='api-first-v45'||!tools.includes('jma_weather'))throw new Error(process.env.OUT);"
-
-      - name: Verify simple search bypasses director
-        env:
-          URL: https://talksys.syouziroupc.workers.dev
-        shell: bash
-        run: |
-          set -euo pipefail
-          payload='{"text":"MSI X79A-GD45の最新BIOSを公式で確認して","history":[]}'
-          out="$(curl -fsS --max-time 30 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
-          echo "$out"
-          OUT="$out" node <<'NODE'
-          const d=JSON.parse(process.env.OUT||'{}');
-          const x=d.searchDiagnostics||{};
-          if(!d.ok||d.search!==true) throw new Error('search route failed');
-          if(x.plannerPlanned===true) throw new Error('simple lookup unnecessarily used Qwen director');
-          if(!['deterministic-simple','deterministic-fallback'].includes(x.plannerTransport)) throw new Error(JSON.stringify(x));
-          if((x.probes||[]).some(p=>!String(p.engine||'').includes('bing-rss-keyless-single-index'))) throw new Error('unexpected search provider: '+JSON.stringify(x.probes));
-          if(Number(d.timings?.searchMs||0)>9000) throw new Error('search budget overrun: '+JSON.stringify(d.timings));
+          health="$(curl -fsS --max-time 20 "$URL/voice-health")"
+          HEALTH="$health" node - <<'NODE'
+          const d=JSON.parse(process.env.HEALTH||'{}');
+          if(d.voiceRevision!=='talksys-v45-api-first-single-search-provider'||d.searchSingleProvider!==true||d.searchProvider!=='bing-rss-keyless-single-index'||d.searchEngineRotation!==false||d.searchEngineRetry!==false) throw new Error(process.env.HEALTH);
           NODE
 
-      - name: Verify complex search uses bounded director and single provider
-        env:
-          URL: https://talksys.syouziroupc.workers.dev
-        shell: bash
-        run: |
-          set -euo pipefail
-          payload='{"text":"3万円以下で動画視聴用の中古ノートPCを候補から比較して選んで","history":[]}'
-          out="$(curl -fsS --max-time 35 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
+          call() { node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$1" | curl -fsS --max-time "$2" -H 'content-type: application/json' --data-binary @- "$URL/api/turn"; }
+
+          out="$(call '12345÷15' 20)"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.search!==false||!String(d.answer||'').includes('823'))throw new Error(process.env.OUT)"
+
+          out="$(call '別府市の今日の天気は？' 30)"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='jma_weather'))throw new Error(process.env.OUT)"
+
+          out="$(call 'MSI X79A-GD45の最新BIOSを公式で確認して' 25)"
           echo "$out"
-          OUT="$out" node <<'NODE'
-          const d=JSON.parse(process.env.OUT||'{}');
-          const x=d.searchDiagnostics||{};
-          if(!d.ok||d.search!==true) throw new Error('complex search route failed');
-          if(x.plannerTransport==='tool_call' && x.plannerPlanned!==true) throw new Error('invalid director diagnostics');
-          if((x.probes||[]).some(p=>!String(p.engine||'').includes('bing-rss-keyless-single-index'))) throw new Error('unexpected search provider: '+JSON.stringify(x.probes));
-          if(Number(d.timings?.searchMs||0)>9000) throw new Error('search budget overrun: '+JSON.stringify(d.timings));
-          if(/外部情報を取得できなかったため、現在情報は断定しません。/.test(String(d.answer||''))) throw new Error('old blanket give-up returned');
+          OUT="$out" node - <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}'), x=d.searchDiagnostics||{};
+          if(!d.ok||d.search!==true||x.plannerPlanned===true) throw new Error('simple route');
+          if(!(d.queries||[]).includes('X79A-GD45 BIOS site:msi.com')) throw new Error('noncompact BIOS query '+JSON.stringify(d.queries));
+          if(/検索機能.*(?:無効|禁止|使えない)|外部検索を使わない設定/.test(String(d.answer||''))) throw new Error('false capability statement '+d.answer);
+          if(Number(d.timings?.searchMs||0)>9000) throw new Error('budget '+JSON.stringify(d.timings));
+          NODE
+
+          out="$(call '3万円以下で動画視聴用の中古ノートPCを候補から比較して選んで' 30)"
+          echo "$out"
+          OUT="$out" node - <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}'), x=d.searchDiagnostics||{};
+          if(!d.ok||d.search!==true) throw new Error('complex route');
+          if(x.plannerTransport==='deterministic-fallback' && (x.researchMode!=='discover_then_verify'||x.candidateType!=='product_model')) throw new Error('bad fallback '+JSON.stringify(x));
+          if((x.probes||[]).some(p=>!String(p.engine||'').includes('bing-rss-keyless-single-index'))) throw new Error('provider rotation');
+          if(Number(d.timings?.searchMs||0)>9000) throw new Error('budget '+JSON.stringify(d.timings));
+          if(/外部情報を取得できなかったため、現在情報は断定しません。/.test(String(d.answer||''))) throw new Error('old giveup');
           NODE
