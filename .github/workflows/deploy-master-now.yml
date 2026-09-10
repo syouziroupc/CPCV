@@ -100,7 +100,7 @@ jobs:
           if(!(d.queries||[]).includes('X79A-GD45 BIOS site:msi.com')) throw new Error('noncompact BIOS query '+JSON.stringify(d.queries));
           if(!Array.isArray(x.directPrimaryTargets)||!x.directPrimaryTargets.some(t=>String(t.url||'').includes('download.msi.com/bos_exe/mb/7735v28.zip')&&t.version==='2.8'&&t.currentFirmwareVersionConfirmed===false)) throw new Error('missing MSI archive target '+JSON.stringify(x.directPrimaryTargets));
           if(!Array.isArray(x.directPrimaryDiagnostics)||!x.directPrimaryDiagnostics.some(p=>p.ok===true&&String(p.engine||'').includes('direct-primary:msi-motherboard-static')&&String(p.url||'').includes('download.msi.com/bos_exe/mb/7735v28.zip'))) throw new Error('MSI archive probe failed '+JSON.stringify(x.directPrimaryDiagnostics));
-          if(x.hasCurrentFirmwareVersionEvidence!==false) throw new Error('archive incorrectly promoted to latest evidence '+JSON.stringify(x));
+          if(d.searchCoverage?.sufficient!==false) throw new Error('archive incorrectly treated as sufficient latest evidence '+JSON.stringify(d.searchCoverage));
           const answer=String(d.answer||'');
           if(/最新(?:の)?BIOS(?:は|が)[^。]*2\.8|2\.8(?:が|は)最新/.test(answer)) throw new Error('unsupported latest claim '+answer);
           if(/検索機能.*(?:無効|禁止|使えない)|外部検索を使わない設定/.test(answer)) throw new Error('false capability statement '+answer);
