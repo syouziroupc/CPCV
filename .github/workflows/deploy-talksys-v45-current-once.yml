@@ -1,0 +1,83 @@
+name: Validate and deploy current TalkSys v45 once
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/deploy-talksys-v45-current-once.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate-deploy:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 30
+    env:
+      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
+    steps:
+      - name: Checkout exact TalkSys revision
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: 311e60b09dd2027c5de1290a35d4dd0f14501f29
+          path: talksys
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        working-directory: talksys
+        run: |
+          set -euo pipefail
+          if [[ -f package-lock.json ]]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+
+      - name: Validate exact revision
+        working-directory: talksys
+        run: |
+          set -euo pipefail
+          find src -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
+          npm test
+          npx wrangler deploy --dry-run
+
+      - name: Require Cloudflare production credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          test -n "${CLOUDFLARE_API_TOKEN:-}"
+          test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
+
+      - name: Deploy exact validated revision
+        working-directory: talksys
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler deploy
+
+      - name: Verify v45 production contract
+        run: |
+          set -euo pipefail
+          body=""
+          for attempt in $(seq 1 20); do
+            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(Boolean(d.voiceRevision==='talksys-v45-unified-router-no-v43-turn-delegation'&&d.unifiedTurnRouter===true&&d.legacyV43TurnDelegation===false&&d.apiFirst===true&&d.apiParallel===true&&d.groundedEvidenceFallback===true&&d.externalFailureUsesCasualModel===false&&d.modelTimeoutMs===12000&&d.searchDirectorModel==='@cf/qwen/qwen3-30b-a3b-fp8'&&d.searchDefault==='intent-routed-v45')))" )"
+            [[ "$ok" == "true" ]] && break
+            [[ "$attempt" -eq 20 ]] && { echo "$body"; exit 1; }
+            sleep 3
+          done
+          echo "$body"
+
+      - name: Production smoke
+        run: |
+          set -euo pipefail
+          payload='{"text":"12345÷15","history":[]}'
+          out="$(curl -fsS --max-time 20 -H 'content-type: application/json' --data "$payload" "$PRODUCTION_URL/api/turn")"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.route!=='deterministic-v45'||d.search!==false||!String(d.answer||'').includes('823'))throw new Error(process.env.OUT);"
+
+          payload='{"text":"別府市の今日の天気は？","history":[]}'
+          out="$(curl -fsS --max-time 75 -H 'content-type: application/json' --data "$payload" "$PRODUCTION_URL/api/turn")"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const tools=(d.apiSources||[]).map(x=>x.tool);if(!d.ok||d.route!=='api-first-v45'||!tools.includes('jma_weather'))throw new Error(process.env.OUT);"
