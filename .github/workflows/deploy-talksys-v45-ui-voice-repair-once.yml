@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 30
     env:
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
-      TALKSYS_SHA: 7c8f89e2859c3a8d526087a50c7923aa2ef90dfc
+      TALKSYS_SHA: cd4403840a4b64a5925d9b552327952b2bb04998
     steps:
       - name: Checkout exact repaired TalkSys revision
         uses: actions/checkout@v6
@@ -84,6 +84,7 @@ jobs:
           grep -F 'Foonz' <<< "$page"
 
           client="$(curl -fsS --max-time 20 "$PRODUCTION_URL/talk-v45.js")"
+          grep -F 'talksys-v45-http-adaptive-vad' <<< "$client"
           grep -F 'getUserMedia' <<< "$client"
           grep -F '/api/transcribe' <<< "$client"
           grep -F '/api/turn' <<< "$client"
