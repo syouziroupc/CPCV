@@ -1,4 +1,4 @@
-name: Deploy repaired TalkSys v45 production bridge once
+name: Finalize public layout and source manifest once
 
 on:
   push:
@@ -6,97 +6,110 @@ on:
       - .github/workflows/unify-navigation-once.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  deploy-talksys:
-    runs-on: ubuntu-24.04
-    environment: production
-    timeout-minutes: 30
-    env:
-      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
-      TALKSYS_SHA: cd4403840a4b64a5925d9b552327952b2bb04998
+  repair:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout exact repaired TalkSys revision
-        uses: actions/checkout@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          repository: syouziroupc/talksys
-          ref: ${{ env.TALKSYS_SHA }}
-          path: talksys
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 22
-
-      - name: Validate exact repaired runtime
-        working-directory: talksys
+          ref: master
+          fetch-depth: 0
+      - name: Unify signed-out navigation and refresh source manifest
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f package-lock.json ]]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
-          find src -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
-          npm test
-          npx wrangler deploy --dry-run
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          import re
 
-      - name: Require CPCV Cloudflare credentials
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN"
-          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          info_targets = [
+              'public/about/index.html',
+              'public/guide/index.html',
+              'public/privacy/index.html',
+          ]
+          auth_targets = [
+              'public/signup/index.html',
+              'public/forgot-password/index.html',
+              'public/reset-password/index.html',
+              'public/accept-invitation/index.html',
+              'public/check-email/index.html',
+              'public/confirm-email-change/index.html',
+              'public/verify-email/index.html',
+              'public/_admin_spa.html',
+              'public/admin/index.html',
+          ]
+          targets = info_targets + auth_targets
 
-      - name: Deploy exact repaired revision
-        working-directory: talksys
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          npx wrangler deploy
+          public_nav = '''<nav class="site-nav" aria-label="メインメニュー">
+      <a href="/#how">使い方</a>
+      <a href="/#features">機能</a>
+      <a href="/#desktop">Windows版</a>
+      <a href="/privacy">情報の扱い</a>
+      <a href="/admin">先生ログイン</a>
+      <a class="nav-cta" href="/#start">今すぐはじめる</a>
+    </nav>'''
+          auth_nav = '''<nav class="site-nav" aria-label="メインメニュー">
+      <a href="/">公開サイト</a>
+      <a class="nav-cta" href="/admin">先生ログイン</a>
+    </nav>'''
 
-      - name: Verify repaired production
-        shell: bash
-        run: |
-          set -euo pipefail
-          body=''
-          for attempt in $(seq 1 25); do
-            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
-            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(Boolean(d.ok===true&&d.revision==='talksys-v45-formal-api-primary-safe-fallback'&&d.voiceRevision==='talksys-v45-http-adaptive-vad'&&d.uiRevision==='talksys-v45-ui-restored-20260911'&&d.sttRevision==='talksys-v45-hardened-whisper'&&d.voiceArchitecture==='http-turns-client-vad-v45'&&d.adaptiveNoiseVad===true&&d.ambientCalibration===true&&d.legacyWebSocketVoice===false&&d.durableObjectVoice===false&&d.legacyAgentRoute===false&&d.unifiedTurnRouter===true&&d.apiFirst===true&&d.apiParallel===true)))")"
-            [[ "$ok" == 'true' ]] && break
-            [[ "$attempt" -eq 25 ]] && { echo "$body"; exit 1; }
-            sleep 3
-          done
-          echo "$body"
+          for item in targets:
+              path = Path(item)
+              text = path.read_text(encoding='utf-8')
+              nav = auth_nav if item in auth_targets else public_nav
+              text, count = re.subn(
+                  r'<nav class="site-nav" aria-label="メインメニュー">.*?</nav>',
+                  nav,
+                  text,
+                  count=1,
+                  flags=re.S,
+              )
+              if count != 1:
+                  raise SystemExit(f'public nav not found exactly once: {item}')
+              text = re.sub(r'/assets/app\.css\?v=[^"\s]+', '/assets/app.css?v=0.8.10-lp4', text, count=1)
+              text = re.sub(r'/assets/public-responsive\.css\?v=[^"\s]+', '/assets/public-responsive.css?v=0.8.10-public2', text, count=1)
+              path.write_text(text, encoding='utf-8', newline='\n')
 
-          page="$(curl -fsS --max-time 20 "$PRODUCTION_URL/")"
-          grep -F 'talksys-v45-ui-restored-20260911' <<< "$page"
-          grep -F '/talk-v45.js' <<< "$page"
-          grep -F '非常用の文字入力' <<< "$page"
-          grep -F 'Foonz' <<< "$page"
-
-          client="$(curl -fsS --max-time 20 "$PRODUCTION_URL/talk-v45.js")"
-          grep -F 'talksys-v45-http-adaptive-vad' <<< "$client"
-          grep -F 'getUserMedia' <<< "$client"
-          grep -F '/api/transcribe' <<< "$client"
-          grep -F '/api/turn' <<< "$client"
-          grep -F 'noiseBoost' <<< "$client"
-          grep -F 'calibrationUntil' <<< "$client"
-          if grep -E 'new[[:space:]]+WebSocket|/agents/' <<< "$client"; then
-            echo 'legacy websocket/agent voice path found'
-            exit 1
+          manifest_paths = [
+              '.github/workflows/deploy-master-now.yml',
+              '.github/workflows/unify-navigation-once.yml',
+              '.github/workflows/verify-all-responsive-staging-once.yml',
+              'scripts/test-v0810-security-ui.mjs',
+              'public/assets/app.css',
+              'public/assets/public-responsive.css',
+              'public/assets/landing.css',
+              'public/index.html',
+              *targets,
+          ]
+          manifest = Path('SOURCE_SHA256SUMS.override.txt')
+          order = []
+          values = {}
+          for line in manifest.read_text(encoding='utf-8').splitlines():
+              if not line:
+                  continue
+              digest, path = line.split('  ', 1)
+              if path not in order:
+                  order.append(path)
+              values[path] = digest
+          for item in manifest_paths:
+              path = Path(item)
+              if not path.exists():
+                  continue
+              values[item] = hashlib.sha256(path.read_bytes()).hexdigest()
+              if item not in order:
+                  order.append(item)
+          manifest.write_text(''.join(f'{values[path]}  {path}\n' for path in order), encoding='utf-8', newline='\n')
+          PY
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/about/index.html public/guide/index.html public/privacy/index.html public/signup/index.html public/forgot-password/index.html public/reset-password/index.html public/accept-invitation/index.html public/check-email/index.html public/confirm-email-change/index.html public/verify-email/index.html public/_admin_spa.html public/admin/index.html SOURCE_SHA256SUMS.override.txt
+          if git diff --cached --quiet; then
+            echo "Public layout already current."
+            exit 0
           fi
-
-          telephony="$(curl -fsS --max-time 20 "$PRODUCTION_URL/telephony-health")"
-          TELEPHONY="$telephony" node -e "const d=JSON.parse(process.env.TELEPHONY||'{}');if(d.provider!=='Foonz'||d.connected!==false||d.status!=='planned-not-wired')throw new Error(process.env.TELEPHONY);"
-
-          payload='{"text":"12345÷15","history":[]}'
-          out="$(curl -fsS --max-time 20 -H 'content-type: application/json' --data "$payload" "$PRODUCTION_URL/api/turn")"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.route!=='deterministic-v45'||d.search!==false||!String(d.answer||'').includes('823'))throw new Error(process.env.OUT);"
-
-          payload='{"text":"別府市の今日の天気は？","history":[]}'
-          out="$(curl -fsS --max-time 75 -H 'content-type: application/json' --data "$payload" "$PRODUCTION_URL/api/turn")"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const tools=(d.apiSources||[]).map(x=>x.tool);if(!d.ok||d.route!=='api-first-v45'||!tools.includes('jma_weather'))throw new Error(process.env.OUT);"
+          git commit -m "Unify public navigation and responsive entry screens"
+          git push origin HEAD:master
