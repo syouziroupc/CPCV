@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: talksys-production-formal-retrieval
+  group: talksys-production-multi-engine-search
   cancel-in-progress: false
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
     environment: production
     env:
       PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
-      TALKSYS_SHA: cd4403840a4b64a5925d9b552327952b2bb04998
+      TALKSYS_SHA: 75e90af62a910d7044eee841747badbbb8e86f83
     steps:
       - name: Checkout exact repaired TalkSys revision
         uses: actions/checkout@v6
@@ -63,14 +63,14 @@ jobs:
           set -euo pipefail
           npx wrangler deploy
 
-      - name: Verify repaired v45 production contract
+      - name: Verify repaired search production contract
         shell: bash
         run: |
           set -euo pipefail
           body=''
           for attempt in $(seq 1 25); do
             body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
-            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(Boolean(d.ok===true&&d.revision==='talksys-v45-formal-api-primary-safe-fallback'&&d.voiceRevision==='talksys-v45-http-adaptive-vad'&&d.uiRevision==='talksys-v45-ui-restored-20260911'&&d.sttRevision==='talksys-v45-hardened-whisper'&&d.voiceArchitecture==='http-turns-client-vad-v45'&&d.adaptiveNoiseVad===true&&d.ambientCalibration===true&&d.falseNoiseLearning===true&&d.legacyWebSocketVoice===false&&d.durableObjectVoice===false&&d.legacyAgentRoute===false&&d.unifiedTurnRouter===true&&d.legacyV43TurnDelegation===false&&d.apiFirst===true&&d.apiParallel===true&&d.groundedEvidenceFallback===true&&d.externalFailureUsesCasualModel===false&&d.modelTimeoutMs===12000&&d.searchDirectorModel==='@cf/qwen/qwen3-30b-a3b-fp8'&&d.searchDefault==='intent-routed-v45')))" )"
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(Boolean(d.ok===true&&d.revision==='talksys-v45-api-primary-multi-engine-search'&&d.voiceRevision==='talksys-v45-http-adaptive-vad'&&d.uiRevision==='talksys-v45-ui-restored-20260911'&&d.sttRevision==='talksys-v45-hardened-whisper'&&d.voiceArchitecture==='http-turns-client-vad-v45'&&d.adaptiveNoiseVad===true&&d.ambientCalibration===true&&d.falseNoiseLearning===true&&d.legacyWebSocketVoice===false&&d.durableObjectVoice===false&&d.legacyAgentRoute===false&&d.unifiedTurnRouter===true&&d.legacyV43TurnDelegation===false&&d.apiFirst===true&&d.apiParallel===true&&d.groundedEvidenceFallback===true&&d.externalFailureUsesCasualModel===false&&d.webSearch===true&&d.webRetrieval===true&&d.searchGeneralWebEnabled===true&&d.searchEngineRotation===true&&d.searchEngineRetry===true&&d.searchSingleProvider===false&&d.generalWebSearchProvider==='rotating-multi-engine-v45'&&d.bingRssEnabled===true&&d.searchProvider==='formal-structured-apis+direct-primary+rotating-web'&&d.searchMaxEngineRetries===2)))" )"
             [[ "$ok" == 'true' ]] && break
             [[ "$attempt" -eq 25 ]] && { echo "$body"; exit 1; }
             sleep 3
@@ -86,6 +86,7 @@ jobs:
           grep -F '/talk-v45.js' <<< "$page"
           grep -F '非常用の文字入力' <<< "$page"
           grep -F 'Foonz' <<< "$page"
+          grep -F '電話網連携準備中' <<< "$page"
 
           client="$(curl -fsS --max-time 20 "$PRODUCTION_URL/talk-v45.js")"
           grep -F 'talksys-v45-http-adaptive-vad' <<< "$client"
@@ -102,20 +103,68 @@ jobs:
           telephony="$(curl -fsS --max-time 20 "$PRODUCTION_URL/telephony-health")"
           TELEPHONY="$telephony" node -e "const d=JSON.parse(process.env.TELEPHONY||'{}');if(d.provider!=='Foonz'||d.connected!==false||d.status!=='planned-not-wired')throw new Error(process.env.TELEPHONY);"
 
-      - name: Verify improved v45 backend remains intact
+      - name: Verify structured API and deterministic routes live
         shell: bash
         run: |
           set -euo pipefail
           call() { node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$1" | curl -fsS --max-time "$2" -H 'content-type: application/json' --data-binary @- "$PRODUCTION_URL/api/turn"; }
 
           out="$(call '12345÷15' 20)"
+          echo "$out"
           OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.route!=='deterministic-v45'||d.search!==false||!String(d.answer||'').includes('823'))throw new Error(process.env.OUT);"
 
           out="$(call '別府市の今日の天気は？' 75)"
+          echo "$out"
           OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const tools=(d.apiSources||[]).map(x=>x.tool);if(!d.ok||d.route!=='api-first-v45'||!tools.includes('jma_weather'))throw new Error(process.env.OUT);"
 
-          out="$(call '100米ドルは日本円でいくら？' 35)"
+          out="$(call '100米ドルは日本円でいくら？' 45)"
+          echo "$out"
           OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='frankfurter'))throw new Error(process.env.OUT);"
 
-          out="$(call '日本の一人当たりGDPは？' 40)"
+          out="$(call '日本の一人当たりGDPは？' 50)"
+          echo "$out"
           OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='world_bank_wdi'))throw new Error(process.env.OUT);"
+
+      - name: Verify multi-engine web search live
+        shell: bash
+        run: |
+          set -euo pipefail
+          call() { node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$1" | curl -fsS --max-time 90 -H 'content-type: application/json' --data-binary @- "$PRODUCTION_URL/api/turn"; }
+          general_web_sources=0
+
+          for q in \
+            'OpenAIの今日のニュースを検索して' \
+            'Panasonic CF-SV8の現在の中古価格を調べて' \
+            '別府市のPC修理店を探して'; do
+            out="$(call "$q")"
+            echo "$out"
+            OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const bad=/検索機能(?:が|は)(?:無効|禁止|使えない)/.test(String(d.answer||''));const attempted=(d.queries||[]).length>0||(d.searchDiagnostics?.probes||[]).length>0;if(!d.ok||d.search!==true||d.route!=='api-first-v45'||bad||!attempted)throw new Error(process.env.OUT);"
+            n="$(OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const n=(d.sources||[]).filter(x=>!String(x.engine||'').startsWith('api:')&&!String(x.engine||'').startsWith('direct-primary:')).length;process.stdout.write(String(n));")"
+            general_web_sources=$((general_web_sources + n))
+          done
+          test "$general_web_sources" -ge 1
+
+          bios="$(call 'X79A-GD45の最新BIOSを公式情報から確認して')"
+          echo "$bios"
+          BIOS="$bios" node -e "const d=JSON.parse(process.env.BIOS||'{}');const targets=JSON.stringify(d.searchDiagnostics?.directPrimaryTargets||[]);const official=(d.sources||[]).some(x=>String(x.engine||'').startsWith('direct-primary:')&&String(x.url||'').includes('msi.com'));if(!d.ok||d.search!==true||!targets.includes('X79A-GD45')||(!official&&!targets.includes('msi.com')))throw new Error(process.env.BIOS);"
+
+      - name: Verify contextual follow-up and explicit no-search guard live
+        shell: bash
+        run: |
+          set -euo pipefail
+          follow="$(node - <<'NODE' | curl -fsS --max-time 90 -H 'content-type: application/json' --data-binary @- "$PRODUCTION_URL/api/turn"
+          process.stdout.write(JSON.stringify({
+            text:'その中でもっと安いのある？',
+            history:[
+              {role:'user',content:'3万円以下の中古ノートPCを探して'},
+              {role:'assistant',content:'候補を調べます。'}
+            ]
+          }));
+          NODE
+          )"
+          echo "$follow"
+          FOLLOW="$follow" node -e "const d=JSON.parse(process.env.FOLLOW||'{}');if(!d.ok||d.search!==true||d.route!=='api-first-v45'||/(何について|対象を教えて)/.test(String(d.answer||'')))throw new Error(process.env.FOLLOW);"
+
+          nosearch="$(node -e 'process.stdout.write(JSON.stringify({text:"検索を使わないで。中古PCを選ぶ基準だけ教えて",history:[]}))' | curl -fsS --max-time 45 -H 'content-type: application/json' --data-binary @- "$PRODUCTION_URL/api/turn")"
+          echo "$nosearch"
+          NOSEARCH="$nosearch" node -e "const d=JSON.parse(process.env.NOSEARCH||'{}');if(!d.ok||d.search!==false)throw new Error(process.env.NOSEARCH);"
