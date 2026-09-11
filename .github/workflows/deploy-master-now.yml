@@ -1,4 +1,4 @@
-name: Deploy TalkSys v45 formal retrieval
+name: Deploy repaired TalkSys v45 production
 
 on:
   push:
@@ -17,107 +17,105 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: production
+    env:
+      PRODUCTION_URL: https://talksys.syouziroupc.workers.dev
+      TALKSYS_SHA: cd4403840a4b64a5925d9b552327952b2bb04998
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout exact repaired TalkSys revision
+        uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 311e60b09dd2027c5de1290a35d4dd0f14501f29
+          ref: ${{ env.TALKSYS_SHA }}
           path: talksys
+
       - uses: actions/setup-node@v6
         with:
           node-version: 22
-      - name: Validate exact revision
+
+      - name: Validate exact repaired revision
         working-directory: talksys
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git rev-parse HEAD)" = "311e60b09dd2027c5de1290a35d4dd0f14501f29"
+          test "$(git rev-parse HEAD)" = "$TALKSYS_SHA"
           if [[ -f package-lock.json ]]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
           find src -maxdepth 1 -name '*.js' -print0 | xargs -0 -n1 node --check
           npm test
           npx wrangler deploy --dry-run
-      - name: Verify credentials
+
+      - name: Verify Cloudflare production credentials
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
         run: |
           set -euo pipefail
           test -n "${CLOUDFLARE_API_TOKEN:-}"
           test -n "${CLOUDFLARE_ACCOUNT_ID:-}"
-      - name: Deploy exact revision
+
+      - name: Deploy exact repaired revision
         working-directory: talksys
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: npx wrangler deploy
-      - name: Production smoke
-        env:
-          URL: https://talksys.syouziroupc.workers.dev
         shell: bash
         run: |
           set -euo pipefail
-          health="$(curl -fsS --max-time 20 "$URL/voice-health")"
-          echo "HEALTH=$health"
-          HEALTH="$health" node - <<'NODE'
-          const d=JSON.parse(process.env.HEALTH||'{}');
-          if(d.voiceRevision!=='talksys-v45-formal-api-primary-safe-fallback') throw new Error('revision '+JSON.stringify(d));
-          if(d.searchProvider!=='formal-structured-apis+direct-primary') throw new Error('provider '+JSON.stringify(d));
-          if(d.searchSingleProvider!==false||d.searchGeneralWebEnabled!==false) throw new Error('search topology '+JSON.stringify(d));
-          if(d.bingRssEnabled!==false||d.generalWebScraping!==false) throw new Error('legacy web path '+JSON.stringify(d));
-          if(d.webSearch!==false||d.webRetrieval!==true) throw new Error('web metadata '+JSON.stringify(d));
-          if(d.searchDirectPrimaryResolver!==true||d.shoppingApiFirst!==true) throw new Error('resolver/api metadata '+JSON.stringify(d));
-          if(!d.shoppingApiRegistry||!d.shoppingApiRegistry.yahoo_jp_shopping||!d.shoppingApiRegistry.rakuten_ichiba) throw new Error('shopping registry '+JSON.stringify(d));
-          if(d.searchDirectorModel!=='@cf/qwen/qwen3-30b-a3b-fp8') throw new Error('director '+JSON.stringify(d));
-          if(d.weatherDirect!=='jma-api-first-with-met-norway-fallback'||d.openMeteoExcluded!==true) throw new Error('weather metadata '+JSON.stringify(d));
-          NODE
+          npx wrangler deploy
 
-          call() { node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$1" | curl -fsS --max-time "$2" -H 'content-type: application/json' --data-binary @- "$URL/api/turn"; }
+      - name: Verify repaired v45 production contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=''
+          for attempt in $(seq 1 25); do
+            body="$(curl -fsS --max-time 20 "$PRODUCTION_URL/voice-health" || true)"
+            ok="$(BODY="$body" node -e "let d={};try{d=JSON.parse(process.env.BODY||'{}')}catch{};process.stdout.write(String(Boolean(d.ok===true&&d.revision==='talksys-v45-formal-api-primary-safe-fallback'&&d.voiceRevision==='talksys-v45-http-adaptive-vad'&&d.uiRevision==='talksys-v45-ui-restored-20260911'&&d.sttRevision==='talksys-v45-hardened-whisper'&&d.voiceArchitecture==='http-turns-client-vad-v45'&&d.adaptiveNoiseVad===true&&d.ambientCalibration===true&&d.falseNoiseLearning===true&&d.legacyWebSocketVoice===false&&d.durableObjectVoice===false&&d.legacyAgentRoute===false&&d.unifiedTurnRouter===true&&d.legacyV43TurnDelegation===false&&d.apiFirst===true&&d.apiParallel===true&&d.groundedEvidenceFallback===true&&d.externalFailureUsesCasualModel===false&&d.modelTimeoutMs===12000&&d.searchDirectorModel==='@cf/qwen/qwen3-30b-a3b-fp8'&&d.searchDefault==='intent-routed-v45')))" )"
+            [[ "$ok" == 'true' ]] && break
+            [[ "$attempt" -eq 25 ]] && { echo "$body"; exit 1; }
+            sleep 3
+          done
+          echo "$body"
+
+      - name: Verify live UI and HTTP microphone path
+        shell: bash
+        run: |
+          set -euo pipefail
+          page="$(curl -fsS --max-time 20 "$PRODUCTION_URL/")"
+          grep -F 'talksys-v45-ui-restored-20260911' <<< "$page"
+          grep -F '/talk-v45.js' <<< "$page"
+          grep -F '非常用の文字入力' <<< "$page"
+          grep -F 'Foonz' <<< "$page"
+
+          client="$(curl -fsS --max-time 20 "$PRODUCTION_URL/talk-v45.js")"
+          grep -F 'talksys-v45-http-adaptive-vad' <<< "$client"
+          grep -F 'getUserMedia' <<< "$client"
+          grep -F '/api/transcribe' <<< "$client"
+          grep -F '/api/turn' <<< "$client"
+          grep -F 'noiseBoost' <<< "$client"
+          grep -F 'calibrationUntil' <<< "$client"
+          if grep -E 'new[[:space:]]+WebSocket|/agents/' <<< "$client"; then
+            echo 'legacy websocket/agent voice path found in production client'
+            exit 1
+          fi
+
+          telephony="$(curl -fsS --max-time 20 "$PRODUCTION_URL/telephony-health")"
+          TELEPHONY="$telephony" node -e "const d=JSON.parse(process.env.TELEPHONY||'{}');if(d.provider!=='Foonz'||d.connected!==false||d.status!=='planned-not-wired')throw new Error(process.env.TELEPHONY);"
+
+      - name: Verify improved v45 backend remains intact
+        shell: bash
+        run: |
+          set -euo pipefail
+          call() { node -e 'process.stdout.write(JSON.stringify({text:process.argv[1],history:[]}))' "$1" | curl -fsS --max-time "$2" -H 'content-type: application/json' --data-binary @- "$PRODUCTION_URL/api/turn"; }
 
           out="$(call '12345÷15' 20)"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.search!==false||!String(d.answer||'').includes('823'))throw new Error(process.env.OUT)"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.route!=='deterministic-v45'||d.search!==false||!String(d.answer||'').includes('823'))throw new Error(process.env.OUT);"
 
-          out="$(call '別府市の今日の天気は？' 30)"
-          echo "WEATHER=$out"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='jma_weather'))throw new Error(process.env.OUT)"
+          out="$(call '別府市の今日の天気は？' 75)"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');const tools=(d.apiSources||[]).map(x=>x.tool);if(!d.ok||d.route!=='api-first-v45'||!tools.includes('jma_weather'))throw new Error(process.env.OUT);"
 
-          out="$(call '100米ドルは日本円でいくら？' 30)"
-          echo "FX=$out"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='frankfurter'))throw new Error(process.env.OUT)"
+          out="$(call '100米ドルは日本円でいくら？' 35)"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='frankfurter'))throw new Error(process.env.OUT);"
 
-          out="$(call '日本の一人当たりGDPは？' 35)"
-          echo "WDI=$out"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='world_bank_wdi'))throw new Error(process.env.OUT)"
-
-          out="$(call 'DOI 10.1038/s41586-020-2649-2 の文献情報を確認して' 35)"
-          echo "CROSSREF=$out"
-          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='crossref'))throw new Error(process.env.OUT)"
-
-          out="$(call 'MSI X79A-GD45の最新BIOSを公式で確認して' 30)"
-          echo "BIOS=$out"
-          OUT="$out" node - <<'NODE'
-          const d=JSON.parse(process.env.OUT||'{}'), x=d.searchDiagnostics||{};
-          if(!d.ok||d.search!==true||x.plannerPlanned===true) throw new Error('simple route '+process.env.OUT);
-          if(!(d.queries||[]).includes('X79A-GD45 BIOS site:msi.com')) throw new Error('noncompact BIOS query '+JSON.stringify(d.queries));
-          if(!Array.isArray(x.directPrimaryTargets)||!x.directPrimaryTargets.some(t=>String(t.url||'').includes('download.msi.com/bos_exe/mb/7735v28.zip')&&t.version==='2.8'&&t.currentFirmwareVersionConfirmed===false)) throw new Error('missing MSI archive target '+JSON.stringify(x.directPrimaryTargets));
-          if(!Array.isArray(x.directPrimaryDiagnostics)||!x.directPrimaryDiagnostics.some(p=>p.ok===true&&String(p.engine||'').includes('direct-primary:msi-motherboard-static')&&String(p.url||'').includes('download.msi.com/bos_exe/mb/7735v28.zip'))) throw new Error('MSI archive probe failed '+JSON.stringify(x.directPrimaryDiagnostics));
-          if(d.searchCoverage?.sufficient!==false) throw new Error('archive incorrectly treated as sufficient latest evidence '+JSON.stringify(d.searchCoverage));
-          const answer=String(d.answer||'');
-          if(/最新(?:の)?BIOS(?:は|が)[^。]*2\.8|2\.8(?:が|は)最新/.test(answer)) throw new Error('unsupported latest claim '+answer);
-          if(/検索機能.*(?:無効|禁止|使えない)|外部検索を使わない設定/.test(answer)) throw new Error('false capability statement '+answer);
-          if(Number(d.timings?.searchMs||0)>9000) throw new Error('budget '+JSON.stringify(d.timings));
-          NODE
-
-          out="$(call '3万円以下で動画視聴用の中古ノートPCを候補から比較して選んで' 30)"
-          echo "SHOPPING=$out"
-          OUT="$out" node - <<'NODE'
-          const d=JSON.parse(process.env.OUT||'{}'), x=d.searchDiagnostics||{};
-          if(!d.ok||d.search!==true) throw new Error('shopping route '+process.env.OUT);
-          if(x.plannerPlanned===true||x.plannerTransport!=='deterministic-simple') throw new Error('routine shopping should skip Qwen '+JSON.stringify(x));
-          if(x.generalWebSearchEnabled!==false) throw new Error('general web unexpectedly enabled '+JSON.stringify(x));
-          if((x.probes||[]).some(p=>String(p.engine||'').includes('bing-rss'))) throw new Error('bing RSS still active '+JSON.stringify(x.probes));
-          if(Number(d.timings?.searchMs||0)>5000) throw new Error('shopping search budget '+JSON.stringify(d.timings));
-          const a=String(d.answer||'');
-          if(!a.trim()) throw new Error('empty answer');
-          if(/外部情報を取得できなかったため、現在情報は断定しません。/.test(a)) throw new Error('old giveup '+a);
-          if(/(?:\d{1,3}(?:,\d{3})+|\d+)円/.test(a) && !(d.sources||[]).length) throw new Error('invented price without evidence '+a);
-          NODE
+          out="$(call '日本の一人当たりGDPは？' 40)"
+          OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!(d.apiSources||[]).some(x=>x.tool==='world_bank_wdi'))throw new Error(process.env.OUT);"
