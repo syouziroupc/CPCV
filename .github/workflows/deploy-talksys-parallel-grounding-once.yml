@@ -1,4 +1,4 @@
-name: Deploy TalkSys parallel grounding once
+name: Deploy TalkSys v46 hard facts once
 
 on:
   push:
@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: syouziroupc/talksys
-          ref: 7664956d374be4cc353578a07feff840e1412aef
+          ref: 03094242ff6481b8aa28cbca5c5ee26eb00d3966
           path: talksys
 
       - uses: actions/setup-node@v6
@@ -32,6 +32,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -f package-lock.json ]]; then npm ci --no-audit --no-fund; else npm install --no-audit --no-fund; fi
+          node --check src/entry.js
           node --check src/worker-v44.js
           node --check src/search-v45.js
           npm run architecture:check
@@ -56,7 +57,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: npx wrangler deploy
 
-      - name: Verify production revision and safeguards
+      - name: Verify V46 truth gate health
         env:
           URL: https://talksys.syouziroupc.workers.dev
         shell: bash
@@ -64,14 +65,16 @@ jobs:
           set -euo pipefail
           body=""
           for attempt in $(seq 1 20); do
-            body="$(curl -fsS --max-time 20 "$URL/voice-health" || true)"
+            body="$(curl -fsS --max-time 20 "$URL/truth-gate-health" || true)"
             ok="$(BODY="$body" node - <<'NODE'
           let d={}; try { d=JSON.parse(process.env.BODY||'{}'); } catch {}
           process.stdout.write(String(
-            d.revision==='talksys-v45-parallel-grounding-r1' &&
-            d.searchDirectorParallelSeed===true &&
-            d.groundedHistoryUserOnly===true &&
-            d.transitEvidenceGuard===true
+            d.ok===true &&
+            d.revision==='talksys-v46-hard-facts-r1' &&
+            d.mode==='claim-level-fail-close' &&
+            d.transitExactRouteRequiresStructuredEvidence===true &&
+            d.genericWebDoesNotAuthorizeTransitSequence===true &&
+            d.dynamicSpecificsFailClosedWithoutEvidence===true
           ));
           NODE
           )"
@@ -80,6 +83,21 @@ jobs:
             sleep 3
           done
           echo "$body"
+
+      - name: Verify production voice health carries V46 gate
+        env:
+          URL: https://talksys.syouziroupc.workers.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(curl -fsS --max-time 20 "$URL/voice-health")"
+          BODY="$body" node - <<'NODE'
+          const d=JSON.parse(process.env.BODY||'{}');
+          if(d.revision!=='talksys-v45-parallel-grounding-r1') throw new Error(process.env.BODY);
+          if(d.truthGateRevision!=='talksys-v46-hard-facts-r1') throw new Error(process.env.BODY);
+          if(d.truthGatePolicy!=='claim-level-fail-close') throw new Error(process.env.BODY);
+          console.log(JSON.stringify({revision:d.revision,truthGateRevision:d.truthGateRevision,truthGatePolicy:d.truthGatePolicy}));
+          NODE
 
       - name: Smoke deterministic route
         env:
@@ -91,7 +109,7 @@ jobs:
           out="$(curl -fsS --max-time 25 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
           OUT="$out" node -e "const d=JSON.parse(process.env.OUT||'{}');if(!d.ok||d.route!=='deterministic-v45'||!String(d.answer||'').includes('823'))throw new Error(process.env.OUT);console.log(JSON.stringify({ok:d.ok,route:d.route,answer:d.answer}));"
 
-      - name: Probe transit regression
+      - name: Probe V46 transit regression
         env:
           URL: https://talksys.syouziroupc.workers.dev
         shell: bash
@@ -103,9 +121,10 @@ jobs:
           OUT="$out" node - <<'NODE'
           const d=JSON.parse(process.env.OUT||'{}');
           if(!d.ok) throw new Error(process.env.OUT);
+          if(d.truthGate?.revision!=='talksys-v46-hard-facts-r1') throw new Error('V46 truth gate missing: '+process.env.OUT);
           const a=String(d.answer||'');
           if(/小倉[^。]{0,40}(?:鹿児島本線|乗り換)/.test(a) || /鹿児島本線[^。]{0,40}乗り換/.test(a)) {
             throw new Error('dangerous transit regression: '+a);
           }
-          console.log(JSON.stringify({ok:d.ok,route:d.route,answer:a,searchUseful:d.searchUseful}));
+          console.log(JSON.stringify({ok:d.ok,route:d.route,answer:a,truthGate:d.truthGate}));
           NODE
