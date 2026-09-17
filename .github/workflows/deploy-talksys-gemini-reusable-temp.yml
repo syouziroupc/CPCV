@@ -1,0 +1,108 @@
+name: Temporary reusable TalkSys Gemini deploy
+
+on:
+  workflow_call:
+    inputs:
+      talksys_ref:
+        description: Exact TalkSys commit SHA to deploy
+        required: true
+        type: string
+    secrets:
+      GEMINI_API_KEY:
+        description: Gemini API key supplied by TalkSys caller
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-talksys:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact TalkSys revision
+        uses: actions/checkout@v6
+        with:
+          repository: syouziroupc/talksys
+          ref: ${{ inputs.talksys_ref }}
+          path: talksys
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Require both repositories' secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          test -n "$GEMINI_API_KEY"
+
+      - name: Install and validate exact TalkSys revision
+        working-directory: talksys
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+          npm run architecture:check
+          npm run architecture:graph
+          find src archive -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+          npm test
+          npx wrangler deploy --dry-run
+
+      - name: Deploy TalkSys with Gemini secret
+        working-directory: talksys
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          set -euo pipefail
+          secrets_file="$(mktemp)"
+          trap 'rm -f "$secrets_file"' EXIT
+          SECRETS_FILE="$secrets_file" node <<'NODE'
+          const fs = require('fs');
+          const key = process.env.GEMINI_API_KEY || '';
+          if (!key) throw new Error('GEMINI_API_KEY is required');
+          fs.writeFileSync(process.env.SECRETS_FILE, JSON.stringify({ GEMINI_API_KEY: key }));
+          NODE
+          npx wrangler deploy --secrets-file "$secrets_file"
+
+      - name: Verify Gemini production health
+        env:
+          URL: https://talksys.syouziroupc.workers.dev
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 20); do
+            health="$(curl -fsS --max-time 20 "$URL/gemini-health" || true)"
+            ok="$(HEALTH="$health" node - <<'NODE'
+          let d={};
+          try { d=JSON.parse(process.env.HEALTH||'{}'); } catch {}
+          process.stdout.write(String(Boolean(d.ok===true && d.configured===true && d.provider==='gemini' && d.model==='gemini-3.8-flash' && d.legacyGlmExecution===false)));
+          NODE
+            )"
+            [ "$ok" = "true" ] && break
+            [ "$attempt" -eq 20 ] && { echo "$health"; exit 1; }
+            sleep 3
+          done
+          echo "$health"
+
+      - name: Smoke Gemini conversation turn
+        env:
+          URL: https://talksys.syouziroupc.workers.dev
+        run: |
+          set -euo pipefail
+          payload='{"text":"大学のレポート用に中古ノートPCを探してる。予算は3万円。どれがいい？","history":[]}'
+          out="$(curl -fsS --max-time 75 -H 'content-type: application/json' --data "$payload" "$URL/api/turn")"
+          OUT="$out" node - <<'NODE'
+          const d=JSON.parse(process.env.OUT||'{}');
+          const answer=String(d.answer||'');
+          if (!d.ok || d.generationProvider!=='gemini' || d.generationModel!=='gemini-3.8-flash' || d.legacyGlmExecution!==false || answer.length<8) {
+            throw new Error(process.env.OUT);
+          }
+          console.log(JSON.stringify({ok:d.ok,route:d.route,generationProvider:d.generationProvider,generationModel:d.generationModel,answer}));
+          NODE
