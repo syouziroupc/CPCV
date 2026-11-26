@@ -73,10 +73,11 @@ jobs:
             body="$(curl --fail --silent --show-error https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
             if printf '%s' "$body" | grep -q '"ok":true' \
-              && printf '%s' "$body" | grep -q '"version":"0.10.0-panel"' \
+              && printf '%s' "$body" | grep -q '"version":"0.10.1-panel"' \
               && printf '%s' "$body" | grep -q '"parallel_panel":true' \
               && printf '%s' "$body" | grep -q '"review_rate_limit":"none"' \
-              && printf '%s' "$body" | grep -q '"panel_models":'; then
+              && printf '%s' "$body" | grep -q '"panel_models":' \
+              && printf '%s' "$body" | grep -q '"gemma_timeout_ms":22000'; then
               break
             fi
             if [ "$i" = "24" ]; then exit 1; fi
