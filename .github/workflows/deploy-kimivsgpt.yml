@@ -53,6 +53,7 @@ jobs:
           npm run test:concurrency
           npm run test:reliability
           node --experimental-strip-types scripts/verify-model-policy.mjs
+          node --experimental-strip-types scripts/verify-panel-runner.mjs
           npm run build-check
 
       - name: Deploy canonical GitHub-linked Worker
@@ -73,11 +74,11 @@ jobs:
             body="$(curl --fail --silent --show-error https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
             if printf '%s' "$body" | grep -q '"ok":true' \
-              && printf '%s' "$body" | grep -q '"version":"0.10.1-panel"' \
+              && printf '%s' "$body" | grep -q '"version":"0.11.0-resilient-panel"' \
               && printf '%s' "$body" | grep -q '"parallel_panel":true' \
               && printf '%s' "$body" | grep -q '"review_rate_limit":"none"' \
               && printf '%s' "$body" | grep -q '"panel_models":' \
-              && printf '%s' "$body" | grep -q '"gemma_timeout_ms":22000'; then
+              && printf '%s' "$body" | grep -q '"hedged_failover":true'; then
               break
             fi
             if [ "$i" = "24" ]; then exit 1; fi
