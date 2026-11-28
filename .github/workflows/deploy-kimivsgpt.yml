@@ -24,7 +24,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: syouziroupc/kimivsgpt
-          ref: main
+          ref: 753ab9d045dbff3a80fd7d8b6f7cee592e79d169
           path: kimivsgpt
 
       - name: Setup Node.js
@@ -74,7 +74,8 @@ jobs:
             body="$(curl --fail --silent --show-error https://kimivsgpt.syouziroupc.workers.dev/health || true)"
             echo "$body"
             if printf '%s' "$body" | grep -q '"ok":true' \
-              && printf '%s' "$body" | grep -q '"version":"0.11.0-resilient-panel"' \
+              && printf '%s' "$body" | grep -q '"version":"0.12.0-artifact-audit"' \
+              && printf '%s' "$body" | grep -q '"visual_audit":{"enabled":true' \
               && printf '%s' "$body" | grep -q '"parallel_panel":true' \
               && printf '%s' "$body" | grep -q '"review_rate_limit":"none"' \
               && printf '%s' "$body" | grep -q '"panel_models":' \
